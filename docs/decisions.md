@@ -2,6 +2,22 @@
 
 Decisions agreed with the project owner. Newest first.
 
+## 2026-10-11: Simulator and virtual iPhone
+
+- **Device mirror** serves as the simulator replacement in the first build: the real iPhone
+  appears live in the IDE with input and hot reload.
+- **Virtual iPhone (parallel track).** Boot real iOS in QEMU (TCG) on x86 by emulating
+  Apple's *virtual* iPhone platform (VPHONE600AP from the Private Cloud Compute research
+  firmware, as used by vphone-cli). We are not emulating a physical iPhone model.
+  - It ships publicly in Russet with user-supplied firmware; Apple files are never
+    redistributed.
+  - It runs alongside the core build and does not block it.
+- **Rejected:** running Apple's iOS Simulator natively on Linux or Windows. The iOS 27
+  simulator runtime is arm64-only and needs the macOS kernel, macOS frameworks and Metal.
+- **Mac reference VM.** The owner enabled research guests on the Mac (2026-10-11) so that
+  vphone-cli can run a reference virtual iPhone for reverse engineering. Ask the owner
+  before deleting anything on the Mac.
+
 ## 2026-10-10: Project foundations
 
 - **Goal.** Anyone can develop, build, install, debug, test and ship iOS apps from Linux
