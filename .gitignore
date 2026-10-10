@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/target/
+
+# Node / IDE
+node_modules/
+out/
+dist/
+*.vsix
+
+# Build products and Apple artifacts (never commit Apple files)
+*.ipa
+*.xip
+*.dmg
+*.ipsw
+*.p8
+*.p12
+*.mobileprovision
+.build/
+xtool/
+.orchard/
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
