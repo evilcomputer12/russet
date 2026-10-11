@@ -112,7 +112,11 @@ impl Provisioning for LiveProvisioning {
 /// covers its bundle ID, lists the device and one of the team's usable development certificates, and is valid for
 /// another day needs no App Store Connect round trip (the plan would be zero-mutation and pick that profile). It
 /// keeps `russet run` and `russet debug` fast and independent of ASC latency when nothing changed.
-fn cached_profile(svc: &russet_account::AccountService, product: &BuiltProduct, udid: &str) -> Result<Option<Provisioned>> {
+fn cached_profile(
+    svc: &russet_account::AccountService,
+    product: &BuiltProduct,
+    udid: &str,
+) -> Result<Option<Provisioned>> {
     if ["PlugIns", "Extensions", "AppClips", "Watch"].iter().any(|d| product.app.join(d).is_dir()) {
         return Ok(None);
     }

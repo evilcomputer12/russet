@@ -172,7 +172,10 @@ pub trait DeviceServices: Send + Sync {
 
 /// The console hub of a launch as session entries: the backlog, then live lines until the process exits (the
 /// lines that arrived before the exit notice are still delivered).
-fn console_entries(hub: Arc<russet_device::process::OutputHub>, mut exit: russet_device::ExitWatcher) -> launch::ConsoleEntries {
+fn console_entries(
+    hub: Arc<russet_device::process::OutputHub>,
+    mut exit: russet_device::ExitWatcher,
+) -> launch::ConsoleEntries {
     let (tx, rx) = mpsc::channel(1024);
     tokio::spawn(async move {
         let (backlog, mut live) = hub.subscribe();
