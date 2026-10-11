@@ -42,6 +42,28 @@ pub struct BundleSpec {
     pub requested: plist::Dictionary,
 }
 
+impl BundleSpec {
+    /// A bundle with the requested entitlements read from an `.entitlements` file (the build plane's
+    /// `SignItem::entitlements`), or none. W7's pipeline builds its request from the build output this way.
+    pub fn with_entitlements_file(
+        rel_path: &str,
+        bundle_id: &str,
+        entitlements: Option<&std::path::Path>,
+    ) -> Result<Self> {
+        let requested = match entitlements {
+            Some(p) => plist::Value::from_file(p)
+                .map_err(|e| {
+                    Error::new(codes::config::INVALID, format!("cannot read the entitlements {}: {e}", p.display()))
+                        .with_hint("The .entitlements file must be an XML or binary property list.")
+                })?
+                .into_dictionary()
+                .ok_or_else(|| Error::new(codes::config::INVALID, format!("{} is not a dictionary", p.display())))?,
+            None => plist::Dictionary::new(),
+        };
+        Ok(Self { rel_path: rel_path.to_owned(), bundle_id: bundle_id.to_owned(), requested })
+    }
+}
+
 /// What to provision for (`provision.plan` params, resolved from the project).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProvisionRequest {
@@ -564,6 +586,21 @@ fn plan_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundle_specs_read_entitlements() {
+        let dir = std::env::temp_dir().join(format!("russet-bundlespec-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap_or_default();
+        let p = dir.join("App.entitlements");
+        let mut d = plist::Dictionary::new();
+        d.insert("aps-environment".into(), plist::Value::String("development".into()));
+        plist::Value::Dictionary(d).to_file_xml(&p).unwrap_or_default();
+        let spec = BundleSpec::with_entitlements_file("", "com.example.app", Some(&p));
+        assert!(spec.is_ok_and(|s| s.requested.contains_key("aps-environment")));
+        assert!(BundleSpec::with_entitlements_file("", "x", None).is_ok_and(|s| s.requested.is_empty()));
+        assert!(BundleSpec::with_entitlements_file("", "x", Some(&dir.join("missing"))).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn helpers() {

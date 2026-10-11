@@ -2302,3 +2302,46 @@ SA-01 → SA-02 → SA-03 → SA-04 → SA-05 → SA-06 → SA-07.
 - Entitlements lost on unsigned-archive export: github.com/parob/homecast/issues/33, github.com/MyAvenCEO/avenOS/issues/97; tauri `crates/tauri-cli/src/mobile/ios/build.rs` and [tauri#15663](https://github.com/tauri-apps/tauri/issues/15663)
 - xtool 1.21.0 release asset `xtool.app.zip` (sha256 33bb2ef1…b64e8); Homebrew cask `xtool-org/homebrew-tap` (`version :latest`, `sha256 :no_check`)
 - [apple-codesign-quick 0.1.0](https://crates.io/crates/apple-codesign-quick) (LGPL-2.1-or-later): fallback signer
+
+---
+
+## 23. Wave-1 implementation notes (W6)
+
+Where the Wave-1 code (W6: SA-02…SA-07 subsets) differs from the sections above. ARCHITECTURE.md stays binding;
+the contract points among these are listed as contract change requests for the lead.
+
+- **russet-macho** (§3.1, §8.5) is MIT (ARCHITECTURE §5.1) and has its own bounds-checked parser instead of
+  goblin/object: the edits need raw load-command offsets. The string-pool fix moves the table to the next 8-byte
+  boundary and shifts everything after it by 16 bytes, so the trailing code signature keeps its alignment.
+- **Profiles** (§8.3) are parsed with `cryptographic-message-syntax` (apple-codesign's CMS crate), not `cms`.
+- **App Store Connect** (§5.1–§5.3): the typed models are written by hand (`xtask asc-gen`/`asc-drift` are not
+  in Wave 1). Every Wave-1 read carries a token scoped to exactly that request (`TokenMode::PerRequest`), not only
+  agent reads, so App Store Connect refuses anything else; scoped tokens are GET-only.
+- **xtool import** (§4.4): `XTLAuthToken` is the JSON of xtool's Swift `AuthToken` enum
+  (`{"appStoreConnect": {"_0": {"id", "issuerID", "pem"}}}`); the identity is the property list named after the
+  identity ID (the issuer ID for App Store Connect logins) with `privateKey.data` (PKCS#1 PEM) and `certificate`
+  (DER). The team comes from the certificate's OU, so the import needs no network. The `XTL-<prefix>` bundle-ID
+  prefix is the issuer ID's first segment, uppercased. An Apple ID session in xtool is not imported (W22).
+- **Identities** (§6.3): `IdentityStore::load` and `import_p12` are async (the secret store is); the key is stored as
+  PKCS#8 DER whatever its source format.
+- **Planning** (§6.4): step 5 also accepts profiles that are not Russet-named (Russet-named ones are tried first),
+  checked for kind, validity, certificate, devices, App ID and entitlements — this is how the Wave-1 slice reuses
+  xtool's `XTL-…` profile with 0 mutations. `DeleteProfile` is only planned for Russet-named profiles. The plan
+  digest is a SHA-256 over account, team, distribution, identity, mutations and reused profiles; plans live 10
+  minutes; `apply` re-plans and fails with `provision.planStale` (5206) on drift. Without an approval a plan with
+  mutations answers `perm.approvalRequired`; with one, `core.notImplemented` until W12.
+- **Signing** (§8.1, §8.7): `sign` takes `.app` directories (an `.ipa` is read by `verify`, `lint` and `inspect`).
+  Post-sign verification always runs and fails with `sign.verifyFailed` (5009); lint errors fail with
+  `sign.lintFailed`. A build product that is unsigned or only linker-signed skips the L-SIG lint rules with an
+  info finding. L-BND-008 (multi-size icon catalogs) is not checked (it needs the CAR reader, W21).
+- **Wire** (§10): `sign.lint` answers `{findings}` and `sign.inspect` `{signatures}` (results are objects,
+  ARCHITECTURE §7.3). Team IDs are masked (`*******XYZ`) in every DTO and in `inspect`; no certificate subject is
+  reported (it names a person); portal UDIDs and device names are masked unless an `ide` connection asks to
+  reveal them.
+- **CLI** (§12): `russet account list` also lists the signing identities (`identity.list`); `account
+  certs|devices|bundle-ids|profiles list` are the read-only portal rows; `sign --lint none` skips the post-sign
+  lints (`noLint`).
+- **Errors** (§16): new codes `sign.profileInvalid` (5007), `sign.bundleInvalid` (5008), `sign.verifyFailed` (5009),
+  `account.keyInvalid` (5109) and `account.noAccount` (5110), each with a hint.
+- **Doctor**: `account.configured`, `account.identity`, `account.xtool-files` (files only) and `asc.reachable`
+  (`--online`).
