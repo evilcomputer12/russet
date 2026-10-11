@@ -248,9 +248,7 @@ pub fn run_checks(root: &Path, checks: &[Check], opts: &Options) -> Result<Summa
         let result = match check {
             Check::AppleFiles => apple_files(root, files.as_deref(), opts),
             Check::Secrets => secrets(root, files.as_deref(), opts),
-            Check::Reuse => external_tree(opts, "reuse", root, |cmd| {
-                cmd.arg("--root").arg(root).arg("lint");
-            }),
+            Check::Reuse => reuse(root, files.as_deref(), opts),
             Check::Typos => external_tree(opts, "typos", root, |cmd| {
                 cmd.arg("--format").arg("brief");
             }),
@@ -821,8 +819,9 @@ fn is_jwt(b: &[u8]) -> bool {
         && parts.iter().all(|p| p.len() >= 10)
 }
 
-/// A modern UDID `0000XXXX-XXXXXXXXXXXXXXXX` (chip id, ECID) at `at`, as a 1-based column. Fakes with an
-/// all-zero ECID (the protocol tests' `00008101-0000000000000000`) pass.
+/// A modern UDID `0000XXXX-XXXXXXXXXXXXXXXX` (chip id, ECID) at `at`, as a 1-based column. Two synthetic
+/// forms pass: an all-zero ECID (the protocol tests' `00008101-0000000000000000`) and chip id 0000, which no
+/// Apple chip has (the testkit's scenario devices, `00000000-0000000000000001`).
 fn udid_at(b: &[u8], at: usize) -> Option<usize> {
     if at > 0 && b[at - 1].is_ascii_hexdigit() {
         return None;
@@ -830,7 +829,8 @@ fn udid_at(b: &[u8], at: usize) -> Option<usize> {
     let s = b.get(at..at + 25)?;
     let shaped = s[..8].iter().all(u8::is_ascii_hexdigit) && s[8] == b'-' && s[9..].iter().all(u8::is_ascii_hexdigit);
     let bounded = b.get(at + 25).is_none_or(|c| !c.is_ascii_hexdigit());
-    (shaped && bounded && s[9..].iter().any(|c| *c != b'0')).then_some(at + 1)
+    let synthetic = s[9..].iter().all(|c| *c == b'0') || &s[..8] == b"00000000";
+    (shaped && bounded && !synthetic).then_some(at + 1)
 }
 
 /// PEM private-key blocks with a body of at least 64 base64 characters, like gitleaks' rule: a bare
@@ -1007,6 +1007,56 @@ fn external_tree(opts: &Options, tool: &str, root: &Path, args: impl FnOnce(&mut
         }
     }
     Ok(r)
+}
+
+/// `reuse lint` over exactly the files the other guards see (tracked, plus untracked and not ignored). reuse
+/// itself descends into some git-ignored directories, such as the Node harness's `node_modules`, so it runs on a
+/// temporary copy of that file set (about 3 MB).
+fn reuse(root: &Path, files: Option<&[String]>, opts: &Options) -> Result<CheckResult> {
+    let Some(files) = files else {
+        return Ok(CheckResult::skip("artifact scans run apple-files and secrets only"));
+    };
+    if opts.builtin_only {
+        return Ok(CheckResult::skip("external tools disabled"));
+    }
+    if !crate::ci::has_program("reuse") {
+        return Ok(CheckResult::missing("reuse"));
+    }
+    let copy = ScratchDir::new("russet-reuse")?;
+    for rel in files {
+        let to = copy.0.join(rel);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(root.join(rel), &to).with_context(|| format!("copying {rel}"))?;
+    }
+    let mut r = external_tree(opts, "reuse", &copy.0, |cmd| {
+        cmd.arg("--root").arg(&copy.0).arg("lint");
+    })?;
+    let prefix = format!("{}/", copy.0.display());
+    for f in &mut r.findings {
+        *f = f.replace(&prefix, "");
+    }
+    r.note = Some(format!("{} files", files.len()));
+    Ok(r)
+}
+
+/// A private temporary directory, removed on drop (xtask has no tempfile dependency outside tests).
+struct ScratchDir(PathBuf);
+
+impl ScratchDir {
+    fn new(prefix: &str) -> Result<Self> {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        Ok(Self(dir))
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn zizmor(root: &Path, opts: &Options) -> Result<CheckResult> {
@@ -1211,7 +1261,14 @@ mod tests {
         repo.write("notes/aws.md", format!("id = {}{}\n", "AKIA", "Z7".repeat(8)).as_bytes());
         repo.write(
             "notes/udid.md",
-            format!("udid {}-{}\nfake 00008101-{}\n", "00008101", "001A2B3C4D5E6F70", "0".repeat(16)).as_bytes(),
+            format!(
+                "udid {}-{}\nfake 00008101-{}\nscenario 00000000-{}\n",
+                "00008101",
+                "001A2B3C4D5E6F70",
+                "0".repeat(16),
+                "0000000000000001"
+            )
+            .as_bytes(),
         );
         // public terms: a canary term outside the allowlist, and the same term inside it
         let canary = "zebracanary quietword";
@@ -1238,6 +1295,7 @@ mod tests {
         assert!(secrets.contains("notes/aws.md:1:6: aws-access-key-id"), "{secrets}");
         assert!(secrets.contains("notes/udid.md:1:6: udid"), "{secrets}");
         assert!(!secrets.contains("notes/udid.md:2"), "an all-zero ECID is a fake: {secrets}");
+        assert!(!secrets.contains("notes/udid.md:3"), "chip id 0000 is a fake: {secrets}");
         assert!(!secrets.contains("a1B2"), "values are never printed");
 
         let terms = joined("public-terms");

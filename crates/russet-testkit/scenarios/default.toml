@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# The default lane-D device scenario (PLAN §0 rule 4; ARCHITECTURE §3.3 item 7, §14.9):
+#
+#   export RUSSET_DEVICE_BACKEND="scripted:$PWD/crates/russet-testkit/scenarios/default.toml"
+#
+# One synthetic iPhone 12 on iOS 27.0, ready for development: paired, Developer Mode on, unlocked, the Xcode 27.0
+# DDI mounted from a directory, RussetProbe's heartbeat on the syslog relay. Every value is synthetic; the UDID
+# uses chip id 0000, which no Apple chip has, so it can never be a real device's. The format is described in
+# crates/russet-testkit/README.md and src/scenario.rs.
+
+schema = 1
+name = "default"
+description = "One synthetic, ready iPhone 12 (iPhone13,2) on iOS 27.0 (24A437) with the RussetProbe heartbeat"
+
+[[device]]
+udid = "00000000-0000000000000001"
+name = "Russet Test iPhone"
+product-type = "iPhone13,2"
+marketing-name = "iPhone 12"
+os-version = "27.0"
+build = "24A437"
+transport = "usb"
+code-signing-monitor = "txm"
+paired = true
+developer-mode = true
+locked = false
+attach-at-ms = 0
+
+[device.ddi]
+mounted = true
+kind = "cryptex1"
+product-build = "27A266a"
+source = "dir"
+
+[device.lockdown]
+DeviceClass = "iPhone"
+HardwareModel = "D53gAP"
+CPUArchitecture = "arm64e"
+ProductName = "iPhone OS"
+
+# RussetProbe's heartbeat (the §4.10 exit script counts >= 100 `PROBE seq=` lines).
+[[device.log]]
+process = "RussetProbe"
+pid = 932
+level = "Notice"
+message = "PROBE seq={n}"
+repeat = 100
+every-ms = 10
