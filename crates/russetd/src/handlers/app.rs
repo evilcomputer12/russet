@@ -69,9 +69,14 @@ async fn app_launch(cx: DaemonCtx, rq: RequestCtx, p: p::AppLaunchParams) -> Res
             }
         }
         loop {
+            // `Some(Some(line))`, `Some(None)` after a lag (lines were lost; keep going), `None` at the console's end.
             let line = async {
                 match output.as_mut() {
-                    Some((_, rx)) => rx.recv().await.ok(),
+                    Some((_, rx)) => match rx.recv().await {
+                        Ok(e) => Some(Some(e)),
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Some(None),
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
+                    },
                     None => std::future::pending().await,
                 }
             };
@@ -89,7 +94,8 @@ async fn app_launch(cx: DaemonCtx, rq: RequestCtx, p: p::AppLaunchParams) -> Res
                     return;
                 }
                 l = line => match l {
-                    Some(entry) => {
+                    Some(None) => {}
+                    Some(Some(entry)) => {
                         let n = p::AppOutputParams {
                             lease_id: lease_id.clone(),
                             stream: p::AppOutputStream::Stdout,
@@ -99,7 +105,7 @@ async fn app_launch(cx: DaemonCtx, rq: RequestCtx, p: p::AppLaunchParams) -> Res
                             return;
                         }
                     }
-                    // The console ended or lagged: keep waiting for the exit only.
+                    // The console ended: keep waiting for the exit only.
                     None => output = None,
                 },
             }

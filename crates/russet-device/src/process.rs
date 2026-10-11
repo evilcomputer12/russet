@@ -571,9 +571,9 @@ mod tests {
     #[test]
     fn console_bytes_split_into_lines() {
         let mut s = LineSplitter::default();
-        assert_eq!(s.feed(b"hel"), Vec::<String>::new());
-        assert_eq!(s.feed(b"lo\r\nwor"), vec!["hello".to_owned()]);
-        assert_eq!(s.feed(b"ld\n\n"), vec!["world".to_owned(), String::new()]);
+        assert_eq!(s.feed(b"probe-"), Vec::<String>::new());
+        assert_eq!(s.feed(b"start\r\nbeat-"), vec!["probe-start".to_owned()]);
+        assert_eq!(s.feed(b"1\n\n"), vec!["beat-1".to_owned(), String::new()]);
         assert_eq!(s.feed(b"tail"), Vec::<String>::new());
         assert_eq!(s.finish(), Some("tail".into()));
         assert_eq!(s.finish(), None);
