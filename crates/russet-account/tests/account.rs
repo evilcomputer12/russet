@@ -412,3 +412,49 @@ async fn doctor_checks_read_files_only() {
     assert_eq!(checks().len(), 3);
     let _: Arc<dyn russet_doctor::Check> = Arc::new(XtoolFilesPrivate::default());
 }
+
+/// The redaction canary (DoD: no secrets in logs): after an import, no Debug output, file or wire-bound value
+/// carries a byte of the App Store Connect key or the signing key.
+#[tokio::test]
+async fn secrets_never_leak_into_debug_output_files_or_errors() {
+    let e = env();
+    write_xtool(&e.xtool, true);
+    let svc = service(&e, "http://127.0.0.1:9/");
+    let imp = svc.accounts().write().await.import_xtool(false).await.unwrap();
+    let canaries: Vec<String> = [p8_pem(), rsa_identity().1.clone()]
+        .iter()
+        .flat_map(|pem| {
+            pem.lines().filter(|l| !l.starts_with("-----") && l.len() > 20).map(str::to_owned).collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(!canaries.is_empty());
+    let id = &imp.identities[0];
+    let loaded = svc.identities().load(&id.id).await.unwrap();
+    let key = svc.accounts().read().await.asc_key(&imp.accounts[0]).await.unwrap();
+    let mut seen = vec![
+        format!("{imp:?}"),
+        format!("{:?}", svc.accounts().read().await),
+        format!("{svc:?}"),
+        format!("{loaded:?}"),
+        format!("{key:?}"),
+        format!("{:?}", svc.identities()),
+        std::fs::read_to_string(e.dirs.config.join("accounts.toml")).unwrap(),
+    ];
+    for f in std::fs::read_dir(e.dirs.data.join("identities").join(TEAM)).unwrap() {
+        let p = f.unwrap().path();
+        if p.extension().is_some_and(|x| x == "json") {
+            seen.push(std::fs::read_to_string(p).unwrap());
+        }
+    }
+    // Errors on the paths that touch the key carry no key material either.
+    e.secrets.items.lock().unwrap().remove(&format!("asc-key/{KEY_ID}"));
+    let err = svc.accounts().read().await.asc_key(&imp.accounts[0]).await.unwrap_err();
+    seen.push(format!("{err:?} {}", err.message()));
+    seen.push(serde_json::to_string(&err.to_data()).unwrap());
+    for text in &seen {
+        assert!(!text.contains("PRIVATE KEY"), "a PEM header leaked");
+        for c in &canaries {
+            assert!(!text.contains(c.as_str()), "key material leaked");
+        }
+    }
+}

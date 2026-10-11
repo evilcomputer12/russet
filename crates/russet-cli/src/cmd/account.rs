@@ -152,6 +152,21 @@ pub fn call(m: &ArgMatches) -> Result<AccountCall> {
     })
 }
 
+/// Why `account verify` failed, as an error with the matching exit code (5).
+pub fn verify_failure(r: &pa::AccountVerifyResult) -> Error {
+    match r.role_probe.certificates {
+        pa::ProbeOutcome::Unauthorized => {
+            Error::new(codes::account::ASC_UNAUTHORIZED, "App Store Connect rejected the key")
+                .with_hint("Check the key ID and issuer ID, and that the key was not revoked; sync the clock (NTP).")
+        }
+        pa::ProbeOutcome::Forbidden => Error::new(codes::account::ASC_FORBIDDEN, "the key cannot read certificates")
+            .with_hint("Use a key with the App Manager or Admin role."),
+        _ => Error::new(codes::account::APPLE_SERVICE_UNAVAILABLE, "App Store Connect could not be reached")
+            .with_hint("Check the network; `russet doctor --online` tests the connection.")
+            .retryable(true),
+    }
+}
+
 fn json<T: serde::Serialize>(v: &T) -> Result<serde_json::Value> {
     serde_json::to_value(v).map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot encode the result: {e}")))
 }
@@ -174,11 +189,7 @@ pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
             let v = json(&r)?;
             if !r.ok {
                 cx.reporter.result(&v);
-                return Err(Error::new(
-                    codes::account::ASC_FORBIDDEN,
-                    "the account cannot read App Store Connect certificates",
-                )
-                .with_hint("Check the key's role (App Manager or Admin) and that it has not been revoked."));
+                return Err(verify_failure(&r));
             }
             v
         }
@@ -250,5 +261,19 @@ mod tests {
         }
         assert_eq!(parse(&["login", "--apple-id", "x"]).unwrap(), AccountCall::Later("W22"));
         assert_eq!(parse(&["default", "asc:K"]).unwrap(), AccountCall::Later("W12"));
+    }
+
+    #[test]
+    fn verify_failures_map_to_account_codes() {
+        let r = |c| pa::AccountVerifyResult {
+            ok: false,
+            account_id: "asc:K".into(),
+            team_id: None,
+            role_probe: pa::RoleProbe { certificates: c, profiles: c, builds: c },
+        };
+        assert_eq!(verify_failure(&r(pa::ProbeOutcome::Unauthorized)).code(), codes::account::ASC_UNAUTHORIZED);
+        assert_eq!(verify_failure(&r(pa::ProbeOutcome::Forbidden)).code(), codes::account::ASC_FORBIDDEN);
+        assert_eq!(verify_failure(&r(pa::ProbeOutcome::Error)).code(), codes::account::APPLE_SERVICE_UNAVAILABLE);
+        assert_eq!(verify_failure(&r(pa::ProbeOutcome::Error)).code().exit_code(), 5);
     }
 }
