@@ -14,7 +14,7 @@ use russet_core::error::codes;
 use russet_device::io::ServiceConnector;
 use russet_device::model::{DeviceState, Udid};
 use russet_device::rpc::{self, Caller};
-use russet_device::{DeviceConfig, DeviceEvent, DeviceManager, DeviceSelector, ForwardTarget};
+use russet_device::{DeviceConfig, DeviceEvent, DeviceManager, DeviceSelector};
 use support::{FakeConnector, FakeDevice, UDID_A, UDID_B};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -185,7 +185,9 @@ async fn unix_forwards_are_private_and_named_after_the_lease() {
     use std::os::unix::fs::PermissionsExt;
     let (_tmp, _conn, m) = start(vec![FakeDevice::iphone12(UDID_A)]).await;
     let h = m.get(&DeviceSelector::Only).expect("device");
-    let f = russet_device::debug::open_forward_with(&h, ForwardTarget::TunnelPort(1234), None).await.expect("forward");
+    let f = russet_device::debug::open_forward_with(&h, russet_device::ForwardTarget::TunnelPort(1234), None)
+        .await
+        .expect("forward");
     let path = match &f.local {
         russet_device::LocalEndpoint::Unix(p) => p.clone(),
         other => panic!("expected a Unix socket, got {other:?}"),

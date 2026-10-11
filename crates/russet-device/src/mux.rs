@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;

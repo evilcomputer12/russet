@@ -11,6 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -245,7 +246,10 @@ async fn bind(h: &DeviceHandle, lease: &LeaseId, b: Option<BindSpec>) -> Result<
         #[cfg(unix)]
         None => BindSpec::Unix(h.cfg().runtime_dir.join(format!("fwd-{lease}.sock"))),
         #[cfg(not(unix))]
-        None => BindSpec::Tcp(SocketAddr::from(([127, 0, 0, 1], 0))),
+        None => {
+            let _ = (lease, h);
+            BindSpec::Tcp(SocketAddr::from(([127, 0, 0, 1], 0)))
+        }
     };
     match spec {
         BindSpec::Tcp(addr) => {
