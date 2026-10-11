@@ -124,10 +124,13 @@ pub fn ensure_space(dir: &Path, needed: u64, reserve: u64) -> Result<()> {
     Ok(())
 }
 
-fn is_loopback_url(url: &str) -> bool {
-    let rest = url.split_once("://").map_or(url, |(_, r)| r);
-    let host = rest.split(['/', ':']).next().unwrap_or("");
-    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+/// Whether `url` names a loopback host (`127.0.0.1`, `localhost`, `[::1]`), parsed properly so userinfo
+/// (`http://127.0.0.1:x@example.com/`) cannot pass as one.
+pub(crate) fn is_loopback_url(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .is_some_and(|h| matches!(h.as_str(), "127.0.0.1" | "localhost" | "[::1]" | "::1"))
 }
 
 /// What one install needs besides the pin.
@@ -552,7 +555,11 @@ mod tests {
     fn loopback_urls() {
         assert!(is_loopback_url("http://127.0.0.1:8080/x.tar.gz"));
         assert!(is_loopback_url("http://localhost/x"));
+        assert!(is_loopback_url("http://[::1]:8080/x"));
         assert!(!is_loopback_url("https://github.com/x"));
+        assert!(!is_loopback_url("http://127.0.0.1:x@example.com/a.tar.gz"), "userinfo is not the host");
+        assert!(!is_loopback_url("http://127.0.0.1.example.com/x"));
+        assert!(!is_loopback_url("not a url"));
     }
 
     #[test]

@@ -108,9 +108,15 @@ impl ConfigEditor {
         let (last, parents) = segments.split_last().ok_or_else(|| {
             Error::new(codes::core::INVALID_ARGUMENT, "empty configuration key").with_hint("Name a key.")
         })?;
-        let table = table_at_mut(self.doc.as_table_mut(), parents)?;
-        table.insert(last, item);
-        self.validate()?;
+        // A refused edit leaves the document as it was (no stray value, no empty tables).
+        let saved = self.doc.clone();
+        let applied = table_at_mut(self.doc.as_table_mut(), parents).map(|table| {
+            table.insert(last, item);
+        });
+        if let Err(e) = applied.and_then(|()| self.validate()) {
+            self.doc = saved;
+            return Err(e);
+        }
         Ok(self.render() != before)
     }
 
@@ -118,9 +124,11 @@ impl ConfigEditor {
     pub fn unset(&mut self, dotted_key: &str) -> Result<bool> {
         let segments = keys::parse(dotted_key)?;
         self.check_writable(&segments)?;
+        let saved = self.doc.clone();
         let removed = remove_at(self.doc.as_table_mut(), &segments);
-        if removed {
-            self.validate()?;
+        if removed && let Err(e) = self.validate() {
+            self.doc = saved;
+            return Err(e);
         }
         Ok(removed)
     }
@@ -370,6 +378,9 @@ mod tests {
         assert_eq!(err.code(), codes::config::INVALID);
         let err = e.set("schema", Value::from(2)).expect_err("schema");
         assert_eq!(err.code(), codes::config::READ_ONLY);
+        // Refused edits leave nothing behind: a later valid edit saves.
+        assert!(e.get("daemon.idle-timeout").expect("get").is_none());
+        e.set("daemon.max-build-jobs", Value::from(2)).expect("valid edit after a refused one");
         assert_eq!(std::fs::read_to_string(e.path()).expect("read"), "[daemon]\nmax-build-jobs = 1\n");
     }
 

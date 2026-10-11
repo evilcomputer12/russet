@@ -129,7 +129,10 @@ impl PinManifest {
                 if a.sha256.len() != 64 || !a.sha256.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
                     return Err(pins_invalid(format!("{} {platform}: sha256 is not 64 lowercase hex digits", c.name)));
                 }
-                if !a.url.starts_with("https://") && !a.url.starts_with("http://127.0.0.1") {
+                let allowed = reqwest::Url::parse(&a.url).is_ok_and(|u| {
+                    u.scheme() == "https" || (u.scheme() == "http" && u.host_str() == Some("127.0.0.1"))
+                });
+                if !allowed {
                     return Err(pins_invalid(format!("{} {platform}: only https URLs are allowed", c.name)));
                 }
             }

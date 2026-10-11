@@ -98,6 +98,7 @@ pub struct CachedExec {
     inner: std::sync::Arc<dyn Exec>,
     file: Option<std::path::PathBuf>,
     entries: std::sync::Mutex<BTreeMap<String, CacheEntry>>,
+    dirty: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for CachedExec {
@@ -114,7 +115,7 @@ impl CachedExec {
             .and_then(|f| std::fs::read_to_string(f).ok())
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        Self { inner, file, entries: std::sync::Mutex::new(entries) }
+        Self { inner, file, entries: std::sync::Mutex::new(entries), dirty: std::sync::atomic::AtomicBool::new(false) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, CacheEntry>> {
@@ -139,16 +140,21 @@ impl CachedExec {
         Some(format!("{}|{mtime}|{}|{}|{env:?}", real.display(), meta.len(), args.join("\u{1f}")))
     }
 
-    fn persist(&self, entries: &BTreeMap<String, CacheEntry>) {
-        if let Some(f) = &self.file {
-            if let Some(dir) = f.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if let Ok(text) = serde_json::to_vec(entries) {
-                let tmp = f.with_extension("json.tmp");
-                if std::fs::write(&tmp, text).is_ok() {
-                    let _ = std::fs::rename(&tmp, f);
-                }
+    /// Writes the cache file if a probe added results since the last flush (the manager calls it once per
+    /// operation, outside the lock, rather than once per probe).
+    pub fn flush(&self) {
+        if !self.dirty.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
+        let Some(f) = &self.file else { return };
+        let snapshot = self.lock().clone();
+        if let Some(dir) = f.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(text) = serde_json::to_vec(&snapshot) {
+            let tmp = f.with_extension("json.tmp");
+            if std::fs::write(&tmp, text).is_ok() {
+                let _ = std::fs::rename(&tmp, f);
             }
         }
     }
@@ -171,9 +177,9 @@ impl Exec for CachedExec {
         }
         let out = self.inner.output(program, args, env, timeout).await?;
         if let Some(k) = key {
-            let mut entries = self.lock();
-            entries.insert(k, CacheEntry { code: out.code, stdout: out.stdout.clone(), stderr: out.stderr.clone() });
-            self.persist(&entries);
+            self.lock()
+                .insert(k, CacheEntry { code: out.code, stdout: out.stdout.clone(), stderr: out.stderr.clone() });
+            self.dirty.store(true, std::sync::atomic::Ordering::Release);
         }
         Ok(out)
     }

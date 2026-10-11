@@ -338,14 +338,21 @@ impl ToolchainSwift {
         };
         let msg =
             format!("Swift {} at {} ({})", swift.version, swift.path.display(), provenance_label(&swift.provenance));
-        let sdks = tc.sdks().await.unwrap_or_default();
-        if let Some(sdk) = sdks.iter().find(|s| !s.compatible_swift.is_empty())
-            && !swift.version.starts_with(&sdk.compatible_swift)
-        {
-            return CheckResult::fail(format!("{msg}; the {} SDK needs Swift {}", sdk.id, sdk.compatible_swift))
-                .with_hint(format!("Install Swift {} for the Xcode {} SDK.", sdk.compatible_swift, sdk.xcode_version));
+        // The SDK compatibility rule exactly as a build applies it (ARCHITECTURE §16.1).
+        let section = match cx.extension::<ConfigService>().zip(cx.project.as_deref()) {
+            Some((config, root)) => match config.effective(Some(root)) {
+                Ok(eff) => eff.project.toolchain,
+                Err(e) => return CheckResult::from_error(Status::Fail, &e),
+            },
+            None => Default::default(),
+        };
+        match tc.resolve_build_env(&section).await {
+            Err(e) if e.code() == codes::sdk::INCOMPATIBLE || e.code() == codes::toolchain::VERSION_MISMATCH => {
+                CheckResult::from_error(Status::Fail, &e).with_detail(msg)
+            }
+            // A missing SDK or linker is reported by toolchain.sdk and toolchain.linker.
+            _ => CheckResult::pass(msg),
         }
-        CheckResult::pass(msg)
     }
     async fn apply_fix(_cx: &CheckCx) -> Result<()> {
         no_fix()

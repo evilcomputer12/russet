@@ -72,7 +72,8 @@ fn pem_len(s: &str, i: usize) -> usize {
 fn bearer_token(s: &str, i: usize) -> Option<(usize, usize)> {
     let rest = &s[i..];
     let prefix_len = "bearer ".len();
-    if rest.len() <= prefix_len || !rest[..prefix_len].eq_ignore_ascii_case("bearer ") {
+    // Compare bytes: byte `prefix_len` need not be a character boundary in arbitrary text.
+    if rest.len() <= prefix_len || !rest.as_bytes()[..prefix_len].eq_ignore_ascii_case(b"bearer ") {
         return None;
     }
     if i > 0 && s.as_bytes()[i - 1].is_ascii_alphanumeric() {
@@ -181,6 +182,12 @@ mod tests {
         assert_eq!(mask(pem), "key:\n***\ndone");
         assert!(matches!(mask("nothing secret here"), Cow::Borrowed(_)));
         assert_eq!(mask("unterminated -----BEGIN RSA PRIVATE KEY-----\nAAAA"), "unterminated ***");
+        // Multibyte text never panics, wherever its characters fall.
+        for text in ["abcdefé", "é bearer x", "ééééé", "Bearer é-token, rest", "日本語のログ Bearer abc"]
+        {
+            let _ = mask(text);
+        }
+        assert_eq!(mask("Bearer é-token, rest"), "Bearer ***, rest");
         let mut v = serde_json::json!({"password": "hunter2", "nested": [{"note": format!("x {jwt}")}], "udid": "u"});
         redact_json(&mut v);
         assert_eq!(v, serde_json::json!({"password": "***", "nested": [{"note": "x ***"}], "udid": "u"}));

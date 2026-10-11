@@ -243,6 +243,7 @@ impl SealedStore {
                         if create {
                             ensure_private_dir(&self.inner.dir)?;
                             write_private(&check_path, &crypto::seal(&k, &check_id, CHECK_PLAINTEXT)?)?;
+                            self.write_store_file()?;
                         }
                     }
                     Err(e) => return Err(io_err("read", &check_path, e)),
@@ -269,21 +270,25 @@ impl SealedStore {
                 ensure_private_dir(&self.inner.dir)?;
                 let k = self.inner.source.create()?;
                 write_private(&check_path, &crypto::seal(&k, &check_id, CHECK_PLAINTEXT)?)?;
-                let store = StoreFile {
-                    version: 1,
-                    backend: backend_name(self.inner.source.kind()).into(),
-                    keyring_entry: self.inner.source.describe().keyring_entry,
-                };
-                let text = serde_json::to_vec_pretty(&store).map_err(|e| {
-                    Error::new(codes::core::INTERNAL, format!("cannot encode store.json: {e}"))
-                        .with_hint("Report this bug.")
-                })?;
-                write_private(&self.inner.dir.join(STORE_FILE), &text)?;
+                self.write_store_file()?;
                 k
             }
         };
         *cached = Some(key.clone());
         Ok(Some(key))
+    }
+
+    /// Records which backend sealed the directory (`store.json`), so `auto` keeps choosing it.
+    fn write_store_file(&self) -> Result<()> {
+        let store = StoreFile {
+            version: 1,
+            backend: backend_name(self.inner.source.kind()).into(),
+            keyring_entry: self.inner.source.describe().keyring_entry,
+        };
+        let text = serde_json::to_vec_pretty(&store).map_err(|e| {
+            Error::new(codes::core::INTERNAL, format!("cannot encode store.json: {e}")).with_hint("Report this bug.")
+        })?;
+        write_private(&self.inner.dir.join(STORE_FILE), &text)
     }
 
     fn key_mismatch(&self) -> Error {

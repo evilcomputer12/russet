@@ -5,7 +5,7 @@
 //! §16.1, with its version, provenance, environment and problems. The resolver picks the first `ok` candidate.
 //!
 //! LLDB (RD-05): flavor `swift` (the build toolchain's LLDB 21, default) or `llvm` (a distro LLDB ≥ 23.1). Swift's
-//! Linux `liblldb` has a hard `DT_NEEDED` on `libpython3.12.so.1.0`, so the resolver reads that soname with goblin
+//! Linux `liblldb` has a hard `DT_NEEDED` on `libpython3.12.so.1.0`, so the resolver reads that soname ([`crate::elf`])
 //! and finds a matching libpython: the `ldconfig` cache, an existing uv-managed python-build-standalone (provenance
 //! `uv`), or Russet's managed `python-shared`. The env contract (ARCHITECTURE §16.2) is then
 //! `LD_LIBRARY_PATH=<pbs>/lib:<swift>/usr/lib/swift/linux:<swift>/usr/lib/swift/host/compiler` and
@@ -233,11 +233,9 @@ impl Prober<'_> {
             .collect();
         libs.sort();
         for l in libs {
-            let Ok(bytes) = std::fs::read(&l) else { continue };
-            let Ok(elf) = goblin::elf::Elf::parse(&bytes) else { continue };
-            let needs: Vec<String> =
-                elf.libraries.iter().filter(|n| n.starts_with("libpython")).map(|n| (*n).to_owned()).collect();
-            return needs;
+            // Only the dynamic section is read: liblldb is about 230 MB.
+            let Ok(needed) = crate::elf::needed_libraries(&l) else { continue };
+            return needed.into_iter().filter(|n| n.starts_with("libpython")).collect();
         }
         Vec::new()
     }

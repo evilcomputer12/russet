@@ -28,6 +28,7 @@ use russet_core::progress::ProgressSink;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
+pub mod elf;
 pub mod exec;
 pub mod host;
 pub mod install;
@@ -368,6 +369,7 @@ impl Toolchains {
         }
         out.extend(p.simple(Component::Xtool, "xtool").await);
         out.extend(p.simple(Component::Flutter, "flutter").await);
+        self.exec.flush();
         out
     }
 
@@ -379,6 +381,9 @@ impl Toolchains {
     /// The first working candidate of `c` that meets `req` (ARCHITECTURE §16.1 order).
     pub async fn resolve(&self, c: Component, req: &Requirement) -> Result<ToolInfo> {
         let flavor = req.flavor.as_deref().filter(|f| !f.is_empty() && *f != "auto");
+        if let Some(f) = flavor {
+            validate_flavor(c, f)?;
+        }
         if matches!(c, Component::Linker | Component::Lldb | Component::LldbDap)
             && let Some(path) = flavor.filter(|f| f.contains('/'))
         {
@@ -391,6 +396,12 @@ impl Toolchains {
     /// Every candidate of `c` for `req`'s flavor, in resolution order, with problems (one component of
     /// [`probe_all`](Self::probe_all)).
     pub async fn candidates(&self, c: Component, req: &Requirement) -> Vec<ToolInfo> {
+        let out = self.candidates_uncached(c, req).await;
+        self.exec.flush();
+        out
+    }
+
+    async fn candidates_uncached(&self, c: Component, req: &Requirement) -> Vec<ToolInfo> {
         let p = self.prober();
         let flavor = req.flavor.as_deref().filter(|f| !f.is_empty() && *f != "auto");
         match c {
@@ -696,6 +707,31 @@ impl Toolchains {
         }
         Ok(report)
     }
+}
+
+/// Checks a flavor from the project file: `darwin-tools[@req]`, `llvm[@req]`, `lld[@req]` or a path for the
+/// linker; `swift`, `llvm` or a path for LLDB. A malformed one is `config.invalid`, never "any version".
+fn validate_flavor(c: Component, flavor: &str) -> Result<()> {
+    if flavor.contains('/') || flavor.contains('\\') {
+        return Ok(());
+    }
+    let ok = match c {
+        Component::Linker => {
+            let (kind, req) = flavor.split_once('@').unwrap_or((flavor, ""));
+            matches!(kind, "darwin-tools" | "llvm" | "lld") && (req.is_empty() || req.parse::<VersionReq>().is_ok())
+        }
+        Component::Lldb | Component::LldbDap => matches!(flavor, "swift" | "llvm"),
+        _ => true,
+    };
+    if ok {
+        return Ok(());
+    }
+    let expected = match c {
+        Component::Linker => "auto, darwin-tools@1.1.0, llvm@>=23.1.3 or a path",
+        _ => "auto, swift, llvm or a path",
+    };
+    Err(Error::new(codes::config::INVALID, format!("`{flavor}` is not a valid {} choice", c.as_str()))
+        .with_hint(format!("Use {expected} in the project file.")))
 }
 
 /// Whether a linker candidate matches `darwin-tools@<req>`, `llvm@<req>` or `lld@<req>`; `bundles` maps an SDK

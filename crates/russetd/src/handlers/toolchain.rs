@@ -150,12 +150,21 @@ pub fn requirement(config: &ConfigService, project: Option<&std::path::Path>, c:
     let Some(root) = project else { return Ok(Requirement::any()) };
     let eff = config.effective(Some(root))?;
     let t = &eff.project.toolchain;
+    // A path in the project file is relative to the project root, never to the daemon's working directory.
+    let in_project = |f: &str| {
+        let looks_like_path = f.contains('/') || f.contains('\\');
+        if looks_like_path && !std::path::Path::new(f).is_absolute() {
+            root.join(f).to_string_lossy().into_owned()
+        } else {
+            f.to_owned()
+        }
+    };
     Ok(match c {
         Component::Swift => Requirement { version: t.swift.clone(), flavor: None },
         Component::DarwinSdk => Requirement { version: t.xcode_sdk.clone(), flavor: None },
-        Component::Linker => Requirement { version: None, flavor: t.linker.clone() },
+        Component::Linker => Requirement { version: None, flavor: t.linker.as_deref().map(in_project) },
         Component::Lldb | Component::LldbDap => {
-            Requirement { version: None, flavor: Some(eff.project.debug.lldb.clone()) }
+            Requirement { version: None, flavor: Some(in_project(&eff.project.debug.lldb)) }
         }
         _ => Requirement::any(),
     })
