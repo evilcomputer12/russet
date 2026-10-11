@@ -58,8 +58,8 @@ fn errors_map_to_their_exit_codes() {
     let out = home.run(&["--json", "--no-daemon", "approve", "apr_01J00000000000000000000000"]);
     assert_eq!(code(&out), 11);
     assert_eq!(json_error(&out)["russetCode"], "perm.denied");
-    // core.notImplemented (another area's stub command): 1.
-    let out = home.run(&["--json", "device", "list"]);
+    // core.notImplemented (a later wave's stub command): 1.
+    let out = home.run(&["--json", "crash"]);
     assert_eq!(code(&out), 1);
     assert_eq!(json_error(&out)["russetCode"], "core.notImplemented");
     // Successful daemon-backed commands: 0, with one JSON document.

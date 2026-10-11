@@ -188,26 +188,26 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `device.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `device.watch` | read |  | plain | `Unspecified` | `Unspecified` |
-| `device.info` | read |  | plain | `Unspecified` | `Unspecified` |
-| `device.readiness` | read |  | plain | `Unspecified` | `Unspecified` |
-| `device.prepare` | device | L | plain | `Unspecified` | `Unspecified` |
-| `device.pair` | device | L | plain | `Unspecified` | `Unspecified` |
+| `device.list` | read |  | plain | `DeviceListParams` | `DeviceListResult` |
+| `device.watch` | read |  | plain | `DeviceWatchParams` | `DeviceWatchResult` |
+| `device.info` | read |  | plain | `DeviceInfoParams` | `DeviceInfoResult` |
+| `device.readiness` | read |  | plain | `DeviceReadinessParams` | `Readiness` |
+| `device.prepare` | device | L | plain | `DevicePrepareParams` | `Readiness` |
+| `device.pair` | device | L | plain | `DevicePairParams` | `DevicePairResult` |
 | `device.unpair` | device |  | plain | `Unspecified` | `Unspecified` |
 | `device.developerMode.reveal` | device |  | plain | `Unspecified` | `Unspecified` |
-| `device.ddi.status` | read |  | plain | `Unspecified` | `Unspecified` |
+| `device.ddi.status` | read |  | plain | `DeviceDdiStatusParams` | `DdiStatus` |
 | `device.ddi.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `device.ddi.mount` | device | L | plain | `Unspecified` | `Unspecified` |
-| `device.reserve` | device |  | plain | `Unspecified` | `Unspecified` |
-| `device.alias.set` | system |  | plain | `Unspecified` | `Unspecified` |
+| `device.ddi.mount` | device | L | plain | `DeviceDdiMountParams` | `DdiStatus` |
+| `device.reserve` | device |  | plain | `DeviceReserveParams` | `DeviceReserveResult` |
+| `device.alias.set` | system |  | plain | `DeviceAliasSetParams` | `DeviceAliasSetResult` |
 | `device.wifi.enable` | device |  | plain | `Unspecified` | `Unspecified` |
 
 Notifications:
 
 | Notification | Params |
 |---|---|
-| `device.changed` | `Unspecified` |
+| `device.changed` | `DeviceChangedParams` |
 
 ## `app` (module `app`)
 
@@ -215,19 +215,19 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `app.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `app.install` | device | L | plain | `Unspecified` | `Unspecified` |
-| `app.uninstall` | device (per call) |  | plain | `Unspecified` | `Unspecified` |
-| `app.launch` | device |  | plain | `Unspecified` | `Unspecified` |
-| `app.terminate` | device |  | plain | `Unspecified` | `Unspecified` |
+| `app.list` | read |  | plain | `AppListParams` | `AppListResult` |
+| `app.install` | device | L | plain | `AppInstallParams` | `AppInstallResult` |
+| `app.uninstall` | device (per call) |  | plain | `AppUninstallParams` | `AppUninstallResult` |
+| `app.launch` | device |  | plain | `AppLaunchParams` | `AppLaunchResult` |
+| `app.terminate` | device |  | plain | `AppTerminateParams` | `AppTerminateResult` |
 | `app.icon` | read |  | plain | `Unspecified` | `Unspecified` |
 
 Notifications:
 
 | Notification | Params |
 |---|---|
-| `app.output` | `Unspecified` |
-| `app.exited` | `Unspecified` |
+| `app.output` | `AppOutputParams` |
+| `app.exited` | `AppExitedParams` |
 
 ## `process` (module `process`)
 
@@ -235,8 +235,8 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `process.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `process.signal` | device |  | plain | `Unspecified` | `Unspecified` |
+| `process.list` | read |  | plain | `ProcessListParams` | `ProcessListResult` |
+| `process.signal` | device |  | plain | `ProcessSignalParams` | `ProcessSignalResult` |
 
 ## `forward` (module `forward`)
 
@@ -244,9 +244,9 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `forward.open` | device |  | plain | `Unspecified` | `Unspecified` |
-| `forward.close` | device |  | plain | `Unspecified` | `Unspecified` |
-| `forward.list` | read |  | plain | `Unspecified` | `Unspecified` |
+| `forward.open` | device |  | plain | `ForwardOpenParams` | `ForwardOpenResult` |
+| `forward.close` | device |  | plain | `ForwardCloseParams` | `ForwardCloseResult` |
+| `forward.list` | read |  | plain | `ForwardListParams` | `ForwardListResult` |
 
 ## `logs` (module `logs`)
 
@@ -254,14 +254,14 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `logs.subscribe` | read |  | plain | `Unspecified` | `Unspecified` |
-| `logs.tail` | read |  | plain | `Unspecified` | `Unspecified` |
+| `logs.subscribe` | read |  | plain | `LogsSubscribeParams` | `LogsSubscribeResult` |
+| `logs.tail` | read |  | plain | `LogsTailParams` | `LogsTailResult` |
 
 Notifications:
 
 | Notification | Params |
 |---|---|
-| `logs.entries` | `Unspecified` |
+| `logs.entries` | `LogsEntriesParams` |
 
 ## `screen` (module `screen`)
 

@@ -113,7 +113,7 @@ fn a_second_live_daemon_gets_3019_with_the_holder() {
     let second = Home::new("live-second");
 
     let (first_child, first_pid) = run_live_daemon(&first, &lock, &mux);
-    // The holder passes the guard: `device.list` reaches the device plane (W4's handler; a stub until then).
+    // The holder passes the guard: `device.list` reaches the device plane (W4's handler).
     let reached = call(&first, "device.list", json!({}));
     assert!(not_refused(&reached), "{reached:?}");
 
@@ -134,7 +134,7 @@ fn a_second_live_daemon_gets_3019_with_the_holder() {
     let reached = call(&third, "device.list", json!({}));
     assert!(not_refused(&reached), "{reached:?}");
     stop(&third, third_child, third_pid);
-    assert_eq!(mux.connections(), 0, "no daemon connected to usbmuxd");
+    assert!(mux.connections() > 0, "the lock holders reach usbmuxd (W4's device plane)");
 }
 
 /// `Ok`, or an error other than 3019 (the device plane's own answer).

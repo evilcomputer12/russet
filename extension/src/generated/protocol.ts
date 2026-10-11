@@ -92,6 +92,146 @@ export type AccountVerifyResult = { ok: boolean, accountId: string,
 teamId?: string, roleProbe: RoleProbe, };
 
 /**
+ * Params of the `app.exited` notification: `{leaseId, pid, code?, signal?, crashId?}; to the app.launch caller`.
+ */
+export type AppExitedParams = { leaseId: LeaseId, pid: number, code?: number, signal?: number, crashId?: string, };
+
+/**
+ * One installed app.
+ */
+export type AppInfo = { bundleId: string, name?: string, 
+/**
+ * `CFBundleShortVersionString`.
+ */
+version?: string, 
+/**
+ * `CFBundleVersion`.
+ */
+build?: string, 
+/**
+ * The `.app` path on the device.
+ */
+path?: string, 
+/**
+ * `CFBundleExecutable`.
+ */
+executable?: string, 
+/**
+ * A user app with `get-task-allow` (debuggable).
+ */
+developerApp: boolean, removable: boolean, hidden: boolean, };
+
+/**
+ * Params of `app.install`: `{udid?, path: .app|.ipa} → {bundleId, installedPath, durationMs}`.
+ */
+export type AppInstallParams = { udid?: string, 
+/**
+ * An absolute path to a signed `.app` directory or `.ipa`.
+ */
+path: string, };
+
+/**
+ * Result of `app.install`.
+ */
+export type AppInstallResult = { bundleId: string, 
+/**
+ * The app's path on the device (empty when installd did not report it).
+ */
+installedPath: string, durationMs: number, };
+
+/**
+ * Which apps `app.list` returns.
+ */
+export type AppKind = "user" | "all";
+
+/**
+ * Params of `app.launch`: `{udid?, bundleId, args?, env?, suspended?, killExisting?, console?} → {pid, executable, leaseId} ⇒ app.output, app.exited`.
+ */
+export type AppLaunchParams = { udid?: string, bundleId: string, 
+/**
+ * Arguments after the executable.
+ */
+args: Array<string>, 
+/**
+ * Extra environment variables.
+ */
+env: { [key in string]: string }, 
+/**
+ * Start stopped before `main` (resume with `process.signal` SIGCONT or a debugger).
+ */
+suspended?: boolean, 
+/**
+ * Terminate a running instance first (default true).
+ */
+killExisting?: boolean, 
+/**
+ * Attach the app's stdio (default true): `app.output` notifications and the `stdout` log source.
+ */
+console?: boolean, };
+
+/**
+ * Result of `app.launch`.
+ */
+export type AppLaunchResult = { pid: number, 
+/**
+ * The executable's path on the device (empty after a DVT launch).
+ */
+executable: string, 
+/**
+ * The `app-launch` lease: console and exit notifications go to the caller until it ends.
+ */
+leaseId: LeaseId, };
+
+/**
+ * Params of `app.list`: `{udid?, kind?: user|all, bundleIdPrefix?} → {apps: AppInfo[]}`.
+ */
+export type AppListParams = { udid?: string, kind?: AppKind, bundleIdPrefix?: string, };
+
+/**
+ * Result of `app.list`.
+ */
+export type AppListResult = { apps: Array<AppInfo>, };
+
+/**
+ * Params of the `app.output` notification: `{leaseId, stream: stdout, data}; to the app.launch caller`.
+ */
+export type AppOutputParams = { leaseId: LeaseId, stream: AppOutputStream, 
+/**
+ * One console line, without its line ending.
+ */
+data: string, };
+
+/**
+ * The stream of an `app.output` chunk (CoreDevice merges stdout and stderr on one pseudo-terminal).
+ */
+export type AppOutputStream = "stdout";
+
+/**
+ * Params of `app.terminate`: `{udid?, pid?|bundleId?} → {}`.
+ */
+export type AppTerminateParams = { udid?: string, pid?: number, bundleId?: string, };
+
+/**
+ * Result of `app.terminate`.
+ */
+export type AppTerminateResult = Record<symbol, never>;
+
+/**
+ * Params of `app.uninstall`: `{udid?, bundleId} → {} (MCP: own or dev.russet.test.* IDs only)`.
+ */
+export type AppUninstallParams = { udid?: string, 
+/**
+ * Required; `#[serde(default)]` only so the per-call class can be resolved before validation (the handler
+ * rejects an empty id with `core.invalidArgument`).
+ */
+bundleId: string, };
+
+/**
+ * Result of `app.uninstall`.
+ */
+export type AppUninstallResult = Record<symbol, never>;
+
+/**
  * An approval record (ARCHITECTURE §6.5).
  */
 export type Approval = { approvalId: ApprovalId, state: ApprovalState, requestedBy: ConnectionRef, subject: ApprovalSubject, 
@@ -501,6 +641,11 @@ flags: Array<string>,
 execSegFlags: Array<string>, cdhash: string, };
 
 /**
+ * The device's code-signing monitor (TXM, PPL or none) [D 71].
+ */
+export type CodeSigningMonitor = "txm" | "ppl" | "none" | "unknown";
+
+/**
  * Params of the `config.changed` notification (to every connection).
  */
 export type ConfigChangedParams = { scope: ConfigWriteScope, path: string, };
@@ -771,6 +916,208 @@ shuttingDown: boolean,
 graceMs?: number, };
 
 /**
+ * The DDI form.
+ */
+export type DdiKind = "legacy" | "personalized-dmg" | "cryptex1";
+
+/**
+ * Where a mounted DDI came from (Russet's `MountRecord`, ARCHITECTURE §5.3).
+ */
+export type DdiOrigin = "imported" | "dir" | "pmd3-cache" | "pmd3-auto-mount" | "unknown";
+
+/**
+ * Where `device.prepare` and `device.ddi.mount` take the DDI from (ARCHITECTURE §8.2, §14.3) [D 62].
+ */
+export type DdiSourceParam = { "kind": "imported", ddiBuild?: string, } | { "kind": "dir", path: string, } | { "kind": "pmd3-cache", } | { "kind": "pmd3-auto-mount", allowMirror: boolean, };
+
+/**
+ * The mounted Developer Disk Image (`device.ddi.status`, `Readiness.ddi`).
+ */
+export type DdiStatus = { mounted: boolean, kind: DdiKind, 
+/**
+ * The cryptex version, for example `27.1.266.1`.
+ */
+version?: string, 
+/**
+ * For example `27A266a`.
+ */
+productBuild?: string, 
+/**
+ * The source of Russet's last mount record while the mounted image still matches it, else `unknown` [D 89].
+ */
+source: DdiOrigin, };
+
+/**
+ * Params of `device.alias.set`: `{udid, alias} → {} (global config)`.
+ */
+export type DeviceAliasSetParams = { 
+/**
+ * The UDID; an empty string removes the alias.
+ */
+udid: string, alias: string, };
+
+/**
+ * Result of `device.alias.set`.
+ */
+export type DeviceAliasSetResult = Record<symbol, never>;
+
+/**
+ * What happened to a device (`device.changed`).
+ */
+export type DeviceChange = "added" | "removed" | "updated";
+
+/**
+ * Params of the `device.changed` notification: `{subscriptionId, change: added|removed|updated, device: DeviceSummary}; to subscribers`.
+ */
+export type DeviceChangedParams = { subscriptionId: SubscriptionId, change: DeviceChange, device: DeviceSummary, };
+
+/**
+ * Params of `device.ddi.mount`: `{udid?, source?: {kind: imported, ddiBuild?}|{kind: dir, path}|{kind: pmd3-cache}|{kind: pmd3-auto-mount, allowMirror}, force?} → DdiStatus`.
+ */
+export type DeviceDdiMountParams = { udid?: string, 
+/**
+ * Default: the `[device.ddi]` order.
+ */
+source?: DdiSourceParam, 
+/**
+ * Replace a mounted DDI (on the rig only with the owner's approval [D 62]).
+ */
+force?: boolean, };
+
+/**
+ * Params of `device.ddi.status`: `{udid?} → DdiStatus {mounted, kind, version?, productBuild?, source?}`.
+ */
+export type DeviceDdiStatusParams = { udid?: string, };
+
+/**
+ * Params of `device.info`: `{udid?} → DeviceInfo`.
+ */
+export type DeviceInfoParams = { 
+/**
+ * A UDID or alias; may be omitted when exactly one device is attached (ARCHITECTURE §7.3).
+ */
+udid?: string, };
+
+/**
+ * Result of `device.info`: lockdown identity values plus a few safe properties (never serial numbers, ECIDs or
+ * network addresses).
+ */
+export type DeviceInfoResult = { udid: string, name?: string, productType?: string, marketingName?: string, osVersion?: string, build?: string, deviceClass?: string, hardwareModel?: string, cpuArchitecture?: string, 
+/**
+ * `ChipID`, for example 33025 (0x8101).
+ */
+chipId?: number, transport: DeviceTransport, codeSigningMonitor?: CodeSigningMonitor, state: DeviceState, 
+/**
+ * Further lockdown values (`ProductName`, `ActivationState`, `PasswordProtected`, …).
+ */
+properties: { [key in string]: JsonValue }, };
+
+/**
+ * Params of `device.list`: `{} → {devices: DeviceSummary[]}`.
+ */
+export type DeviceListParams = Record<symbol, never>;
+
+/**
+ * Result of `device.list`.
+ */
+export type DeviceListResult = { devices: Array<DeviceSummary>, };
+
+/**
+ * Params of `device.pair`: `{udid?, hostName?} → {status: paired|pending|denied}`.
+ */
+export type DevicePairParams = { udid?: string, 
+/**
+ * The name the Trust dialog shows.
+ */
+hostName?: string, };
+
+/**
+ * Result of `device.pair`.
+ */
+export type DevicePairResult = { status: PairStatus, };
+
+/**
+ * Params of `device.prepare`: `{udid?, ddiSource?, revealDeveloperMode?} → Readiness`.
+ */
+export type DevicePrepareParams = { udid?: string, 
+/**
+ * Default: the `[device.ddi]` order.
+ */
+ddiSource?: DdiSourceParam, 
+/**
+ * Reveal the Developer Mode toggle in Settings when it is off.
+ */
+revealDeveloperMode?: boolean, };
+
+/**
+ * Params of `device.readiness`: `{udid?, refresh?} → Readiness {paired, developerMode, ddi, locked, tunnel}`.
+ */
+export type DeviceReadinessParams = { udid?: string, 
+/**
+ * Re-read everything instead of answering from the cache.
+ */
+refresh?: boolean, };
+
+/**
+ * Params of `device.reserve`: `{udid?, purpose} → {leaseId}; others get device.reserved`.
+ */
+export type DeviceReserveParams = { udid?: string, 
+/**
+ * Shown to the clients that get `device.reserved`.
+ */
+purpose: string, };
+
+/**
+ * Result of `device.reserve`.
+ */
+export type DeviceReserveResult = { leaseId: LeaseId, };
+
+/**
+ * The flat device state (russet-device's richer `DeviceState` converts to it, ARCHITECTURE §5.2).
+ */
+export type DeviceState = "attached" | "needs-trust" | "trust-pending" | "ready" | "unavailable";
+
+/**
+ * One device: `device.list`, `device.changed`.
+ */
+export type DeviceSummary = { udid: string, name: string, 
+/**
+ * For example `iPhone13,2`.
+ */
+productType: string, marketingName?: string, osVersion: string, 
+/**
+ * The iOS build, for example `24A437`.
+ */
+build?: string, transport: DeviceTransport, 
+/**
+ * ARCHITECTURE §9.5 and §17.3: from the ChipID × iOS-major table, optionally confirmed by the probe app.
+ */
+codeSigningMonitor?: CodeSigningMonitor, state: DeviceState, 
+/**
+ * Read lazily, on the first client request (ARCHITECTURE §5.3); omitted until then.
+ */
+readiness?: Readiness, 
+/**
+ * Only when `state` is `unavailable`.
+ */
+error?: ErrorData, };
+
+/**
+ * How a device is connected.
+ */
+export type DeviceTransport = "usb" | "wifi";
+
+/**
+ * Params of `device.watch`: `{} → {subscriptionId} ⇒ device.changed`.
+ */
+export type DeviceWatchParams = Record<symbol, never>;
+
+/**
+ * Result of `device.watch`.
+ */
+export type DeviceWatchResult = { subscriptionId: SubscriptionId, };
+
+/**
  * The Russet build that ran the checks.
  */
 export type DoctorBuild = { version: string, buildId: string, };
@@ -848,6 +1195,88 @@ export type ErrorData = { russetCode: string, hint?: string, details?: JsonValue
  * `{dev, ino, mtimeNs, size}` of the daemon's executable (Windows: volume serial and file index).
  */
 export type ExecutableId = { dev: number, ino: number, mtimeNs: number, size: number, };
+
+/**
+ * Where the forward listens: at most one field; default a 0600 Unix socket `runtime/fwd-<lease>.sock` on Linux
+ * and `127.0.0.1:0` on Windows.
+ */
+export type ForwardBindParam = { 
+/**
+ * A loopback `host:port` (`127.0.0.1:0` picks a port).
+ */
+tcp?: string, 
+/**
+ * A Unix socket path (Linux).
+ */
+unix?: string, };
+
+/**
+ * Params of `forward.close`: `{leaseId} → {}`.
+ */
+export type ForwardCloseParams = { leaseId: LeaseId, };
+
+/**
+ * Result of `forward.close`.
+ */
+export type ForwardCloseResult = Record<symbol, never>;
+
+/**
+ * One open forward.
+ */
+export type ForwardInfo = { leaseId: LeaseId, udid: string, target: ForwardTargetParam, local: string, 
+/**
+ * Connections accepted so far.
+ */
+connections: number, 
+/**
+ * RFC 3339 UTC.
+ */
+openedAt: string, };
+
+/**
+ * Params of `forward.list`: `{} → {forwards[]}`.
+ */
+export type ForwardListParams = Record<symbol, never>;
+
+/**
+ * Result of `forward.list`.
+ */
+export type ForwardListResult = { forwards: Array<ForwardInfo>, };
+
+/**
+ * Params of `forward.open`: `{udid?, target: {service}|{tunnelPort}|{usbmuxPort}, bind?: {tcp}|{unix}} → {leaseId, local}`.
+ */
+export type ForwardOpenParams = { udid?: string, target: ForwardTargetParam, bind?: ForwardBindParam, };
+
+/**
+ * Result of `forward.open`.
+ */
+export type ForwardOpenResult = { leaseId: LeaseId, 
+/**
+ * `127.0.0.1:41250` or a socket path.
+ */
+local: string, 
+/**
+ * The same as a gdb-remote URL for LLDB: `connect://…` or `unix-connect://…`.
+ */
+url: string, };
+
+/**
+ * What a forward connects to on the device: exactly one field.
+ */
+export type ForwardTargetParam = { 
+/**
+ * An RSD service, for example `com.apple.internal.dt.remote.debugproxy`.
+ */
+service?: string, 
+/**
+ * A TCP port on the device's tunnel address.
+ */
+tunnelPort?: number, 
+/**
+ * A device port through a classic usbmux `Connect` (iproxy-style).
+ */
+usbmuxPort?: number, };
 
 /**
  * A connection's permissions (ARCHITECTURE §7.4 `grant`, §7.5): which classes run, which need a
@@ -1159,9 +1588,111 @@ fixed: boolean, };
 export type LintSeverity = "info" | "warning" | "error";
 
 /**
+ * One log line: `logs.entries`, `logs.tail`, `run.output`, `run.output.query`.
+ */
+export type LogEntry = { 
+/**
+ * RFC 3339 UTC with milliseconds, for example `2026-10-11T09:00:00.123Z`.
+ */
+ts: string, source: LogSource, level: LogLevel, 
+/**
+ * The text (never `text`).
+ */
+message: string, pid?: number, tid?: number, process?: string, subsystem?: string, category?: string, imageUuid?: string, imageOffset?: number, machTs?: number, };
+
+/**
+ * Which entries a subscription delivers.
+ */
+export type LogFilter = { pid?: number, 
+/**
+ * Resolved to the app's running process when the subscription starts.
+ */
+bundleId?: string, process?: string, 
+/**
+ * A subsystem prefix.
+ */
+subsystem?: string, category?: string, minLevel?: LogLevel, 
+/**
+ * A case-insensitive substring of the message.
+ */
+contains?: string, };
+
+/**
+ * Apple's log levels (never `notice`).
+ */
+export type LogLevel = "debug" | "info" | "default" | "error" | "fault";
+
+/**
+ * Where a [`LogEntry`] came from.
+ */
+export type LogSource = "stdout" | "stderr" | "oslog" | "syslog" | "debugger" | "jit" | "russet";
+
+/**
  * The stream a log line came from (`JobEvent` kind `log`).
  */
 export type LogStream = "stdout" | "stderr" | "info" | "warn";
+
+/**
+ * Params of the `logs.entries` notification: `{subscriptionId, entries: LogEntry[], dropped?}; to subscribers`.
+ */
+export type LogsEntriesParams = { subscriptionId: SubscriptionId, entries: Array<LogEntry>, 
+/**
+ * Entries lost since the previous notification (slow consumer, ARCHITECTURE §6.4).
+ */
+dropped?: number, };
+
+/**
+ * A device log source a subscription reads.
+ */
+export type LogsSource = "oslog" | "syslog" | "stdout";
+
+/**
+ * Params of `logs.subscribe`: `{udid?, sources: (oslog|syslog|stdout)[], filter: LogFilter, backlog?} → {subscriptionId} ⇒ logs.entries`.
+ */
+export type LogsSubscribeParams = { udid?: string, 
+/**
+ * Empty means `oslog` and `stdout`.
+ */
+sources: Array<LogsSource>, filter: LogFilter, 
+/**
+ * Entries from before the subscription to deliver first (from the console backlog).
+ */
+backlog?: number, };
+
+/**
+ * Result of `logs.subscribe`.
+ */
+export type LogsSubscribeResult = { subscriptionId: SubscriptionId, };
+
+/**
+ * Params of `logs.tail`: `{udid?, bundleId?, pid?, lines?, minLevel?, contains?, since?, cursor?} → {entries: LogEntry[], truncated, cursor?}`.
+ */
+export type LogsTailParams = { udid?: string, bundleId?: string, pid?: number, 
+/**
+ * Default 200, at most 2000.
+ */
+lines?: number, minLevel?: LogLevel, contains?: string, 
+/**
+ * RFC 3339 UTC.
+ */
+since?: string, 
+/**
+ * Only entries after a previous result's cursor.
+ */
+cursor?: string, };
+
+/**
+ * Result of `logs.tail`.
+ */
+export type LogsTailResult = { entries: Array<LogEntry>, 
+/**
+ * More entries matched than `lines`.
+ */
+truncated: boolean, 
+/**
+ * Pass it back as `cursor` to get only newer entries.
+ */
+cursor?: string, };
 
 /**
  * One Mach-O file of an inspected bundle.
@@ -1200,6 +1731,11 @@ export type MutationKind = "create-certificate" | "register-device" | "register-
  * What to package after the build.
  */
 export type PackageKind = "none" | "ipa-dev" | "ipa-store";
+
+/**
+ * The outcome of `device.pair`.
+ */
+export type PairStatus = "paired" | "pending" | "denied";
 
 /**
  * Permission classes (ARCHITECTURE §7.5). Wire values are kebab-case.
@@ -1345,6 +1881,51 @@ export type PortalProfilesListResult = { profiles: Array<PortalProfile>, };
  * One `account.verify` probe.
  */
 export type ProbeOutcome = "ok" | "forbidden" | "unauthorized" | "error";
+
+/**
+ * One process on the device.
+ */
+export type ProcessInfo = { pid: number, 
+/**
+ * The executable's file name.
+ */
+name: string, 
+/**
+ * The executable's device path.
+ */
+executable?: string, 
+/**
+ * For user apps.
+ */
+bundleId?: string, 
+/**
+ * Runs from an `.app` bundle.
+ */
+isApplication: boolean, };
+
+/**
+ * Params of `process.list`: `{udid?} → {processes: ProcessInfo[]}`.
+ */
+export type ProcessListParams = { udid?: string, };
+
+/**
+ * Result of `process.list`.
+ */
+export type ProcessListResult = { processes: Array<ProcessInfo>, };
+
+/**
+ * Params of `process.signal`: `{udid?, pid, signal} → {}`.
+ */
+export type ProcessSignalParams = { udid?: string, pid: number, 
+/**
+ * A POSIX signal number, for example 19 (SIGCONT) or 9 (SIGKILL).
+ */
+signal: number, };
+
+/**
+ * Result of `process.signal`.
+ */
+export type ProcessSignalResult = Record<symbol, never>;
 
 /**
  * `begin`, `report` or `end`.
@@ -1532,6 +2113,11 @@ identityId?: string,
  * Account changes; empty for a plan `provision.apply` performs without an approval.
  */
 mutations: Array<PlanMutation>, profiles: Array<PlannedProfile>, warnings: Array<string>, };
+
+/**
+ * What a device needs before Russet can use it.
+ */
+export type Readiness = { paired: boolean, developerMode: Tristate, locked: Tristate, ddi?: DdiStatus, tunnel?: TunnelStatus, };
 
 /**
  * A JSON-RPC request id as `$/cancelRequest` carries it.
@@ -2047,6 +2633,29 @@ export type ToolchainUninstallResult = { freedBytes: number, };
 export type TraceLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 /**
+ * `yes`, `no` or `unknown`.
+ */
+export type Tristate = "yes" | "no" | "unknown";
+
+/**
+ * Tunnel states.
+ */
+export type TunnelState = "down" | "up" | "failed";
+
+/**
+ * The userspace tunnel to the device.
+ */
+export type TunnelStatus = { state: TunnelState, generation?: number, 
+/**
+ * RFC 3339 UTC.
+ */
+since?: string, 
+/**
+ * Only when `state` is `failed`.
+ */
+error?: ErrorData, };
+
+/**
  * Params of `ui.confirm` (served by `cli` with a TTY or `--yes`, and `ide`).
  */
 export type UiConfirmParams = { title: string, message: string, detail?: string, 
@@ -2176,33 +2785,33 @@ export interface Methods {
   "sdk.deviceSupport.check": { params: Unspecified; result: Unspecified };
   "sdk.deviceSupport.fetch": { params: Unspecified; result: Unspecified };
   "doctor.run": { params: DoctorRunParams; result: DoctorReport };
-  "device.list": { params: Unspecified; result: Unspecified };
-  "device.watch": { params: Unspecified; result: Unspecified };
-  "device.info": { params: Unspecified; result: Unspecified };
-  "device.readiness": { params: Unspecified; result: Unspecified };
-  "device.prepare": { params: Unspecified; result: Unspecified };
-  "device.pair": { params: Unspecified; result: Unspecified };
+  "device.list": { params: DeviceListParams; result: DeviceListResult };
+  "device.watch": { params: DeviceWatchParams; result: DeviceWatchResult };
+  "device.info": { params: DeviceInfoParams; result: DeviceInfoResult };
+  "device.readiness": { params: DeviceReadinessParams; result: Readiness };
+  "device.prepare": { params: DevicePrepareParams; result: Readiness };
+  "device.pair": { params: DevicePairParams; result: DevicePairResult };
   "device.unpair": { params: Unspecified; result: Unspecified };
   "device.developerMode.reveal": { params: Unspecified; result: Unspecified };
-  "device.ddi.status": { params: Unspecified; result: Unspecified };
+  "device.ddi.status": { params: DeviceDdiStatusParams; result: DdiStatus };
   "device.ddi.list": { params: Unspecified; result: Unspecified };
-  "device.ddi.mount": { params: Unspecified; result: Unspecified };
-  "device.reserve": { params: Unspecified; result: Unspecified };
-  "device.alias.set": { params: Unspecified; result: Unspecified };
+  "device.ddi.mount": { params: DeviceDdiMountParams; result: DdiStatus };
+  "device.reserve": { params: DeviceReserveParams; result: DeviceReserveResult };
+  "device.alias.set": { params: DeviceAliasSetParams; result: DeviceAliasSetResult };
   "device.wifi.enable": { params: Unspecified; result: Unspecified };
-  "app.list": { params: Unspecified; result: Unspecified };
-  "app.install": { params: Unspecified; result: Unspecified };
-  "app.uninstall": { params: Unspecified; result: Unspecified };
-  "app.launch": { params: Unspecified; result: Unspecified };
-  "app.terminate": { params: Unspecified; result: Unspecified };
+  "app.list": { params: AppListParams; result: AppListResult };
+  "app.install": { params: AppInstallParams; result: AppInstallResult };
+  "app.uninstall": { params: AppUninstallParams; result: AppUninstallResult };
+  "app.launch": { params: AppLaunchParams; result: AppLaunchResult };
+  "app.terminate": { params: AppTerminateParams; result: AppTerminateResult };
   "app.icon": { params: Unspecified; result: Unspecified };
-  "process.list": { params: Unspecified; result: Unspecified };
-  "process.signal": { params: Unspecified; result: Unspecified };
-  "forward.open": { params: Unspecified; result: Unspecified };
-  "forward.close": { params: Unspecified; result: Unspecified };
-  "forward.list": { params: Unspecified; result: Unspecified };
-  "logs.subscribe": { params: Unspecified; result: Unspecified };
-  "logs.tail": { params: Unspecified; result: Unspecified };
+  "process.list": { params: ProcessListParams; result: ProcessListResult };
+  "process.signal": { params: ProcessSignalParams; result: ProcessSignalResult };
+  "forward.open": { params: ForwardOpenParams; result: ForwardOpenResult };
+  "forward.close": { params: ForwardCloseParams; result: ForwardCloseResult };
+  "forward.list": { params: ForwardListParams; result: ForwardListResult };
+  "logs.subscribe": { params: LogsSubscribeParams; result: LogsSubscribeResult };
+  "logs.tail": { params: LogsTailParams; result: LogsTailResult };
   "screen.screenshot": { params: Unspecified; result: Unspecified };
   "screen.mirror.start": { params: Unspecified; result: Unspecified };
   "screen.mirror.stop": { params: Unspecified; result: Unspecified };
@@ -2344,10 +2953,10 @@ export interface Notifications {
   "ui.showMessage": UiShowMessageParams;
   "config.changed": ConfigChangedParams;
   "toolchain.changed": ToolchainChangedParams;
-  "device.changed": Unspecified;
-  "app.output": Unspecified;
-  "app.exited": Unspecified;
-  "logs.entries": Unspecified;
+  "device.changed": DeviceChangedParams;
+  "app.output": AppOutputParams;
+  "app.exited": AppExitedParams;
+  "logs.entries": LogsEntriesParams;
   "screen.mirror.ended": Unspecified;
   "perf.samples": Unspecified;
   "account.event": Unspecified;

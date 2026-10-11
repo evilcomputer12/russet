@@ -83,9 +83,9 @@ async fn a_second_live_daemon_gets_3019_with_the_holder() {
 async fn other_backends_reach_the_handlers() {
     let home = Home::new("iso-none");
     let (daemon, cli) = start(home.options()).await;
-    // RUSSET_DEVICE_BACKEND=none passes the guard; device.list is W4's (core.notImplemented until then).
-    let e = cli.call_raw("device.list", json!({}), CallOptions::default()).await.expect_err("W4's stub").to_error();
-    assert_eq!(e.code(), codes::core::NOT_IMPLEMENTED);
+    // RUSSET_DEVICE_BACKEND=none passes the guard and reaches W4's handler, which has no device plane.
+    let e = cli.call_raw("device.list", json!({}), CallOptions::default()).await.expect_err("no plane").to_error();
+    assert_eq!(e.code(), codes::device::USBMUX_UNAVAILABLE);
     let e = daemon.ctx().devices.manager().await.expect_err("no device plane");
     assert_eq!(e.code(), codes::device::USBMUX_UNAVAILABLE);
     assert_eq!(russet_device::io::live_connectors_constructed(), 0);

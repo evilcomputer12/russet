@@ -197,6 +197,361 @@
       ],
       "type": "object"
     },
+    "AppExitedParams": {
+      "description": "Params of the `app.exited` notification: `{leaseId, pid, code?, signal?, crashId?}; to the app.launch caller`.",
+      "properties": {
+        "code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "crashId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "signal": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "leaseId",
+        "pid"
+      ],
+      "type": "object"
+    },
+    "AppInfo": {
+      "description": "One installed app.",
+      "properties": {
+        "build": {
+          "description": "`CFBundleVersion`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "developerApp": {
+          "description": "A user app with `get-task-allow` (debuggable).",
+          "type": "boolean"
+        },
+        "executable": {
+          "description": "`CFBundleExecutable`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "The `.app` path on the device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "version": {
+          "description": "`CFBundleShortVersionString`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bundleId",
+        "developerApp",
+        "removable",
+        "hidden"
+      ],
+      "type": "object"
+    },
+    "AppInstallParams": {
+      "description": "Params of `app.install`: `{udid?, path: .app|.ipa} → {bundleId, installedPath, durationMs}`.",
+      "properties": {
+        "path": {
+          "description": "An absolute path to a signed `.app` directory or `.ipa`.",
+          "type": "string"
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "AppInstallResult": {
+      "description": "Result of `app.install`.",
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "installedPath": {
+          "description": "The app's path on the device (empty when installd did not report it).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bundleId",
+        "installedPath",
+        "durationMs"
+      ],
+      "type": "object"
+    },
+    "AppKind": {
+      "description": "Which apps `app.list` returns.",
+      "oneOf": [
+        {
+          "const": "user",
+          "description": "Apps the user installed (the default).",
+          "type": "string"
+        },
+        {
+          "const": "all",
+          "description": "Every app, system apps included.",
+          "type": "string"
+        }
+      ]
+    },
+    "AppLaunchParams": {
+      "description": "Params of `app.launch`: `{udid?, bundleId, args?, env?, suspended?, killExisting?, console?} → {pid, executable, leaseId} ⇒ app.output, app.exited`.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "Arguments after the executable.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "console": {
+          "description": "Attach the app's stdio (default true): `app.output` notifications and the `stdout` log source.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Extra environment variables.",
+          "type": "object"
+        },
+        "killExisting": {
+          "description": "Terminate a running instance first (default true).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "suspended": {
+          "description": "Start stopped before `main` (resume with `process.signal` SIGCONT or a debugger).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bundleId"
+      ],
+      "type": "object"
+    },
+    "AppLaunchResult": {
+      "description": "Result of `app.launch`.",
+      "properties": {
+        "executable": {
+          "description": "The executable's path on the device (empty after a DVT launch).",
+          "type": "string"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId",
+          "description": "The `app-launch` lease: console and exit notifications go to the caller until it ends."
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "executable",
+        "leaseId"
+      ],
+      "type": "object"
+    },
+    "AppListParams": {
+      "description": "Params of `app.list`: `{udid?, kind?: user|all, bundleIdPrefix?} → {apps: AppInfo[]}`.",
+      "properties": {
+        "bundleIdPrefix": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AppKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AppListResult": {
+      "description": "Result of `app.list`.",
+      "properties": {
+        "apps": {
+          "items": {
+            "$ref": "#/$defs/AppInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "apps"
+      ],
+      "type": "object"
+    },
+    "AppOutputParams": {
+      "description": "Params of the `app.output` notification: `{leaseId, stream: stdout, data}; to the app.launch caller`.",
+      "properties": {
+        "data": {
+          "description": "One console line, without its line ending.",
+          "type": "string"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId"
+        },
+        "stream": {
+          "$ref": "#/$defs/AppOutputStream"
+        }
+      },
+      "required": [
+        "leaseId",
+        "stream",
+        "data"
+      ],
+      "type": "object"
+    },
+    "AppOutputStream": {
+      "description": "The stream of an `app.output` chunk (CoreDevice merges stdout and stderr on one pseudo-terminal).",
+      "enum": [
+        "stdout"
+      ],
+      "type": "string"
+    },
+    "AppTerminateParams": {
+      "description": "Params of `app.terminate`: `{udid?, pid?|bundleId?} → {}`.",
+      "properties": {
+        "bundleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AppTerminateResult": {
+      "description": "Result of `app.terminate`.",
+      "type": "object"
+    },
+    "AppUninstallParams": {
+      "description": "Params of `app.uninstall`: `{udid?, bundleId} → {} (MCP: own or dev.russet.test.* IDs only)`.",
+      "properties": {
+        "bundleId": {
+          "default": "",
+          "description": "Required; `#[serde(default)]` only so the per-call class can be resolved before validation (the handler\nrejects an empty id with `core.invalidArgument`).",
+          "type": "string"
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AppUninstallResult": {
+      "description": "Result of `app.uninstall`.",
+      "type": "object"
+    },
     "Approval": {
       "description": "An approval record (ARCHITECTURE §6.5).",
       "properties": {
@@ -1355,6 +1710,16 @@
       ],
       "type": "object"
     },
+    "CodeSigningMonitor": {
+      "description": "The device's code-signing monitor (TXM, PPL or none) [D 71].",
+      "enum": [
+        "txm",
+        "ppl",
+        "none",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "ConfigChangedParams": {
       "description": "Params of the `config.changed` notification (to every connection).",
       "properties": {
@@ -1978,6 +2343,572 @@
       ],
       "type": "object"
     },
+    "DdiKind": {
+      "description": "The DDI form.",
+      "enum": [
+        "legacy",
+        "personalized-dmg",
+        "cryptex1"
+      ],
+      "type": "string"
+    },
+    "DdiOrigin": {
+      "description": "Where a mounted DDI came from (Russet's `MountRecord`, ARCHITECTURE §5.3).",
+      "enum": [
+        "imported",
+        "dir",
+        "pmd3-cache",
+        "pmd3-auto-mount",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "DdiSourceParam": {
+      "description": "Where `device.prepare` and `device.ddi.mount` take the DDI from (ARCHITECTURE §8.2, §14.3) [D 62].",
+      "oneOf": [
+        {
+          "description": "An imported DDI (`data/ddi/<ddiBuild>/iOS`); the newest when `ddiBuild` is omitted (W10).",
+          "properties": {
+            "ddiBuild": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "imported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A DDI root holding `Restore/` and `version.plist`, or a directory holding `BuildManifest.plist` [D 82].",
+          "properties": {
+            "kind": {
+              "const": "dir",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "pymobiledevice3's mirror-derived cache; needs the `allow-mirror` consent (W10).",
+          "properties": {
+            "kind": {
+              "const": "pmd3-cache",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The opt-in `pymobiledevice3 mounter auto-mount` subprocess (W10).",
+          "properties": {
+            "allowMirror": {
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "pmd3-auto-mount",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "allowMirror"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DdiStatus": {
+      "description": "The mounted Developer Disk Image (`device.ddi.status`, `Readiness.ddi`).",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/DdiKind"
+        },
+        "mounted": {
+          "type": "boolean"
+        },
+        "productBuild": {
+          "description": "For example `27A266a`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/DdiOrigin",
+          "description": "The source of Russet's last mount record while the mounted image still matches it, else `unknown` [D 89]."
+        },
+        "version": {
+          "description": "The cryptex version, for example `27.1.266.1`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "mounted",
+        "kind",
+        "source"
+      ],
+      "type": "object"
+    },
+    "DeviceAliasSetParams": {
+      "description": "Params of `device.alias.set`: `{udid, alias} → {} (global config)`.",
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "udid": {
+          "description": "The UDID; an empty string removes the alias.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "udid",
+        "alias"
+      ],
+      "type": "object"
+    },
+    "DeviceAliasSetResult": {
+      "description": "Result of `device.alias.set`.",
+      "type": "object"
+    },
+    "DeviceChange": {
+      "description": "What happened to a device (`device.changed`).",
+      "enum": [
+        "added",
+        "removed",
+        "updated"
+      ],
+      "type": "string"
+    },
+    "DeviceChangedParams": {
+      "description": "Params of the `device.changed` notification: `{subscriptionId, change: added|removed|updated, device: DeviceSummary}; to subscribers`.",
+      "properties": {
+        "change": {
+          "$ref": "#/$defs/DeviceChange"
+        },
+        "device": {
+          "$ref": "#/$defs/DeviceSummary"
+        },
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "change",
+        "device"
+      ],
+      "type": "object"
+    },
+    "DeviceDdiMountParams": {
+      "description": "Params of `device.ddi.mount`: `{udid?, source?: {kind: imported, ddiBuild?}|{kind: dir, path}|{kind: pmd3-cache}|{kind: pmd3-auto-mount, allowMirror}, force?} → DdiStatus`.",
+      "properties": {
+        "force": {
+          "description": "Replace a mounted DDI (on the rig only with the owner's approval [D 62]).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DdiSourceParam"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Default: the `[device.ddi]` order."
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DeviceDdiStatusParams": {
+      "description": "Params of `device.ddi.status`: `{udid?} → DdiStatus {mounted, kind, version?, productBuild?, source?}`.",
+      "properties": {
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DeviceInfoParams": {
+      "description": "Params of `device.info`: `{udid?} → DeviceInfo`.",
+      "properties": {
+        "udid": {
+          "description": "A UDID or alias; may be omitted when exactly one device is attached (ARCHITECTURE §7.3).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DeviceInfoResult": {
+      "description": "Result of `device.info`: lockdown identity values plus a few safe properties (never serial numbers, ECIDs or\nnetwork addresses).",
+      "properties": {
+        "build": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chipId": {
+          "description": "`ChipID`, for example 33025 (0x8101).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "codeSigningMonitor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodeSigningMonitor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cpuArchitecture": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deviceClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hardwareModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "marketingName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "osVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "productType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "properties": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Further lockdown values (`ProductName`, `ActivationState`, `PasswordProtected`, …).",
+          "type": "object"
+        },
+        "state": {
+          "$ref": "#/$defs/DeviceState"
+        },
+        "transport": {
+          "$ref": "#/$defs/DeviceTransport"
+        },
+        "udid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "udid",
+        "transport",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DeviceListParams": {
+      "description": "Params of `device.list`: `{} → {devices: DeviceSummary[]}`.",
+      "type": "object"
+    },
+    "DeviceListResult": {
+      "description": "Result of `device.list`.",
+      "properties": {
+        "devices": {
+          "items": {
+            "$ref": "#/$defs/DeviceSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "devices"
+      ],
+      "type": "object"
+    },
+    "DevicePairParams": {
+      "description": "Params of `device.pair`: `{udid?, hostName?} → {status: paired|pending|denied}`.",
+      "properties": {
+        "hostName": {
+          "description": "The name the Trust dialog shows.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DevicePairResult": {
+      "description": "Result of `device.pair`.",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/PairStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "DevicePrepareParams": {
+      "description": "Params of `device.prepare`: `{udid?, ddiSource?, revealDeveloperMode?} → Readiness`.",
+      "properties": {
+        "ddiSource": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DdiSourceParam"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Default: the `[device.ddi]` order."
+        },
+        "revealDeveloperMode": {
+          "description": "Reveal the Developer Mode toggle in Settings when it is off.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DeviceReadinessParams": {
+      "description": "Params of `device.readiness`: `{udid?, refresh?} → Readiness {paired, developerMode, ddi, locked, tunnel}`.",
+      "properties": {
+        "refresh": {
+          "description": "Re-read everything instead of answering from the cache.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DeviceReserveParams": {
+      "description": "Params of `device.reserve`: `{udid?, purpose} → {leaseId}; others get device.reserved`.",
+      "properties": {
+        "purpose": {
+          "default": "",
+          "description": "Shown to the clients that get `device.reserved`.",
+          "type": "string"
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DeviceReserveResult": {
+      "description": "Result of `device.reserve`.",
+      "properties": {
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId"
+        }
+      },
+      "required": [
+        "leaseId"
+      ],
+      "type": "object"
+    },
+    "DeviceState": {
+      "description": "The flat device state (russet-device's richer `DeviceState` converts to it, ARCHITECTURE §5.2).",
+      "enum": [
+        "attached",
+        "needs-trust",
+        "trust-pending",
+        "ready",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "DeviceSummary": {
+      "description": "One device: `device.list`, `device.changed`.",
+      "properties": {
+        "build": {
+          "description": "The iOS build, for example `24A437`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "codeSigningMonitor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodeSigningMonitor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ARCHITECTURE §9.5 and §17.3: from the ChipID × iOS-major table, optionally confirmed by the probe app."
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only when `state` is `unavailable`."
+        },
+        "marketingName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "osVersion": {
+          "type": "string"
+        },
+        "productType": {
+          "description": "For example `iPhone13,2`.",
+          "type": "string"
+        },
+        "readiness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Readiness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Read lazily, on the first client request (ARCHITECTURE §5.3); omitted until then."
+        },
+        "state": {
+          "$ref": "#/$defs/DeviceState"
+        },
+        "transport": {
+          "$ref": "#/$defs/DeviceTransport"
+        },
+        "udid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "udid",
+        "name",
+        "productType",
+        "osVersion",
+        "transport",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DeviceTransport": {
+      "description": "How a device is connected.",
+      "enum": [
+        "usb",
+        "wifi"
+      ],
+      "type": "string"
+    },
+    "DeviceWatchParams": {
+      "description": "Params of `device.watch`: `{} → {subscriptionId} ⇒ device.changed`.",
+      "type": "object"
+    },
+    "DeviceWatchResult": {
+      "description": "Result of `device.watch`.",
+      "properties": {
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId"
+      ],
+      "type": "object"
+    },
     "DoctorBuild": {
       "description": "The Russet build that ran the checks.",
       "properties": {
@@ -2332,6 +3263,180 @@
         "mtimeNs",
         "size"
       ],
+      "type": "object"
+    },
+    "ForwardBindParam": {
+      "description": "Where the forward listens: at most one field; default a 0600 Unix socket `runtime/fwd-<lease>.sock` on Linux\nand `127.0.0.1:0` on Windows.",
+      "properties": {
+        "tcp": {
+          "description": "A loopback `host:port` (`127.0.0.1:0` picks a port).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unix": {
+          "description": "A Unix socket path (Linux).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ForwardCloseParams": {
+      "description": "Params of `forward.close`: `{leaseId} → {}`.",
+      "properties": {
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId"
+        }
+      },
+      "required": [
+        "leaseId"
+      ],
+      "type": "object"
+    },
+    "ForwardCloseResult": {
+      "description": "Result of `forward.close`.",
+      "type": "object"
+    },
+    "ForwardInfo": {
+      "description": "One open forward.",
+      "properties": {
+        "connections": {
+          "description": "Connections accepted so far.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId"
+        },
+        "local": {
+          "type": "string"
+        },
+        "openedAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/ForwardTargetParam"
+        },
+        "udid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "leaseId",
+        "udid",
+        "target",
+        "local",
+        "connections",
+        "openedAt"
+      ],
+      "type": "object"
+    },
+    "ForwardListParams": {
+      "description": "Params of `forward.list`: `{} → {forwards[]}`.",
+      "type": "object"
+    },
+    "ForwardListResult": {
+      "description": "Result of `forward.list`.",
+      "properties": {
+        "forwards": {
+          "items": {
+            "$ref": "#/$defs/ForwardInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "forwards"
+      ],
+      "type": "object"
+    },
+    "ForwardOpenParams": {
+      "description": "Params of `forward.open`: `{udid?, target: {service}|{tunnelPort}|{usbmuxPort}, bind?: {tcp}|{unix}} → {leaseId, local}`.",
+      "properties": {
+        "bind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForwardBindParam"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/ForwardTargetParam"
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
+    "ForwardOpenResult": {
+      "description": "Result of `forward.open`.",
+      "properties": {
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId"
+        },
+        "local": {
+          "description": "`127.0.0.1:41250` or a socket path.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The same as a gdb-remote URL for LLDB: `connect://…` or `unix-connect://…`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "leaseId",
+        "local",
+        "url"
+      ],
+      "type": "object"
+    },
+    "ForwardTargetParam": {
+      "description": "What a forward connects to on the device: exactly one field.",
+      "properties": {
+        "service": {
+          "description": "An RSD service, for example `com.apple.internal.dt.remote.debugproxy`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tunnelPort": {
+          "description": "A TCP port on the device's tunnel address.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usbmuxPort": {
+          "description": "A device port through a classic usbmux `Connect` (iproxy-style).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "Grant": {
@@ -3423,6 +4528,169 @@
       ],
       "type": "string"
     },
+    "LogEntry": {
+      "description": "One log line: `logs.entries`, `logs.tail`, `run.output`, `run.output.query`.",
+      "properties": {
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "imageOffset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "imageUuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "$ref": "#/$defs/LogLevel"
+        },
+        "machTs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "The text (never `text`).",
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "process": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/LogSource"
+        },
+        "subsystem": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tid": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ts": {
+          "description": "RFC 3339 UTC with milliseconds, for example `2026-10-11T09:00:00.123Z`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts",
+        "source",
+        "level",
+        "message"
+      ],
+      "type": "object"
+    },
+    "LogFilter": {
+      "description": "Which entries a subscription delivers.",
+      "properties": {
+        "bundleId": {
+          "description": "Resolved to the app's running process when the subscription starts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "contains": {
+          "description": "A case-insensitive substring of the message.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "minLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "process": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subsystem": {
+          "description": "A subsystem prefix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LogLevel": {
+      "description": "Apple's log levels (never `notice`).",
+      "enum": [
+        "debug",
+        "info",
+        "default",
+        "error",
+        "fault"
+      ],
+      "type": "string"
+    },
+    "LogSource": {
+      "description": "Where a [`LogEntry`] came from.",
+      "enum": [
+        "stdout",
+        "stderr",
+        "oslog",
+        "syslog",
+        "debugger",
+        "jit",
+        "russet"
+      ],
+      "type": "string"
+    },
     "LogStream": {
       "description": "The stream a log line came from (`JobEvent` kind `log`).",
       "enum": [
@@ -3432,6 +4700,191 @@
         "warn"
       ],
       "type": "string"
+    },
+    "LogsEntriesParams": {
+      "description": "Params of the `logs.entries` notification: `{subscriptionId, entries: LogEntry[], dropped?}; to subscribers`.",
+      "properties": {
+        "dropped": {
+          "description": "Entries lost since the previous notification (slow consumer, ARCHITECTURE §6.4).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/LogEntry"
+          },
+          "type": "array"
+        },
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "entries"
+      ],
+      "type": "object"
+    },
+    "LogsSource": {
+      "description": "A device log source a subscription reads.",
+      "oneOf": [
+        {
+          "const": "oslog",
+          "description": "`os_trace_relay`, structured, filtered by pid on the device.",
+          "type": "string"
+        },
+        {
+          "const": "syslog",
+          "description": "`syslog_relay` text lines.",
+          "type": "string"
+        },
+        {
+          "const": "stdout",
+          "description": "The console of an app Russet launched.",
+          "type": "string"
+        }
+      ]
+    },
+    "LogsSubscribeParams": {
+      "description": "Params of `logs.subscribe`: `{udid?, sources: (oslog|syslog|stdout)[], filter: LogFilter, backlog?} → {subscriptionId} ⇒ logs.entries`.",
+      "properties": {
+        "backlog": {
+          "description": "Entries from before the subscription to deliver first (from the console backlog).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "filter": {
+          "$ref": "#/$defs/LogFilter",
+          "default": {}
+        },
+        "sources": {
+          "default": [],
+          "description": "Empty means `oslog` and `stdout`.",
+          "items": {
+            "$ref": "#/$defs/LogsSource"
+          },
+          "type": "array"
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LogsSubscribeResult": {
+      "description": "Result of `logs.subscribe`.",
+      "properties": {
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId"
+      ],
+      "type": "object"
+    },
+    "LogsTailParams": {
+      "description": "Params of `logs.tail`: `{udid?, bundleId?, pid?, lines?, minLevel?, contains?, since?, cursor?} → {entries: LogEntry[], truncated, cursor?}`.",
+      "properties": {
+        "bundleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "contains": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cursor": {
+          "description": "Only entries after a previous result's cursor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lines": {
+          "description": "Default 200, at most 2000.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "minLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "since": {
+          "description": "RFC 3339 UTC.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LogsTailResult": {
+      "description": "Result of `logs.tail`.",
+      "properties": {
+        "cursor": {
+          "description": "Pass it back as `cursor` to get only newer entries.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/LogEntry"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "description": "More entries matched than `lines`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "entries",
+        "truncated"
+      ],
+      "type": "object"
     },
     "MachOSummary": {
       "description": "One Mach-O file of an inspected bundle.",
@@ -3573,6 +5026,15 @@
           "type": "string"
         }
       ]
+    },
+    "PairStatus": {
+      "description": "The outcome of `device.pair`.",
+      "enum": [
+        "paired",
+        "pending",
+        "denied"
+      ],
+      "type": "string"
     },
     "Permission": {
       "description": "Permission classes (ARCHITECTURE §7.5). Wire values are kebab-case.",
@@ -3965,6 +5427,101 @@
         "error"
       ],
       "type": "string"
+    },
+    "ProcessInfo": {
+      "description": "One process on the device.",
+      "properties": {
+        "bundleId": {
+          "description": "For user apps.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "executable": {
+          "description": "The executable's device path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isApplication": {
+          "description": "Runs from an `.app` bundle.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "The executable's file name.",
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "name",
+        "isApplication"
+      ],
+      "type": "object"
+    },
+    "ProcessListParams": {
+      "description": "Params of `process.list`: `{udid?} → {processes: ProcessInfo[]}`.",
+      "properties": {
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ProcessListResult": {
+      "description": "Result of `process.list`.",
+      "properties": {
+        "processes": {
+          "items": {
+            "$ref": "#/$defs/ProcessInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "processes"
+      ],
+      "type": "object"
+    },
+    "ProcessSignalParams": {
+      "description": "Params of `process.signal`: `{udid?, pid, signal} → {}`.",
+      "properties": {
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "signal": {
+          "description": "A POSIX signal number, for example 19 (SIGCONT) or 9 (SIGKILL).",
+          "format": "int32",
+          "type": "integer"
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "pid",
+        "signal"
+      ],
+      "type": "object"
+    },
+    "ProcessSignalResult": {
+      "description": "Result of `process.signal`.",
+      "type": "object"
     },
     "ProgressKind": {
       "description": "`begin`, `report` or `end`.",
@@ -4382,6 +5939,46 @@
         "mutations",
         "profiles",
         "warnings"
+      ],
+      "type": "object"
+    },
+    "Readiness": {
+      "description": "What a device needs before Russet can use it.",
+      "properties": {
+        "ddi": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DdiStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "developerMode": {
+          "$ref": "#/$defs/Tristate"
+        },
+        "locked": {
+          "$ref": "#/$defs/Tristate"
+        },
+        "paired": {
+          "type": "boolean"
+        },
+        "tunnel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TunnelStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "paired",
+        "developerMode",
+        "locked"
       ],
       "type": "object"
     },
@@ -5735,6 +7332,62 @@
       ],
       "type": "string"
     },
+    "Tristate": {
+      "description": "`yes`, `no` or `unknown`.",
+      "enum": [
+        "yes",
+        "no",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "TunnelState": {
+      "description": "Tunnel states.",
+      "enum": [
+        "down",
+        "up",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "TunnelStatus": {
+      "description": "The userspace tunnel to the device.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only when `state` is `failed`."
+        },
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "since": {
+          "description": "RFC 3339 UTC.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/TunnelState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
     "UiConfirmParams": {
       "description": "Params of `ui.confirm` (served by `cli` with a TTY or `--yes`, and `ide`).",
       "properties": {
@@ -6274,11 +7927,11 @@
       "longRunning": true,
       "namespace": "app",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppInstallParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppInstallResult"
       }
     },
     "app.launch": {
@@ -6287,11 +7940,11 @@
       "longRunning": false,
       "namespace": "app",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppLaunchParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppLaunchResult"
       }
     },
     "app.list": {
@@ -6300,11 +7953,11 @@
       "longRunning": false,
       "namespace": "app",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppListResult"
       }
     },
     "app.terminate": {
@@ -6313,11 +7966,11 @@
       "longRunning": false,
       "namespace": "app",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppTerminateParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppTerminateResult"
       }
     },
     "app.uninstall": {
@@ -6326,11 +7979,11 @@
       "longRunning": false,
       "namespace": "app",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppUninstallParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppUninstallResult"
       }
     },
     "approval.deny": {
@@ -6846,11 +8499,11 @@
       "longRunning": false,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceAliasSetParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceAliasSetResult"
       }
     },
     "device.ddi.list": {
@@ -6872,11 +8525,11 @@
       "longRunning": true,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceDdiMountParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DdiStatus"
       }
     },
     "device.ddi.status": {
@@ -6885,11 +8538,11 @@
       "longRunning": false,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceDdiStatusParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DdiStatus"
       }
     },
     "device.developerMode.reveal": {
@@ -6911,11 +8564,11 @@
       "longRunning": false,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceInfoParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceInfoResult"
       }
     },
     "device.list": {
@@ -6924,11 +8577,11 @@
       "longRunning": false,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceListResult"
       }
     },
     "device.pair": {
@@ -6937,11 +8590,11 @@
       "longRunning": true,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DevicePairParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DevicePairResult"
       }
     },
     "device.prepare": {
@@ -6950,11 +8603,11 @@
       "longRunning": true,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DevicePrepareParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/Readiness"
       }
     },
     "device.readiness": {
@@ -6963,11 +8616,11 @@
       "longRunning": false,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceReadinessParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/Readiness"
       }
     },
     "device.reserve": {
@@ -6976,11 +8629,11 @@
       "longRunning": false,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceReserveParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceReserveResult"
       }
     },
     "device.unpair": {
@@ -7002,11 +8655,11 @@
       "longRunning": false,
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceWatchParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceWatchResult"
       }
     },
     "device.wifi.enable": {
@@ -7184,11 +8837,11 @@
       "longRunning": false,
       "namespace": "forward",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ForwardCloseParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ForwardCloseResult"
       }
     },
     "forward.list": {
@@ -7197,11 +8850,11 @@
       "longRunning": false,
       "namespace": "forward",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ForwardListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ForwardListResult"
       }
     },
     "forward.open": {
@@ -7210,11 +8863,11 @@
       "longRunning": false,
       "namespace": "forward",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ForwardOpenParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ForwardOpenResult"
       }
     },
     "ib.compile": {
@@ -7496,11 +9149,11 @@
       "longRunning": false,
       "namespace": "logs",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/LogsSubscribeParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/LogsSubscribeResult"
       }
     },
     "logs.tail": {
@@ -7509,11 +9162,11 @@
       "longRunning": false,
       "namespace": "logs",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/LogsTailParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/LogsTailResult"
       }
     },
     "mcp.http.set": {
@@ -7704,11 +9357,11 @@
       "longRunning": false,
       "namespace": "process",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProcessListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProcessListResult"
       }
     },
     "process.signal": {
@@ -7717,11 +9370,11 @@
       "longRunning": false,
       "namespace": "process",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProcessSignalParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProcessSignalResult"
       }
     },
     "project.detect": {
@@ -8658,13 +10311,13 @@
     "app.exited": {
       "namespace": "app",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppExitedParams"
       }
     },
     "app.output": {
       "namespace": "app",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AppOutputParams"
       }
     },
     "approval.requested": {
@@ -8700,7 +10353,7 @@
     "device.changed": {
       "namespace": "device",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DeviceChangedParams"
       }
     },
     "job.events": {
@@ -8718,7 +10371,7 @@
     "logs.entries": {
       "namespace": "logs",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/LogsEntriesParams"
       }
     },
     "mcp.toolCall": {

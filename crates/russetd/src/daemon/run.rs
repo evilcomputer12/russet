@@ -131,7 +131,7 @@ pub(crate) fn build(
     } else {
         LiveState::NotLive
     };
-    let devices = DeviceSlot::new(backend.clone(), live, dirs.state.join("devices"));
+    let devices = DeviceSlot::new(backend.clone(), live, dirs.clone());
     let services = Services::wire(&dirs, &devices, factories);
     let audit = AuditLog::new(dirs.audit_log());
     let pinned = Pinned { idle_timeout: opts.idle_timeout_pinned, log_filter: opts.log.filter.is_some() };

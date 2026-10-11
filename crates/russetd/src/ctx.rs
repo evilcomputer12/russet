@@ -379,7 +379,7 @@ pub enum LiveStatus {
 struct DeviceSlotInner {
     backend: DeviceBackend,
     live: std::sync::Mutex<Option<LiveState>>,
-    state_dir: std::path::PathBuf,
+    dirs: RussetDirs,
     manager: OnceCell<Arc<russet_device::DeviceManager>>,
 }
 
@@ -404,13 +404,14 @@ impl fmt::Debug for DeviceSlot {
 impl russet_debug::DeviceServices for DeviceSlot {}
 
 impl DeviceSlot {
-    /// A slot for `backend` with the given live-device lock state; device state goes under `state_dir`.
-    pub fn new(backend: DeviceBackend, live: LiveState, state_dir: std::path::PathBuf) -> Self {
+    /// A slot for `backend` with the given live-device lock state; the device plane reads its configuration and
+    /// keeps its state under `dirs`.
+    pub fn new(backend: DeviceBackend, live: LiveState, dirs: RussetDirs) -> Self {
         Self {
             inner: Arc::new(DeviceSlotInner {
                 backend,
                 live: std::sync::Mutex::new(Some(live)),
-                state_dir,
+                dirs,
                 manager: OnceCell::new(),
             }),
         }
@@ -475,7 +476,7 @@ impl DeviceSlot {
         self.inner
             .manager
             .get_or_try_init(|| async move {
-                let cfg = russet_device::DeviceConfig { state_dir: inner.state_dir.clone() };
+                let cfg = russet_device::DeviceConfig::load(&inner.dirs)?;
                 match &inner.backend {
                     DeviceBackend::Live => {
                         let connector = russet_device::io::LiveConnector::new(&cfg)?;
@@ -529,7 +530,8 @@ mod tests {
     #[test]
     fn wired_slots_use_provided_factories_and_do_not_keep_each_other_alive() {
         let dirs = RussetDirs::under(std::path::Path::new("/nonexistent/russet-wire-test"));
-        let devices = DeviceSlot::new(DeviceBackend::None, LiveState::NotLive, "/nope".into());
+        let devices =
+            DeviceSlot::new(DeviceBackend::None, LiveState::NotLive, RussetDirs::under(std::path::Path::new("/nope")));
         let mut r = Router::<DaemonCtx>::new();
         provide::<russet_toolchain::Toolchains>(&mut r, |env| {
             // A factory reaches the other slots through its env (the config under a missing home still loads).
@@ -548,20 +550,24 @@ mod tests {
 
     #[tokio::test]
     async fn refused_slots_answer_3019_without_a_connector() {
-        let slot =
-            DeviceSlot::new(DeviceBackend::Live, LiveState::Refused(LiveRefusal::DevelopmentBuild), "/nope".into());
+        let slot = DeviceSlot::new(
+            DeviceBackend::Live,
+            LiveState::Refused(LiveRefusal::DevelopmentBuild),
+            RussetDirs::under(std::path::Path::new("/nope")),
+        );
         let e = slot.manager().await.expect_err("refused");
         assert_eq!(e.code(), codes::device::LIVE_BACKEND_REFUSED);
         let holder = LockHolder { pid: 7, home: "/w/h".into() };
         let slot = DeviceSlot::new(
             DeviceBackend::Live,
             LiveState::Refused(LiveRefusal::HeldElsewhere(Some(holder))),
-            "/nope".into(),
+            RussetDirs::under(std::path::Path::new("/nope")),
         );
         let e = slot.manager().await.expect_err("held elsewhere");
         assert_eq!(e.details().and_then(|d| d.get("holder")), Some(&json!({"pid": 7, "home": "/w/h"})));
         assert_eq!(russet_device::io::live_connectors_constructed(), 0);
-        let none = DeviceSlot::new(DeviceBackend::None, LiveState::NotLive, "/nope".into());
+        let none =
+            DeviceSlot::new(DeviceBackend::None, LiveState::NotLive, RussetDirs::under(std::path::Path::new("/nope")));
         assert_eq!(none.manager().await.expect_err("no plane").code(), codes::device::USBMUX_UNAVAILABLE);
     }
 }

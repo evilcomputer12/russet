@@ -141,6 +141,16 @@ impl DaemonLink {
         self.get().await?.call_raw(method, params, opts).await.map_err(|e: RpcError| e.to_error())
     }
 
+    /// Waits until the daemon connection closes or the user interrupts (Ctrl-C); returns at once when not
+    /// connected. Commands whose effect lives as long as their connection (forwards, reservations) end with it.
+    pub async fn closed(&self) {
+        let Some((peer, _)) = self.connection.get() else { return };
+        tokio::select! {
+            () = peer.closed() => {}
+            _ = tokio::signal::ctrl_c() => {}
+        }
+    }
+
     /// Stops an in-process daemon (the CLI exits).
     pub async fn finish(&self) {
         if let Some(d) = self.in_process.lock().await.take() {

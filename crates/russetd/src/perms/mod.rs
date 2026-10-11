@@ -604,7 +604,11 @@ mod tests {
             Self {
                 engine: PermissionEngine::default(),
                 approvals: ApprovalService::new(Connections::default(), AuditLog::disabled()),
-                devices: DeviceSlot::new(DeviceBackend::None, LiveState::NotLive, "/nope".into()),
+                devices: DeviceSlot::new(
+                    DeviceBackend::None,
+                    LiveState::NotLive,
+                    russet_core::dirs::RussetDirs::under(std::path::Path::new("/nope")),
+                ),
             }
         }
 
@@ -758,7 +762,7 @@ mod tests {
             devices: DeviceSlot::new(
                 DeviceBackend::Live,
                 LiveState::Refused(LiveRefusal::DevelopmentBuild),
-                "/nope".into(),
+                russet_core::dirs::RussetDirs::under(std::path::Path::new("/nope")),
             ),
             ..World::new()
         };
