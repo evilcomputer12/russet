@@ -31,17 +31,19 @@ use super::run::{
     AppSigner, BuildSpec, BuiltProduct, LldbResolver, Pipeline, ProjectBuilder, Provisioned, Provisioning, SignedApp,
 };
 use crate::DaemonCtx;
+use crate::ctx::Service;
 
-/// The pipeline over the daemon's services.
-pub fn pipeline_for(cx: &DaemonCtx) -> Pipeline {
-    Pipeline {
+/// The pipeline over the daemon's services. The account and toolchain services start on first use; the debug
+/// service is needed by every pipeline call, so its construction error is this function's.
+pub fn pipeline_for(cx: &DaemonCtx) -> Result<Pipeline> {
+    Ok(Pipeline {
         builder: Arc::new(LiveBuilder),
         provisioning: Arc::new(LiveProvisioning),
-        signer: Arc::new(LiveSigner { accounts: Arc::clone(&cx.accounts) }),
-        lldb: Arc::new(LiveLldb { toolchains: Arc::clone(&cx.toolchains) }),
-        debug: Arc::clone(&cx.debug),
+        signer: Arc::new(LiveSigner { accounts: cx.accounts.clone() }),
+        lldb: Arc::new(LiveLldb { toolchains: cx.toolchains.clone() }),
+        debug: cx.debug.get()?,
         ledger: Arc::new(InstallLedger::new(&cx.dirs.state)),
-    }
+    })
 }
 
 /// The build step over W5's build plane.
@@ -80,13 +82,13 @@ impl Provisioning for LiveProvisioning {
 
 /// The signing step: copy, then `russet_sign::sign` with the team's identity.
 pub struct LiveSigner {
-    pub accounts: Arc<russet_account::AccountService>,
+    pub accounts: Service<russet_account::AccountService>,
 }
 
 #[async_trait]
 impl AppSigner for LiveSigner {
     async fn sign(&self, product: &BuiltProduct, provisioned: &Provisioned, dest: &Path) -> Result<SignedApp> {
-        let accounts = Arc::clone(&self.accounts);
+        let accounts = self.accounts.get()?;
         let team = provisioned.team_id.clone();
         let identities =
             f0_guard("the identity store (W6)", async move { accounts.identities().list(team.as_deref()) }).await?;
@@ -94,7 +96,7 @@ impl AppSigner for LiveSigner {
             Error::new(codes::sign::NO_IDENTITY, "no signing identity for this team")
                 .with_hint("Import one with `russet account import --from-xtool --yes`.")
         })?;
-        let accounts = Arc::clone(&self.accounts);
+        let accounts = self.accounts.get()?;
         let id = identity.id.clone();
         let loaded = f0_guard("the identity store (W6)", async move { accounts.identities().load(&id) }).await?;
         let src = product.app.clone();
@@ -124,13 +126,13 @@ impl AppSigner for LiveSigner {
 
 /// LLDB from the toolchain resolver.
 pub struct LiveLldb {
-    pub toolchains: Arc<Toolchains>,
+    pub toolchains: Service<Toolchains>,
 }
 
 #[async_trait]
 impl LldbResolver for LiveLldb {
     async fn lldb(&self, _flavor: DebuggerFlavor) -> Result<ToolInfo> {
-        let t = Arc::clone(&self.toolchains);
+        let t = self.toolchains.get()?;
         f0_guard(
             "the toolchain resolver (W3)",
             async move { t.resolve(Component::Lldb, &Requirement::default()).await },
@@ -138,7 +140,7 @@ impl LldbResolver for LiveLldb {
         .await
     }
     async fn lldb_dap(&self, _flavor: DebuggerFlavor) -> Result<ToolInfo> {
-        let t = Arc::clone(&self.toolchains);
+        let t = self.toolchains.get()?;
         f0_guard(
             "the toolchain resolver (W3)",
             async move { t.resolve(Component::LldbDap, &Requirement::default()).await },

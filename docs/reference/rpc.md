@@ -500,11 +500,11 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `run.start` | device | L | plain | `Unspecified` | `Unspecified` |
-| `run.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `run.subscribe` | read |  | plain | `Unspecified` | `Unspecified` |
-| `run.output.query` | read |  | plain | `Unspecified` | `Unspecified` |
-| `run.stop` | device |  | plain | `Unspecified` | `Unspecified` |
+| `run.start` | device | L | plain | `RunStartParams` | `RunStartResult` |
+| `run.list` | read |  | plain | `RunListParams` | `RunListResult` |
+| `run.subscribe` | read |  | plain | `RunSubscribeParams` | `RunSubscribeResult` |
+| `run.output.query` | read |  | plain | `RunOutputQueryParams` | `RunOutputQueryResult` |
+| `run.stop` | device |  | plain | `RunStopParams` | `RunStopResult` |
 | `run.relaunch` | device | L | plain | `Unspecified` | `Unspecified` |
 | `run.hotReload` | device |  | plain | `Unspecified` | `Unspecified` |
 
@@ -512,9 +512,9 @@ Notifications:
 
 | Notification | Params |
 |---|---|
-| `run.state` | `Unspecified` |
-| `run.output` | `Unspecified` |
-| `run.exited` | `Unspecified` |
+| `run.state` | `RunStateParams` |
+| `run.output` | `RunOutputParams` |
+| `run.exited` | `RunExitedParams` |
 | `run.jit` | `Unspecified` |
 
 ## `debug` (module `debug`)
@@ -523,7 +523,7 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `debug.prepare` | device | L | plain | `Unspecified` | `Unspecified` |
+| `debug.prepare` | device | L | plain | `DebugPrepareParams` | `DebugPrepareResult` |
 | `debug.attach` | device | L | plain | `Unspecified` | `Unspecified` |
 | `debug.control` | device |  | plain | `Unspecified` | `Unspecified` |
 | `debug.inspect` | read |  | plain | `Unspecified` | `Unspecified` |

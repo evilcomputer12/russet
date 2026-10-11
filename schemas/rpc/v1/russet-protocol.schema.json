@@ -884,6 +884,14 @@
       ],
       "type": "string"
     },
+    "AttachMode": {
+      "description": "How LLDB reaches the app (ARCHITECTURE §10.3).",
+      "enum": [
+        "broker",
+        "legacy-async"
+      ],
+      "type": "string"
+    },
     "AuditEntry": {
       "description": "One line of `state/audit.jsonl` (ARCHITECTURE §6.5).",
       "properties": {
@@ -1046,6 +1054,48 @@
         "jobId"
       ],
       "type": "object"
+    },
+    "BrokerInfo": {
+      "description": "The broker endpoint (ARCHITECTURE §10.3).",
+      "properties": {
+        "lldbUrl": {
+          "description": "What `process connect` takes: `unix-connect:///…/gdb.sock` or `connect://127.0.0.1:<port>`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The socket path (`unix`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "The loopback port (`tcp`).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "transport": {
+          "$ref": "#/$defs/BrokerTransport"
+        }
+      },
+      "required": [
+        "transport",
+        "lldbUrl"
+      ],
+      "type": "object"
+    },
+    "BrokerTransport": {
+      "description": "How LLDB reaches the broker.",
+      "enum": [
+        "unix",
+        "tcp"
+      ],
+      "type": "string"
     },
     "BuildBackend": {
       "description": "The SwiftPM build backend (`[build] backend`).",
@@ -2343,6 +2393,30 @@
       ],
       "type": "object"
     },
+    "DapInfo": {
+      "description": "The per-session DAP hub endpoint (ARCHITECTURE §10.2; W11).",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "transport": {
+          "$ref": "#/$defs/DapTransport"
+        }
+      },
+      "required": [
+        "transport",
+        "path"
+      ],
+      "type": "object"
+    },
+    "DapTransport": {
+      "description": "How the DAP hub is reached.",
+      "enum": [
+        "unix",
+        "pipe"
+      ],
+      "type": "string"
+    },
     "DdiKind": {
       "description": "The DDI form.",
       "enum": [
@@ -2468,6 +2542,426 @@
         "source"
       ],
       "type": "object"
+    },
+    "DebugFrontend": {
+      "description": "Which debugger front end will connect (`debug.prepare {frontend}`).",
+      "oneOf": [
+        {
+          "const": "dap",
+          "description": "The IDE through the DAP hub (W11).",
+          "type": "string"
+        },
+        {
+          "const": "lldb-cli",
+          "description": "`russet debug`: `lldb -s attach.lldb`.",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Nothing yet: `russet debug prepare` prints the plan.",
+          "type": "string"
+        }
+      ]
+    },
+    "DebugPrepareParams": {
+      "description": "Params of `debug.prepare`: the `run.start` params plus the debugger options.",
+      "properties": {
+        "args": {
+          "description": "Arguments for the app.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "attachMode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`broker` (default) or the M1 fallback `legacy-async` (ARCHITECTURE §10.3)."
+        },
+        "background": {
+          "description": "The RPC flag of every long-running method (§7.6): return `{jobId}` at once; the job survives the\nrequester. Read by the job layer; it says nothing about the session's lifetime (`sessionLease`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "build": {
+          "description": "Build first (default `true`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "configuration": {
+          "description": "`debug`, `release`, `profile` or a named profile.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment for the app; Russet adds `NSUnbufferedIO=YES` and `OS_ACTIVITY_DT_MODE=YES` unless set here.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "flavor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DebuggerFlavor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frontend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DebugFrontend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "install": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JitPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "launch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LaunchMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project": {
+          "description": "The absolute project root.",
+          "type": "string"
+        },
+        "sessionLease": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionLease"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`owned` (default) ends with the requesting connection plus 2 s; `detached` survives it (§6.3)."
+        },
+        "stopOnEntry": {
+          "description": "Stay stopped after the attach (no `process continue`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "symbols": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymbolTier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "description": "Product, scheme or target.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "description": "UDID or alias; may be omitted when exactly one device is ready.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "DebugPrepareResult": {
+      "description": "Result of `debug.prepare` (`PreparedDebug`): the app is launched suspended and the broker holds the attach.",
+      "properties": {
+        "attachCommands": {
+          "description": "The Python-free attach sequence (RD §9.1); `legacy-async` adds the M1 sequence's `script` lines.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "attachMode": {
+          "$ref": "#/$defs/AttachMode"
+        },
+        "attachScript": {
+          "description": "The `attach.lldb` the daemon wrote: init plus attach commands.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "broker": {
+          "$ref": "#/$defs/BrokerInfo"
+        },
+        "bundleId": {
+          "description": "The bundle ID on the device.",
+          "type": "string"
+        },
+        "dap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DapInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dapConfig": {
+          "description": "The `lldb-dap` attach configuration (RD §9.2)."
+        },
+        "initCommands": {
+          "description": "LLDB settings (RD §8.4), before the attach commands.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lldb": {
+          "$ref": "#/$defs/DebugToolInfo"
+        },
+        "lldbDap": {
+          "$ref": "#/$defs/DebugToolInfo"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "required": [
+        "sessionId",
+        "pid",
+        "bundleId",
+        "lldb",
+        "lldbDap",
+        "broker",
+        "initCommands",
+        "attachCommands",
+        "dapConfig",
+        "attachMode"
+      ],
+      "type": "object"
+    },
+    "DebugToolComponent": {
+      "description": "A toolchain component, with the wire values of `toolchain.*`'s `ToolInfo.component` (ARCHITECTURE §8.1, W3).",
+      "enum": [
+        "swift",
+        "darwin-sdk",
+        "linker",
+        "lldb",
+        "lldb-dap",
+        "libpython",
+        "xtool",
+        "flutter",
+        "gen-snapshot-ios",
+        "llvm"
+      ],
+      "type": "string"
+    },
+    "DebugToolInfo": {
+      "description": "A resolved LLDB tool as `debug.prepare` reports it: the wire shape of `toolchain.resolve`'s `ToolInfo`\n(ARCHITECTURE §8.1), field for field, so `PreparedDebug.lldb` can switch to W3's type once it is on `main`.\n`env` is part of the contract: every launcher applies it (§16.2).",
+      "properties": {
+        "component": {
+          "$ref": "#/$defs/DebugToolComponent",
+          "description": "`lldb` or `lldb-dap`."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "problems": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/DebugToolProvenance"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "component",
+        "version",
+        "path",
+        "provenance",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "DebugToolProvenance": {
+      "description": "Where a resolved tool came from, in the wire shape of `toolchain.*`'s `ToolInfo.provenance` (W3): an object\ntagged by `kind`.",
+      "oneOf": [
+        {
+          "description": "Installed by Russet; `pin` is `<component>@<version>`.",
+          "properties": {
+            "kind": {
+              "const": "managed",
+              "type": "string"
+            },
+            "pin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "pin"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Found on the system (`PATH`, `ldconfig`).",
+          "properties": {
+            "kind": {
+              "const": "system",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An existing uv-managed python-build-standalone.",
+          "properties": {
+            "kind": {
+              "const": "uv",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Inside an xtool SDK bundle, read in place.",
+          "properties": {
+            "bundle": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "xtool-bundle",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "bundle"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Installed by the user elsewhere.",
+          "properties": {
+            "kind": {
+              "const": "user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Named by the project (`[debug] lldb = \"<path>\"`).",
+          "properties": {
+            "kind": {
+              "const": "project-pin",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DebuggerFlavor": {
+      "description": "The LLDB flavor (ARCHITECTURE §16.1).",
+      "enum": [
+        "swift",
+        "llvm"
+      ],
+      "type": "string"
+    },
+    "DebuggerState": {
+      "description": "Whether a debugger is attached to the session's process.",
+      "enum": [
+        "none",
+        "attached",
+        "detached"
+      ],
+      "type": "string"
     },
     "DeviceAliasSetParams": {
       "description": "Params of `device.alias.set`: `{udid, alias} → {} (global config)`.",
@@ -3610,6 +4104,33 @@
       ],
       "type": "object"
     },
+    "InstallMode": {
+      "description": "When the pipeline installs (`[run] install`).",
+      "oneOf": [
+        {
+          "enum": [
+            "always",
+            "never"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "if-changed",
+          "description": "Only when the signed app differs from the install ledger's record (ARCHITECTURE §14.8).",
+          "type": "string"
+        }
+      ]
+    },
+    "JitPolicy": {
+      "description": "The JIT servicer policy (Flutter, W18).",
+      "enum": [
+        "auto",
+        "native",
+        "lldb-python",
+        "off"
+      ],
+      "type": "string"
+    },
     "JobCancelParams": {
       "description": "Params of `job.cancel`.",
       "properties": {
@@ -4351,6 +4872,28 @@
       ],
       "type": "object"
     },
+    "LaunchMode": {
+      "description": "How the pipeline launches (`[run] launch`).",
+      "oneOf": [
+        {
+          "enum": [
+            "coredevice",
+            "dvt"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "CoreDevice, falling back to DVT.",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Build, sign and install only.",
+          "type": "string"
+        }
+      ]
+    },
     "LeaseId": {
       "pattern": "^lse_[0-9A-HJKMNP-TV-Z]{26}$",
       "type": "string"
@@ -5005,6 +5548,51 @@
         "delete-profile"
       ],
       "type": "string"
+    },
+    "OutputFilter": {
+      "description": "Which output entries `run.output.query` returns.",
+      "properties": {
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "contains": {
+          "description": "A plain substring of the message.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "minLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "description": "Only these sources (all when omitted).",
+          "items": {
+            "$ref": "#/$defs/LogSource"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "subsystem": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "PackageKind": {
       "description": "What to package after the build.",
@@ -6014,6 +6602,408 @@
       ],
       "type": "object"
     },
+    "RunExitedParams": {
+      "description": "Params of the `run.exited` notification.",
+      "properties": {
+        "code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "crashId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the session failed (state `failed` or `lost`), when Russet knows (an addition to the catalog's fields)."
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "signal": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The final state: `exited`, `crashed`, `lost` or `failed` (an addition to the catalog's fields)."
+        },
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "RunListParams": {
+      "description": "Params of `run.list`.",
+      "type": "object"
+    },
+    "RunListResult": {
+      "description": "Result of `run.list`: every session kind, detached ones included.",
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions"
+      ],
+      "type": "object"
+    },
+    "RunOutputParams": {
+      "description": "Params of the `run.output` notification.",
+      "properties": {
+        "dropped": {
+          "description": "Entries this subscriber lost because it was slow.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/LogEntry"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "sessionId",
+        "entries"
+      ],
+      "type": "object"
+    },
+    "RunOutputQueryParams": {
+      "description": "Params of `run.output.query`.",
+      "properties": {
+        "afterSeq": {
+          "description": "Only entries numbered after this one: the previous result's `nextSeq` (entries are numbered in the order\nthey arrive; followers page by number, as `job.log` does, because os_trace timestamps come from the device).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "filter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputFilter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "description": "At most this many entries, the newest ones.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "sinceMs": {
+          "description": "Only entries at or after this time: Unix epoch milliseconds (compare `LogEntry.ts`).",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "RunOutputQueryResult": {
+      "description": "Result of `run.output.query`: stdout and os_trace merged, oldest first.",
+      "properties": {
+        "dropped": {
+          "description": "How many entries the session's 10,000-entry buffer has dropped so far.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/LogEntry"
+          },
+          "type": "array"
+        },
+        "nextSeq": {
+          "default": 0,
+          "description": "The number of the newest entry the session holds (0 before the first): pass it as `afterSeq` to continue.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entries",
+        "dropped"
+      ],
+      "type": "object"
+    },
+    "RunStartParams": {
+      "description": "Params of `run.start`: build → provision → sign → install-if-changed → launch (ARCHITECTURE §17.1).",
+      "properties": {
+        "args": {
+          "description": "Arguments for the app.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "background": {
+          "description": "The RPC flag of every long-running method (§7.6): return `{jobId}` at once; the job survives the\nrequester. Read by the job layer; it says nothing about the session's lifetime (`sessionLease`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "build": {
+          "description": "Build first (default `true`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "configuration": {
+          "description": "`debug`, `release`, `profile` or a named profile.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment for the app; Russet adds `NSUnbufferedIO=YES` and `OS_ACTIVITY_DT_MODE=YES` unless set here.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "install": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "launch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LaunchMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project": {
+          "description": "The absolute project root.",
+          "type": "string"
+        },
+        "sessionLease": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionLease"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`owned` (default) ends with the requesting connection plus 2 s; `detached` survives it (§6.3)."
+        },
+        "target": {
+          "description": "Product, scheme or target.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "description": "UDID or alias; may be omitted when exactly one device is ready.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "RunStartResult": {
+      "description": "Result of `run.start`. `sessionId` and `pid` are absent with `launch: none`.",
+      "properties": {
+        "bundleId": {
+          "description": "The bundle ID on the device (after the bundle-ID policy).",
+          "type": "string"
+        },
+        "installed": {
+          "description": "Whether this run installed the app (`false` when the ledger said it was unchanged).",
+          "type": "boolean"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "bundleId",
+        "installed"
+      ],
+      "type": "object"
+    },
+    "RunStateParams": {
+      "description": "Params of the `run.state` notification.",
+      "properties": {
+        "detail": {
+          "description": "A human-readable note, for example `debugger detached`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "sessionId",
+        "state"
+      ],
+      "type": "object"
+    },
+    "RunStopParams": {
+      "description": "Params of `run.stop`.",
+      "properties": {
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "RunStopResult": {
+      "description": "Result of `run.stop`.",
+      "type": "object"
+    },
+    "RunSubscribeParams": {
+      "description": "Params of `run.subscribe`: one session, or every session when omitted.",
+      "properties": {
+        "sessionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RunSubscribeResult": {
+      "description": "Result of `run.subscribe`; then `run.state`, `run.output`, `run.exited` (and `run.jit`, W18).",
+      "properties": {
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId"
+      ],
+      "type": "object"
+    },
     "SdkInfo": {
       "description": "A Darwin SDK known to the registry (Russet imports and xtool bundles).",
       "properties": {
@@ -6385,6 +7375,215 @@
         "platform",
         "arch",
         "deviceBackend"
+      ],
+      "type": "object"
+    },
+    "SessionError": {
+      "description": "Why a session failed, when Russet knows: the error of ARCHITECTURE §13.1 in the shape the CLI's `--json`\nprints, for example `debug.handoffTimeout` when no debugger took over the broker in time.",
+      "properties": {
+        "code": {
+          "description": "The Russet number, for example `6007`.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "russetCode": {
+          "description": "The stable name, for example `debug.handoffTimeout`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "russetCode",
+        "message"
+      ],
+      "type": "object"
+    },
+    "SessionExit": {
+      "description": "How a session ended.",
+      "properties": {
+        "code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "crashId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signal": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SessionId": {
+      "pattern": "^ses_[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "SessionKind": {
+      "description": "Session kinds.",
+      "enum": [
+        "run",
+        "debug",
+        "flutter"
+      ],
+      "type": "string"
+    },
+    "SessionLease": {
+      "description": "Whether a session outlives its creator (ARCHITECTURE §6.3).",
+      "enum": [
+        "owned",
+        "detached"
+      ],
+      "type": "string"
+    },
+    "SessionState": {
+      "description": "Session states (RD §17.2's Rust enum converts to it). Whether a debugger is attached is\n[`SessionSummary::debugger`], not a state.",
+      "oneOf": [
+        {
+          "enum": [
+            "preparing",
+            "building",
+            "installing",
+            "launching",
+            "attaching",
+            "exited",
+            "crashed"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "arming",
+          "description": "Arming the JIT hook.",
+          "type": "string"
+        },
+        {
+          "const": "ready",
+          "description": "Launched suspended, waiting for a debugger.",
+          "type": "string"
+        },
+        {
+          "const": "running",
+          "description": "The app runs, with or without a debugger attached.",
+          "type": "string"
+        },
+        {
+          "const": "stopped",
+          "description": "Stopped in the debugger.",
+          "type": "string"
+        },
+        {
+          "const": "lost",
+          "description": "The device or the tunnel is gone.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "`run.exited` carries the details.",
+          "type": "string"
+        }
+      ]
+    },
+    "SessionSummary": {
+      "description": "One run, debug or Flutter session: `run.list`, `russet sessions --json` [D 84].",
+      "properties": {
+        "attachMode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Debug sessions only."
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "debugger": {
+          "$ref": "#/$defs/DebuggerState"
+        },
+        "endedAt": {
+          "description": "Only once the session has ended.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionExit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only once the session has ended."
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "lease": {
+          "$ref": "#/$defs/SessionLease"
+        },
+        "pid": {
+          "description": "Known once the app is launched.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "project": {
+          "description": "The absolute project root, when the session has one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "startedAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "udid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "kind",
+        "bundleId",
+        "udid",
+        "state",
+        "lease",
+        "debugger",
+        "startedAt"
       ],
       "type": "object"
     },
@@ -6981,6 +8180,21 @@
       ],
       "type": "string"
     },
+    "StopMode": {
+      "description": "How `run.stop` ends a session.",
+      "oneOf": [
+        {
+          "const": "kill",
+          "description": "Kill the app.",
+          "type": "string"
+        },
+        {
+          "const": "detach",
+          "description": "Leave the app running (a debugger detaches first); Russet stops tracking it.",
+          "type": "string"
+        }
+      ]
+    },
     "SubscriptionCancelParams": {
       "description": "Params of `subscription.cancel`.",
       "properties": {
@@ -6999,6 +8213,16 @@
     },
     "SubscriptionId": {
       "pattern": "^sub_[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "SymbolTier": {
+      "description": "Device-symbol tiers (W11).",
+      "enum": [
+        "auto",
+        "none",
+        "core",
+        "full"
+      ],
       "type": "string"
     },
     "TargetKind": {
@@ -8434,11 +9658,11 @@
       "longRunning": true,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugPrepareParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugPrepareResult"
       }
     },
     "debug.symbols.fetch": {
@@ -9487,11 +10711,11 @@
       "longRunning": false,
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunListResult"
       }
     },
     "run.output.query": {
@@ -9500,11 +10724,11 @@
       "longRunning": false,
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunOutputQueryParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunOutputQueryResult"
       }
     },
     "run.relaunch": {
@@ -9526,11 +10750,11 @@
       "longRunning": true,
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunStartParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunStartResult"
       }
     },
     "run.stop": {
@@ -9539,11 +10763,11 @@
       "longRunning": false,
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunStopParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunStopResult"
       }
     },
     "run.subscribe": {
@@ -9552,11 +10776,11 @@
       "longRunning": false,
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunSubscribeParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunSubscribeResult"
       }
     },
     "screen.elements": {
@@ -10389,7 +11613,7 @@
     "run.exited": {
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunExitedParams"
       }
     },
     "run.jit": {
@@ -10401,13 +11625,13 @@
     "run.output": {
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunOutputParams"
       }
     },
     "run.state": {
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunStateParams"
       }
     },
     "screen.mirror.ended": {

@@ -34,7 +34,7 @@ pub fn register(r: &mut Router<DaemonCtx>) {
 }
 
 async fn prepare(cx: DaemonCtx, rq: RequestCtx, params: p::DebugPrepareParams) -> Result<p::DebugPrepareResult> {
-    let pipeline = pipeline_for(&cx);
+    let pipeline = pipeline_for(&cx)?;
     let (result, session) = pipeline.prepare_debug(params, &TracingSink, &rq.cancel).await?;
     bind_owner(&cx, &rq, &session);
     Ok(result)

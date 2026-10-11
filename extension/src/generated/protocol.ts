@@ -338,6 +338,11 @@ export type ApprovalSubject = { "kind": "method", method: string, paramsDigest: 
 export type ArtifactKind = "app" | "ipa" | "dsym" | "archive" | "report";
 
 /**
+ * How LLDB reaches the app (ARCHITECTURE §10.3).
+ */
+export type AttachMode = "broker" | "legacy-async";
+
+/**
  * One line of `state/audit.jsonl` (ARCHITECTURE §6.5).
  */
 export type AuditEntry = { 
@@ -403,6 +408,28 @@ export type AuthToken = string;
  * What a long-running method returns with `background: true` [D 65].
  */
 export type BackgroundJob = { jobId: JobId, };
+
+/**
+ * The broker endpoint (ARCHITECTURE §10.3).
+ */
+export type BrokerInfo = { transport: BrokerTransport, 
+/**
+ * The socket path (`unix`).
+ */
+path?: string, 
+/**
+ * The loopback port (`tcp`).
+ */
+port?: number, 
+/**
+ * What `process connect` takes: `unix-connect:///…/gdb.sock` or `connect://127.0.0.1:<port>`.
+ */
+lldbUrl: string, };
+
+/**
+ * How LLDB reaches the broker.
+ */
+export type BrokerTransport = "unix" | "tcp";
 
 /**
  * The SwiftPM build backend (`[build] backend`).
@@ -916,6 +943,16 @@ shuttingDown: boolean,
 graceMs?: number, };
 
 /**
+ * The per-session DAP hub endpoint (ARCHITECTURE §10.2; W11).
+ */
+export type DapInfo = { transport: DapTransport, path: string, };
+
+/**
+ * How the DAP hub is reached.
+ */
+export type DapTransport = "unix" | "pipe";
+
+/**
  * The DDI form.
  */
 export type DdiKind = "legacy" | "personalized-dmg" | "cryptex1";
@@ -946,6 +983,118 @@ productBuild?: string,
  * The source of Russet's last mount record while the mounted image still matches it, else `unknown` [D 89].
  */
 source: DdiOrigin, };
+
+/**
+ * Which debugger front end will connect (`debug.prepare {frontend}`).
+ */
+export type DebugFrontend = "dap" | "lldb-cli" | "none";
+
+/**
+ * Params of `debug.prepare`: the `run.start` params plus the debugger options.
+ */
+export type DebugPrepareParams = { 
+/**
+ * Stay stopped after the attach (no `process continue`).
+ */
+stopOnEntry?: boolean, frontend?: DebugFrontend, jit?: JitPolicy, symbols?: SymbolTier, flavor?: DebuggerFlavor, 
+/**
+ * `broker` (default) or the M1 fallback `legacy-async` (ARCHITECTURE §10.3).
+ */
+attachMode?: AttachMode, 
+/**
+ * The absolute project root.
+ */
+project: string, 
+/**
+ * Product, scheme or target.
+ */
+target?: string, 
+/**
+ * `debug`, `release`, `profile` or a named profile.
+ */
+configuration?: string, 
+/**
+ * UDID or alias; may be omitted when exactly one device is ready.
+ */
+udid?: string, 
+/**
+ * Arguments for the app.
+ */
+args?: Array<string>, 
+/**
+ * Environment for the app; Russet adds `NSUnbufferedIO=YES` and `OS_ACTIVITY_DT_MODE=YES` unless set here.
+ */
+env?: { [key in string]: string }, 
+/**
+ * Build first (default `true`).
+ */
+build?: boolean, install?: InstallMode, launch?: LaunchMode, 
+/**
+ * `owned` (default) ends with the requesting connection plus 2 s; `detached` survives it (§6.3).
+ */
+sessionLease?: SessionLease, 
+/**
+ * The RPC flag of every long-running method (§7.6): return `{jobId}` at once; the job survives the
+ * requester. Read by the job layer; it says nothing about the session's lifetime (`sessionLease`).
+ */
+background?: boolean, };
+
+/**
+ * Result of `debug.prepare` (`PreparedDebug`): the app is launched suspended and the broker holds the attach.
+ */
+export type DebugPrepareResult = { sessionId: SessionId, pid: number, 
+/**
+ * The bundle ID on the device.
+ */
+bundleId: string, lldb: DebugToolInfo, lldbDap: DebugToolInfo, broker: BrokerInfo, 
+/**
+ * LLDB settings (RD §8.4), before the attach commands.
+ */
+initCommands: Array<string>, 
+/**
+ * The Python-free attach sequence (RD §9.1); `legacy-async` adds the M1 sequence's `script` lines.
+ */
+attachCommands: Array<string>, 
+/**
+ * The `lldb-dap` attach configuration (RD §9.2).
+ */
+dapConfig: Record<string, unknown>, dap?: DapInfo, 
+/**
+ * The `attach.lldb` the daemon wrote: init plus attach commands.
+ */
+attachScript?: string, attachMode: AttachMode, };
+
+/**
+ * A toolchain component, with the wire values of `toolchain.*`'s `ToolInfo.component` (ARCHITECTURE §8.1, W3).
+ */
+export type DebugToolComponent = "swift" | "darwin-sdk" | "linker" | "lldb" | "lldb-dap" | "libpython" | "xtool" | "flutter" | "gen-snapshot-ios" | "llvm";
+
+/**
+ * A resolved LLDB tool as `debug.prepare` reports it: the wire shape of `toolchain.resolve`'s `ToolInfo`
+ * (ARCHITECTURE §8.1), field for field, so `PreparedDebug.lldb` can switch to W3's type once it is on `main`.
+ * `env` is part of the contract: every launcher applies it (§16.2).
+ */
+export type DebugToolInfo = { 
+/**
+ * `lldb` or `lldb-dap`.
+ */
+component: DebugToolComponent, version: string, path: string, provenance: DebugToolProvenance, env: { [key in string]: string }, ok: boolean, problems: Array<string>, };
+
+/**
+ * Where a resolved tool came from, in the wire shape of `toolchain.*`'s `ToolInfo.provenance` (W3): an object
+ * tagged by `kind`.
+ */
+export type DebugToolProvenance = { "kind": "managed", pin: string, } | { "kind": "system" } | { "kind": "uv" } | { "kind": "xtool-bundle", bundle: string, } | { "kind": "user" } | { "kind": "project-pin" };
+
+/**
+ * The LLDB flavor (ARCHITECTURE §16.1).
+ */
+export type DebuggerFlavor = "swift" | "llvm";
+
+/**
+ * Whether a debugger is attached to the session's process.
+ */
+export type DebuggerState = "none" | "attached" | "detached";
 
 /**
  * Params of `device.alias.set`: `{udid, alias} → {} (global config)`.
@@ -1329,6 +1478,16 @@ export type InitializeResult = { protocol: ProtocolVersion, server: ServerInfo,
 connectionId: string, grant: Grant, capabilities: ServerCapabilities, endpoints: ServerEndpoints, };
 
 /**
+ * When the pipeline installs (`[run] install`).
+ */
+export type InstallMode = "if-changed" | "always" | "never";
+
+/**
+ * The JIT servicer policy (Flutter, W18).
+ */
+export type JitPolicy = "auto" | "native" | "lldb-python" | "off";
+
+/**
  * Params of `job.cancel`.
  */
 export type JobCancelParams = { jobId: JobId, };
@@ -1513,6 +1672,11 @@ timeoutMs?: number, };
 export type JobWaitResult = { job: JobInfo, result?: JsonValue, error?: ErrorData, };
 
 export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null;
+
+/**
+ * How the pipeline launches (`[run] launch`).
+ */
+export type LaunchMode = "auto" | "coredevice" | "dvt" | "none";
 
 /**
  * A lease (`lse_…`, ARCHITECTURE §6.3).
@@ -1726,6 +1890,19 @@ export type MessageLevel = "info" | "warning" | "error";
  * The kind of an account change.
  */
 export type MutationKind = "create-certificate" | "register-device" | "register-bundle-id" | "enable-capability" | "create-profile" | "delete-profile";
+
+/**
+ * Which output entries `run.output.query` returns.
+ */
+export type OutputFilter = { 
+/**
+ * Only these sources (all when omitted).
+ */
+sources?: Array<LogSource>, minLevel?: LogLevel, 
+/**
+ * A plain substring of the message.
+ */
+contains?: string, subsystem?: string, category?: string, };
 
 /**
  * What to package after the build.
@@ -2130,6 +2307,153 @@ export type RequestIdValue = number | string;
 export type RoleProbe = { certificates: ProbeOutcome, profiles: ProbeOutcome, builds: ProbeOutcome, };
 
 /**
+ * Params of the `run.exited` notification.
+ */
+export type RunExitedParams = { subscriptionId: SubscriptionId, sessionId: SessionId, 
+/**
+ * The final state: `exited`, `crashed`, `lost` or `failed` (an addition to the catalog's fields).
+ */
+state?: SessionState, code?: number, signal?: number, crashId?: string, 
+/**
+ * Why the session failed (state `failed` or `lost`), when Russet knows (an addition to the catalog's fields).
+ */
+error?: SessionError, };
+
+/**
+ * Params of `run.list`.
+ */
+export type RunListParams = Record<symbol, never>;
+
+/**
+ * Result of `run.list`: every session kind, detached ones included.
+ */
+export type RunListResult = { sessions: Array<SessionSummary>, };
+
+/**
+ * Params of the `run.output` notification.
+ */
+export type RunOutputParams = { subscriptionId: SubscriptionId, sessionId: SessionId, entries: Array<LogEntry>, 
+/**
+ * Entries this subscriber lost because it was slow.
+ */
+dropped?: number, };
+
+/**
+ * Params of `run.output.query`.
+ */
+export type RunOutputQueryParams = { sessionId: SessionId, 
+/**
+ * Only entries numbered after this one: the previous result's `nextSeq` (entries are numbered in the order
+ * they arrive; followers page by number, as `job.log` does, because os_trace timestamps come from the device).
+ */
+afterSeq?: number, 
+/**
+ * Only entries at or after this time: Unix epoch milliseconds (compare `LogEntry.ts`).
+ */
+sinceMs?: number, 
+/**
+ * At most this many entries, the newest ones.
+ */
+limit?: number, filter?: OutputFilter, };
+
+/**
+ * Result of `run.output.query`: stdout and os_trace merged, oldest first.
+ */
+export type RunOutputQueryResult = { entries: Array<LogEntry>, 
+/**
+ * How many entries the session's 10,000-entry buffer has dropped so far.
+ */
+dropped: number, 
+/**
+ * The number of the newest entry the session holds (0 before the first): pass it as `afterSeq` to continue.
+ */
+nextSeq: number, };
+
+/**
+ * Params of `run.start`: build → provision → sign → install-if-changed → launch (ARCHITECTURE §17.1).
+ */
+export type RunStartParams = { 
+/**
+ * The absolute project root.
+ */
+project: string, 
+/**
+ * Product, scheme or target.
+ */
+target?: string, 
+/**
+ * `debug`, `release`, `profile` or a named profile.
+ */
+configuration?: string, 
+/**
+ * UDID or alias; may be omitted when exactly one device is ready.
+ */
+udid?: string, 
+/**
+ * Arguments for the app.
+ */
+args?: Array<string>, 
+/**
+ * Environment for the app; Russet adds `NSUnbufferedIO=YES` and `OS_ACTIVITY_DT_MODE=YES` unless set here.
+ */
+env?: { [key in string]: string }, 
+/**
+ * Build first (default `true`).
+ */
+build?: boolean, install?: InstallMode, launch?: LaunchMode, 
+/**
+ * `owned` (default) ends with the requesting connection plus 2 s; `detached` survives it (§6.3).
+ */
+sessionLease?: SessionLease, 
+/**
+ * The RPC flag of every long-running method (§7.6): return `{jobId}` at once; the job survives the
+ * requester. Read by the job layer; it says nothing about the session's lifetime (`sessionLease`).
+ */
+background?: boolean, };
+
+/**
+ * Result of `run.start`. `sessionId` and `pid` are absent with `launch: none`.
+ */
+export type RunStartResult = { sessionId?: SessionId, pid?: number, 
+/**
+ * The bundle ID on the device (after the bundle-ID policy).
+ */
+bundleId: string, 
+/**
+ * Whether this run installed the app (`false` when the ledger said it was unchanged).
+ */
+installed: boolean, };
+
+/**
+ * Params of the `run.state` notification.
+ */
+export type RunStateParams = { subscriptionId: SubscriptionId, sessionId: SessionId, state: SessionState, 
+/**
+ * A human-readable note, for example `debugger detached`.
+ */
+detail?: string, };
+
+/**
+ * Params of `run.stop`.
+ */
+export type RunStopParams = { sessionId: SessionId, mode?: StopMode, };
+
+/**
+ * Result of `run.stop`.
+ */
+export type RunStopResult = Record<symbol, never>;
+
+/**
+ * Params of `run.subscribe`: one session, or every session when omitted.
+ */
+export type RunSubscribeParams = { sessionId?: SessionId, };
+
+/**
+ * Result of `run.subscribe`; then `run.state`, `run.output`, `run.exited` (and `run.jit`, W18).
+ */
+export type RunSubscribeResult = { subscriptionId: SubscriptionId, };
+
+/**
  * A Darwin SDK known to the registry (Russet imports and xtool bundles).
  */
 export type SdkInfo = { 
@@ -2282,6 +2606,75 @@ arch: string,
  * `live`, `scripted:<file>`, `replay:<trace>`, `mock:<addr>` or `none` (ARCHITECTURE §3.3, §14.9).
  */
 deviceBackend: string, };
+
+/**
+ * Why a session failed, when Russet knows: the error of ARCHITECTURE §13.1 in the shape the CLI's `--json`
+ * prints, for example `debug.handoffTimeout` when no debugger took over the broker in time.
+ */
+export type SessionError = { 
+/**
+ * The Russet number, for example `6007`.
+ */
+code: number, 
+/**
+ * The stable name, for example `debug.handoffTimeout`.
+ */
+russetCode: string, message: string, hint?: string, };
+
+/**
+ * How a session ended.
+ */
+export type SessionExit = { code?: number, signal?: number, crashId?: string, };
+
+/**
+ * A run, debug or Flutter session (`ses_…`).
+ */
+export type SessionId = string;
+
+/**
+ * Session kinds.
+ */
+export type SessionKind = "run" | "debug" | "flutter";
+
+/**
+ * Whether a session outlives its creator (ARCHITECTURE §6.3).
+ */
+export type SessionLease = "owned" | "detached";
+
+/**
+ * Session states (RD §17.2's Rust enum converts to it). Whether a debugger is attached is
+ * [`SessionSummary::debugger`], not a state.
+ */
+export type SessionState = "preparing" | "building" | "installing" | "launching" | "attaching" | "arming" | "ready" | "running" | "stopped" | "exited" | "crashed" | "lost" | "failed";
+
+/**
+ * One run, debug or Flutter session: `run.list`, `russet sessions --json` [D 84].
+ */
+export type SessionSummary = { sessionId: SessionId, kind: SessionKind, bundleId: string, udid: string, 
+/**
+ * Known once the app is launched.
+ */
+pid?: number, 
+/**
+ * The absolute project root, when the session has one.
+ */
+project?: string, state: SessionState, lease: SessionLease, debugger: DebuggerState, 
+/**
+ * Debug sessions only.
+ */
+attachMode?: AttachMode, 
+/**
+ * RFC 3339 UTC.
+ */
+startedAt: string, 
+/**
+ * Only once the session has ended.
+ */
+endedAt?: string, 
+/**
+ * Only once the session has ended.
+ */
+exit?: SessionExit, };
 
 /**
  * Diagnostic severities.
@@ -2526,6 +2919,11 @@ export type Stage = "resolve" | "prepare" | "compile" | "resources" | "assemble"
 export type StepState = "started" | "finished" | "failed";
 
 /**
+ * How `run.stop` ends a session.
+ */
+export type StopMode = "kill" | "detach";
+
+/**
  * Params of `subscription.cancel`.
  */
 export type SubscriptionCancelParams = { subscriptionId: SubscriptionId, };
@@ -2539,6 +2937,11 @@ export type SubscriptionCancelResult = Record<symbol, never>;
  * A subscription (`sub_…`, ARCHITECTURE §6.4).
  */
 export type SubscriptionId = string;
+
+/**
+ * Device-symbol tiers (W11).
+ */
+export type SymbolTier = "auto" | "none" | "core" | "full";
 
 /**
  * What a target builds.
@@ -2906,14 +3309,14 @@ export interface Methods {
   "ship.crashes.list": { params: Unspecified; result: Unspecified };
   "ship.crashes.get": { params: Unspecified; result: Unspecified };
   "ship.compare": { params: Unspecified; result: Unspecified };
-  "run.start": { params: Unspecified; result: Unspecified };
-  "run.list": { params: Unspecified; result: Unspecified };
-  "run.subscribe": { params: Unspecified; result: Unspecified };
-  "run.output.query": { params: Unspecified; result: Unspecified };
-  "run.stop": { params: Unspecified; result: Unspecified };
+  "run.start": { params: RunStartParams; result: RunStartResult };
+  "run.list": { params: RunListParams; result: RunListResult };
+  "run.subscribe": { params: RunSubscribeParams; result: RunSubscribeResult };
+  "run.output.query": { params: RunOutputQueryParams; result: RunOutputQueryResult };
+  "run.stop": { params: RunStopParams; result: RunStopResult };
   "run.relaunch": { params: Unspecified; result: Unspecified };
   "run.hotReload": { params: Unspecified; result: Unspecified };
-  "debug.prepare": { params: Unspecified; result: Unspecified };
+  "debug.prepare": { params: DebugPrepareParams; result: DebugPrepareResult };
   "debug.attach": { params: Unspecified; result: Unspecified };
   "debug.control": { params: Unspecified; result: Unspecified };
   "debug.inspect": { params: Unspecified; result: Unspecified };
@@ -2960,9 +3363,9 @@ export interface Notifications {
   "screen.mirror.ended": Unspecified;
   "perf.samples": Unspecified;
   "account.event": Unspecified;
-  "run.state": Unspecified;
-  "run.output": Unspecified;
-  "run.exited": Unspecified;
+  "run.state": RunStateParams;
+  "run.output": RunOutputParams;
+  "run.exited": RunExitedParams;
   "run.jit": Unspecified;
   "mcp.toolCall": Unspecified;
 }

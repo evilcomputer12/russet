@@ -33,11 +33,13 @@ pub fn register(r: &mut Router<DaemonCtx>) {
 /// An owned session ends 2 s after its requester's connection closes (ARCHITECTURE §6.3).
 pub fn bind_owner(cx: &DaemonCtx, rq: &RequestCtx, h: &SessionHandle) {
     let peer = rq.peer.clone();
-    h.end_with_owner(async move { peer.closed().await }, cx.debug.config().lease_grace);
+    let grace =
+        cx.debug.try_get().map_or_else(|| russet_debug::DebugConfig::default().lease_grace, |d| d.config().lease_grace);
+    h.end_with_owner(async move { peer.closed().await }, grace);
 }
 
 async fn start(cx: DaemonCtx, rq: RequestCtx, params: p::RunStartParams) -> Result<p::RunStartResult> {
-    let pipeline = pipeline_for(&cx);
+    let pipeline = pipeline_for(&cx)?;
     let (result, session) = pipeline.start(params, &TracingSink, &rq.cancel).await?;
     if let Some(h) = &session {
         bind_owner(&cx, &rq, h);
@@ -46,7 +48,7 @@ async fn start(cx: DaemonCtx, rq: RequestCtx, params: p::RunStartParams) -> Resu
 }
 
 async fn list(cx: DaemonCtx, _rq: RequestCtx, _params: p::RunListParams) -> Result<p::RunListResult> {
-    Ok(pipeline_for(&cx).list())
+    Ok(pipeline_for(&cx)?.list())
 }
 
 async fn output_query(
@@ -54,11 +56,11 @@ async fn output_query(
     _rq: RequestCtx,
     params: p::RunOutputQueryParams,
 ) -> Result<p::RunOutputQueryResult> {
-    pipeline_for(&cx).output_query(&params)
+    pipeline_for(&cx)?.output_query(&params)
 }
 
 async fn stop(cx: DaemonCtx, _rq: RequestCtx, params: p::RunStopParams) -> Result<p::RunStopResult> {
-    pipeline_for(&cx).stop(&params).await
+    pipeline_for(&cx)?.stop(&params).await
 }
 
 async fn subscribe(cx: DaemonCtx, rq: RequestCtx, params: p::RunSubscribeParams) -> Result<p::RunSubscribeResult> {
@@ -81,13 +83,14 @@ async fn subscribe(cx: DaemonCtx, rq: RequestCtx, params: p::RunSubscribeParams)
     };
     match &params.session_id {
         Some(id) => {
-            let h = cx.debug.session(id).ok_or_else(|| russet_debug::errors::session_not_found(id.as_str()))?;
+            let h = cx.debug.get()?.session(id).ok_or_else(|| russet_debug::errors::session_not_found(id.as_str()))?;
             tokio::spawn(forward_session(h, sub.clone(), send, closed()));
         }
         None => {
             // Every current session, then every new one, until the subscriber goes away.
-            let mut created = cx.debug.watch_new();
-            for h in cx.debug.handles().into_iter().filter(|h| !h.is_ended()) {
+            let debug = cx.debug.get()?;
+            let mut created = debug.watch_new();
+            for h in debug.handles().into_iter().filter(|h| !h.is_ended()) {
                 tokio::spawn(forward_session(h, sub.clone(), send.clone(), closed()));
             }
             let sub2 = sub.clone();
