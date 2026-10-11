@@ -93,7 +93,8 @@ pub struct Requires {
     pub project: bool,
 }
 
-/// Type-erased handles to daemon services, keyed by type.
+/// Type-erased handles to daemon services, keyed by type. Two sets are equal when they hold the same handles
+/// (pointer identity), so `CheckCx` keeps F0's `PartialEq` and `Eq`.
 #[derive(Clone, Default)]
 pub struct Extensions {
     map: BTreeMap<TypeId, Arc<dyn Any + Send + Sync>>,
@@ -105,8 +106,18 @@ impl std::fmt::Debug for Extensions {
     }
 }
 
-/// What a check runs against.
-#[derive(Debug, Clone, Default)]
+impl PartialEq for Extensions {
+    fn eq(&self, other: &Self) -> bool {
+        self.map.len() == other.map.len()
+            && self.map.iter().all(|(k, v)| other.map.get(k).is_some_and(|o| Arc::ptr_eq(v, o)))
+    }
+}
+
+impl Eq for Extensions {}
+
+/// What a check runs against. Build it with `..CheckCx::default()`: W3 added fields to F0's
+/// `{project, udid, online}`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CheckCx {
     pub project: Option<PathBuf>,
     pub udid: Option<String>,
@@ -195,7 +206,7 @@ impl CheckResult {
 /// How a failing or warning check can be fixed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Fix {
-    /// No fix.
+    /// No fix is known.
     None,
     /// [`Check::fix`] fixes it without root.
     Auto,
@@ -203,6 +214,20 @@ pub enum Fix {
     Command(String),
     /// The user acts; the hint says how.
     Manual,
+}
+
+/// What a check found, and how a failure or warning is fixed (ignored for passes and skips).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnosis {
+    pub result: CheckResult,
+    pub fix: Fix,
+}
+
+impl Diagnosis {
+    /// `result`, fixed as `fix` says.
+    pub fn new(result: CheckResult, fix: Fix) -> Self {
+        Self { result, fix }
+    }
 }
 
 /// An environment check.
@@ -214,13 +239,22 @@ pub trait Check: Send + Sync {
     fn category(&self) -> Category;
     fn requires(&self) -> Requires;
     async fn run(&self, cx: &CheckCx) -> CheckResult;
-    /// The automatic fix, for checks whose [`fix_kind`](Self::fix_kind) is [`Fix::Auto`].
+    /// The automatic fix. `doctor --fix` calls it for a failure or warning whose fix is [`Fix::Auto`], and for
+    /// one whose fix is [`Fix::None`] (F0 checks implement `fix` without saying so); `core.notImplemented`, the
+    /// default, means there is none.
     async fn fix(&self, _cx: &CheckCx) -> Result<()> {
         Err(Error::new(codes::core::NOT_IMPLEMENTED, "no automatic fix").with_hint("Follow the check's hint instead."))
     }
-    /// How a failure or warning of this check is fixed.
+    /// How a failure or warning of this check is fixed, whatever the cause.
     fn fix_kind(&self) -> Fix {
         Fix::None
+    }
+    /// Runs the check and says how what it found is fixed; the registry calls this. The default is
+    /// [`run`](Self::run) with [`fix_kind`](Self::fix_kind). A check whose fix depends on the cause (an automatic
+    /// install for one failure, a manual step for another) overrides it and implements `run` as
+    /// `self.diagnose(cx).await.result`.
+    async fn diagnose(&self, cx: &CheckCx) -> Diagnosis {
+        Diagnosis::new(self.run(cx).await, self.fix_kind())
     }
 }
 
@@ -250,7 +284,8 @@ pub struct CheckOutcome {
     pub title: String,
     pub category: Category,
     pub result: CheckResult,
-    /// How to fix a failure or warning (`None` for passes and skips).
+    /// How to fix a failure or warning; [`Fix::Auto`] when this run applied the fix, whatever the result now.
+    /// `None` for passes and skips that needed no fix.
     pub fix: Option<Fix>,
     /// Whether this run applied the automatic fix.
     pub fix_applied: bool,
@@ -316,8 +351,8 @@ impl Registry {
     }
 
     /// Runs the checks `filter` selects, concurrently, and reports them in registration order. Checks that need
-    /// the network run only with `cx.online`. With `filter.fix`, failing or warning checks with an automatic fix
-    /// are fixed and run again.
+    /// the network run only with `cx.online`. With `filter.fix`, a failing or warning check whose diagnosis offers
+    /// an automatic fix (or no fix kind at all, see [`Check::fix`]) is fixed and run again.
     pub async fn run(&self, cx: &CheckCx, filter: &Filter) -> DoctorReport {
         let selected: Vec<&Arc<dyn Check>> = self.checks.iter().filter(|c| filter.wants(c.as_ref())).collect();
         let runs = selected.iter().map(|c| run_one(c.as_ref(), cx, filter.fix));
@@ -325,44 +360,52 @@ impl Registry {
     }
 }
 
-async fn timed(check: &dyn Check, cx: &CheckCx) -> CheckResult {
-    match tokio::time::timeout(CHECK_TIMEOUT, check.run(cx)).await {
-        Ok(r) => r,
-        Err(_) => CheckResult::fail(format!("the check did not finish within {} s", CHECK_TIMEOUT.as_secs()))
-            .with_hint("Run it alone with `russet doctor --check <id>` to see where it hangs."),
+async fn timed(check: &dyn Check, cx: &CheckCx) -> Diagnosis {
+    match tokio::time::timeout(CHECK_TIMEOUT, check.diagnose(cx)).await {
+        Ok(d) => d,
+        Err(_) => Diagnosis::new(
+            CheckResult::fail(format!("the check did not finish within {} s", CHECK_TIMEOUT.as_secs()))
+                .with_hint("Run it alone with `russet doctor --check <id>` to see where it hangs."),
+            Fix::Manual,
+        ),
     }
+}
+
+fn is_problem(r: &CheckResult) -> bool {
+    matches!(r.status, Status::Fail | Status::Warn)
 }
 
 async fn run_one(check: &dyn Check, cx: &CheckCx, fix: bool) -> CheckOutcome {
     let started = Instant::now();
-    let mut result = if check.requires().network && !cx.online {
-        CheckResult::skip("needs the network; run `russet doctor --online`")
+    let skip = |why: &str| Diagnosis::new(CheckResult::skip(why), Fix::None);
+    let mut d = if check.requires().network && !cx.online {
+        skip("needs the network; run `russet doctor --online`")
     } else if check.requires().project && cx.project.is_none() {
-        CheckResult::skip("no project; run it inside a project or pass --project")
+        skip("no project; run it inside a project or pass --project")
     } else if check.requires().device && cx.udid.is_none() {
-        CheckResult::skip("no device selected")
+        skip("no device selected")
     } else {
         timed(check, cx).await
     };
     let mut fix_applied = false;
-    let kind = check.fix_kind();
-    if fix && kind == Fix::Auto && matches!(result.status, Status::Fail | Status::Warn) {
+    if fix && is_problem(&d.result) && matches!(d.fix, Fix::Auto | Fix::None) {
         match check.fix(cx).await {
             Ok(()) => {
                 fix_applied = true;
-                result = timed(check, cx).await;
+                d = timed(check, cx).await;
             }
-            Err(e) => {
-                result.detail = Some(format!("the automatic fix failed: {}", e.message()));
-            }
+            // The F0 default: this check has no automatic fix.
+            Err(e) if d.fix == Fix::None && e.code() == codes::core::NOT_IMPLEMENTED => {}
+            Err(e) => d.result.detail = Some(format!("the automatic fix failed: {}", e.message())),
         }
     }
-    let fix = matches!(result.status, Status::Fail | Status::Warn).then_some(kind).filter(|k| *k != Fix::None);
+    let fix =
+        if fix_applied { Some(Fix::Auto) } else { Some(d.fix).filter(|k| *k != Fix::None && is_problem(&d.result)) };
     CheckOutcome {
         id: check.id().to_owned(),
         title: check.title().to_owned(),
         category: check.category(),
-        result,
+        result: d.result,
         fix,
         fix_applied,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
