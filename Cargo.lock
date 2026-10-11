@@ -5610,6 +5610,7 @@ name = "russet-lab"
 version = "0.1.0"
 dependencies = [
  "russet-core",
+ "serde_json",
 ]
 
 [[package]]

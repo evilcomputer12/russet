@@ -16,3 +16,4 @@ workspace = true
 
 [dependencies]
 russet-core.workspace = true
+serde_json.workspace = true
