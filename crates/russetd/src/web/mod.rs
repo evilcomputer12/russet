@@ -27,7 +27,7 @@ pub use server::TokenStore;
 type StartHook = Box<dyn Fn(&str) + Send + Sync>;
 
 struct Inner {
-    listen: SocketAddr,
+    listen: Mutex<SocketAddr>,
     routes: Mutex<Option<axum::Router>>,
     started: OnceCell<SocketAddr>,
     shutdown: CancellationToken,
@@ -43,7 +43,7 @@ pub struct WebEndpoint {
 
 impl std::fmt::Debug for WebEndpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WebEndpoint").field("listen", &self.inner.listen).field("url", &self.url()).finish()
+        f.debug_struct("WebEndpoint").field("listen", &self.listen()).field("url", &self.url()).finish()
     }
 }
 
@@ -58,7 +58,7 @@ impl WebEndpoint {
     pub fn new(listen: SocketAddr, shutdown: CancellationToken) -> Self {
         Self {
             inner: Arc::new(Inner {
-                listen,
+                listen: Mutex::new(listen),
                 routes: Mutex::new(Some(axum::Router::new())),
                 started: OnceCell::new(),
                 shutdown,
@@ -66,6 +66,20 @@ impl WebEndpoint {
                 on_start: Mutex::new(None),
             }),
         }
+    }
+
+    /// The address the endpoint listens on, or will.
+    pub fn listen(&self) -> SocketAddr {
+        *self.inner.listen.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Changes the address (`[web] listen`) if the endpoint has not started; returns whether it applied.
+    pub fn set_listen(&self, addr: SocketAddr) -> bool {
+        if self.inner.started.initialized() {
+            return false;
+        }
+        *self.inner.listen.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = addr;
+        true
     }
 
     /// Registers `router` under `path` (for example `/mirror/v1`); only before the endpoint starts.
@@ -93,7 +107,8 @@ impl WebEndpoint {
             .get_or_try_init(|| async move {
                 let routes =
                     inner.routes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap_or_default();
-                server::start(inner.listen, routes, inner.shutdown.clone()).await
+                let listen = *inner.listen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                server::start(listen, routes, inner.shutdown.clone()).await
             })
             .await
             .copied()?;

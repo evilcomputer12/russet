@@ -9,13 +9,24 @@
 //! start with an invalid `config.toml` (so `doctor` can say so) or without a keyring, and until W3, W6 and W7
 //! land their constructors (F0 stubs end in `todo!()`; `Toolchains` has none yet) the slots answer
 //! `core.notImplemented`. ARCHITECTURE §5.3 types these fields `Arc<T>`; the slots are a contract change
-//! request of W2 (handlers write `cx.config.get()?` instead of `cx.config`).
+//! request of W2 (handlers write `cx.config.get()?` instead of `cx.config`, `&*cx.accounts.get()?` instead of
+//! `&cx.accounts`).
+//!
+//! **Who constructs them.** An area installs the constructor of its service with [`provide`] from its
+//! `handlers/<ns>.rs::register` (the handler seam), for example W3's `Toolchains`; the factory gets a
+//! [`ServiceEnv`] with the directories, the device slot and the other services. Without one the daemon uses
+//! the F0 constructors of ARCHITECTURE §5.3 (`ConfigService::load`, `russet_secrets::open_default`,
+//! `DebugService::new`, `AccountService::new`); `Toolchains` has none, so its slot answers
+//! `core.notImplemented` until W3 provides it.
 
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, Result, codes};
+use russet_ipc::Router;
 use serde_json::json;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
@@ -60,7 +71,8 @@ struct ServiceInner<T: ?Sized> {
     value: OnceLock<Arc<T>>,
     /// A constructor that panicked (an F0 stub) stays failed; ordinary errors are retried on the next call.
     broken: Mutex<Option<String>>,
-    factory: Factory<T>,
+    /// Installed once, right after the daemon created every slot (so factories can name each other).
+    factory: OnceLock<Factory<T>>,
 }
 
 /// A domain service constructed on first use (module docs).
@@ -84,21 +96,33 @@ impl<T: ?Sized + Send + Sync + 'static> fmt::Debug for Service<T> {
 }
 
 impl<T: ?Sized + Send + Sync + 'static> Service<T> {
-    /// A service built by `factory` on the first [`Service::get`].
-    pub fn lazy(name: &'static str, factory: impl Fn() -> Result<Arc<T>> + Send + Sync + 'static) -> Self {
+    /// A slot whose constructor comes later ([`Service::install`]).
+    fn deferred(name: &'static str) -> Self {
         Self {
             inner: Arc::new(ServiceInner {
                 name,
                 value: OnceLock::new(),
                 broken: Mutex::new(None),
-                factory: Box::new(factory),
+                factory: OnceLock::new(),
             }),
         }
     }
 
+    /// Sets the constructor of a deferred slot (the first one wins).
+    fn install(&self, factory: Factory<T>) {
+        let _ = self.inner.factory.set(factory);
+    }
+
+    /// A service built by `factory` on the first [`Service::get`].
+    pub fn lazy(name: &'static str, factory: impl Fn() -> Result<Arc<T>> + Send + Sync + 'static) -> Self {
+        let s = Self::deferred(name);
+        s.install(Box::new(factory));
+        s
+    }
+
     /// A service that is already built (tests, fakes).
     pub fn ready(name: &'static str, value: Arc<T>) -> Self {
-        let s = Self::lazy(name, || Err(Error::internal("unreachable: the service was built up front")));
+        let s = Self::deferred(name);
         let _ = s.inner.value.set(value);
         s
     }
@@ -116,7 +140,10 @@ impl<T: ?Sized + Send + Sync + 'static> Service<T> {
         if let Some(why) = self.inner.broken.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
             return Err(not_ready(self.inner.name, why));
         }
-        match crate::daemon::panics::catch_expected(|| (self.inner.factory)()) {
+        let Some(factory) = self.inner.factory.get() else {
+            return Err(not_ready(self.inner.name, "nothing constructs it"));
+        };
+        match crate::daemon::panics::catch_expected(factory) {
             Ok(Ok(v)) => Ok(Arc::clone(self.inner.value.get_or_init(|| v))),
             Ok(Err(e)) => Err(e),
             Err(payload) => {
@@ -136,11 +163,189 @@ impl<T: ?Sized + Send + Sync + 'static> Service<T> {
     pub fn name(&self) -> &'static str {
         self.inner.name
     }
+
+    fn downgrade(&self) -> WeakService<T> {
+        WeakService { inner: Arc::downgrade(&self.inner), name: self.inner.name }
+    }
 }
 
 fn not_ready(name: &str, why: &str) -> Error {
     Error::new(codes::core::NOT_IMPLEMENTED, format!("the {name} service is not available yet: {why}"))
         .with_hint("Its workstream has not landed it yet (docs/PLAN.md); see ARCHITECTURE §8 for its wave.")
+}
+
+/// A slot seen from a factory: weak, so the slots and their factories never keep each other alive.
+struct WeakService<T: ?Sized + Send + Sync + 'static> {
+    inner: Weak<ServiceInner<T>>,
+    name: &'static str,
+}
+
+impl<T: ?Sized + Send + Sync + 'static> Clone for WeakService<T> {
+    fn clone(&self) -> Self {
+        Self { inner: Weak::clone(&self.inner), name: self.name }
+    }
+}
+
+impl<T: ?Sized + Send + Sync + 'static> WeakService<T> {
+    fn get(&self) -> Result<Arc<T>> {
+        let inner = self.inner.upgrade().ok_or_else(|| {
+            Error::new(codes::ipc::CONNECTION_CLOSED, format!("the {} service is gone: the daemon stopped", self.name))
+        })?;
+        Service { inner }.get()
+    }
+}
+
+/// What a service factory gets ([`provide`]): the daemon's directories, its device slot and the other
+/// services, each constructed on first use.
+#[derive(Clone)]
+pub struct ServiceEnv {
+    pub dirs: RussetDirs,
+    pub devices: DeviceSlot,
+    config: WeakService<russet_config::ConfigService>,
+    secrets: WeakService<dyn russet_secrets::SecretStore>,
+    toolchains: WeakService<russet_toolchain::Toolchains>,
+    debug: WeakService<russet_debug::DebugService>,
+    accounts: WeakService<russet_account::AccountService>,
+}
+
+impl fmt::Debug for ServiceEnv {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServiceEnv").field("dirs", &self.dirs).finish_non_exhaustive()
+    }
+}
+
+impl ServiceEnv {
+    /// The configuration service.
+    pub fn config(&self) -> Result<Arc<russet_config::ConfigService>> {
+        self.config.get()
+    }
+    /// The secret store.
+    pub fn secrets(&self) -> Result<Arc<dyn russet_secrets::SecretStore>> {
+        self.secrets.get()
+    }
+    /// The toolchain manager.
+    pub fn toolchains(&self) -> Result<Arc<russet_toolchain::Toolchains>> {
+        self.toolchains.get()
+    }
+    /// The debug service.
+    pub fn debug(&self) -> Result<Arc<russet_debug::DebugService>> {
+        self.debug.get()
+    }
+    /// The account service.
+    pub fn accounts(&self) -> Result<Arc<russet_account::AccountService>> {
+        self.accounts.get()
+    }
+}
+
+type ProvidedFactory<T> = Arc<dyn Fn(&ServiceEnv) -> Result<Arc<T>> + Send + Sync>;
+
+/// The factories areas installed with [`provide`] (a router extension until the daemon takes it).
+#[derive(Default)]
+pub struct ServiceFactories {
+    by_type: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+}
+
+impl fmt::Debug for ServiceFactories {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServiceFactories").field("len", &self.by_type.len()).finish()
+    }
+}
+
+impl ServiceFactories {
+    fn take<T: ?Sized + Send + Sync + 'static>(&mut self) -> Option<ProvidedFactory<T>> {
+        self.by_type.remove(&TypeId::of::<T>()).and_then(|b| b.downcast::<ProvidedFactory<T>>().ok()).map(|b| *b)
+    }
+}
+
+/// Installs the constructor of a `DaemonCtx` service: `T` is one of `russet_config::ConfigService`,
+/// `dyn russet_secrets::SecretStore`, `russet_toolchain::Toolchains`, `russet_debug::DebugService` and
+/// `russet_account::AccountService`. Call it from the owning area's `handlers/<ns>.rs::register`; the factory
+/// runs on the slot's first [`Service::get`], and an error (or a panic) is that call's error. The last
+/// registration for a type wins.
+pub fn provide<T: ?Sized + Send + Sync + 'static>(
+    r: &mut Router<DaemonCtx>,
+    factory: impl Fn(&ServiceEnv) -> Result<Arc<T>> + Send + Sync + 'static,
+) {
+    let f: ProvidedFactory<T> = Arc::new(factory);
+    r.extensions_mut().get_or_default::<ServiceFactories>().by_type.insert(TypeId::of::<T>(), Box::new(f));
+}
+
+/// The five service slots of a daemon, wired to their factories.
+pub(crate) struct Services {
+    pub config: Service<russet_config::ConfigService>,
+    pub secrets: Service<dyn russet_secrets::SecretStore>,
+    pub toolchains: Service<russet_toolchain::Toolchains>,
+    pub debug: Service<russet_debug::DebugService>,
+    pub accounts: Service<russet_account::AccountService>,
+}
+
+/// `RUSSET_SECRETS_BACKEND` (`auto` without it).
+fn secrets_config() -> russet_secrets::SecretsConfig {
+    use russet_secrets::BackendChoice;
+    let backend = match std::env::var("RUSSET_SECRETS_BACKEND").unwrap_or_default().as_str() {
+        "keyring" => BackendChoice::Keyring,
+        "passphrase" => BackendChoice::Passphrase,
+        "env" => BackendChoice::Env,
+        "memory" => BackendChoice::Memory,
+        _ => BackendChoice::Auto,
+    };
+    russet_secrets::SecretsConfig { backend }
+}
+
+fn install<T: ?Sized + Send + Sync + 'static>(
+    slot: &Service<T>,
+    env: &ServiceEnv,
+    provided: Option<ProvidedFactory<T>>,
+    default: fn(&ServiceEnv) -> Result<Arc<T>>,
+) {
+    let env = env.clone();
+    match provided {
+        Some(f) => slot.install(Box::new(move || f(&env))),
+        None => slot.install(Box::new(move || default(&env))),
+    }
+}
+
+impl Services {
+    /// Creates the slots and installs each one's factory: the provided one, else the F0 constructor.
+    pub(crate) fn wire(dirs: &RussetDirs, devices: &DeviceSlot, mut provided: ServiceFactories) -> Self {
+        let s = Self {
+            config: Service::deferred("config"),
+            secrets: Service::deferred("secrets"),
+            toolchains: Service::deferred("toolchains"),
+            debug: Service::deferred("debug"),
+            accounts: Service::deferred("accounts"),
+        };
+        let env = ServiceEnv {
+            dirs: dirs.clone(),
+            devices: devices.clone(),
+            config: s.config.downgrade(),
+            secrets: s.secrets.downgrade(),
+            toolchains: s.toolchains.downgrade(),
+            debug: s.debug.downgrade(),
+            accounts: s.accounts.downgrade(),
+        };
+        install(&s.config, &env, provided.take(), |env| Ok(Arc::new(russet_config::ConfigService::load(&env.dirs)?)));
+        install(&s.secrets, &env, provided.take(), |env| russet_secrets::open_default(&env.dirs, &secrets_config()));
+        install(&s.toolchains, &env, provided.take(), |_| {
+            Err(Error::not_implemented("russet-toolchain has no constructor yet (W3, CORE-10)")
+                .with_hint("The toolchain service lands with W3; see docs/PLAN.md §4.3."))
+        });
+        install(&s.debug, &env, provided.take(), |env| {
+            let services: Arc<dyn russet_debug::DeviceServices> = Arc::new(env.devices.clone());
+            Ok(Arc::new(russet_debug::DebugService::new(services, russet_debug::DebugConfig::default())))
+        });
+        install(&s.accounts, &env, provided.take(), |env| {
+            let endpoints = russet_core::net::Endpoints::from_env()?;
+            Ok(Arc::new(russet_account::AccountService::new(&env.dirs, env.secrets()?, endpoints)?))
+        });
+        if !provided.by_type.is_empty() {
+            tracing::warn!(
+                "{} service factories name no DaemonCtx slot (russetd::ctx::provide takes the five service types)",
+                provided.by_type.len()
+            );
+        }
+        s
+    }
 }
 
 /// Why the live backend cannot be used by this daemon.
@@ -320,6 +525,26 @@ mod tests {
         assert_eq!(e.code(), codes::core::NOT_IMPLEMENTED);
         assert!(e.message().contains("W3 (CORE-08)"), "{}", e.message());
         assert_eq!(stub.get().expect_err("stays broken").code(), codes::core::NOT_IMPLEMENTED);
+    }
+
+    #[test]
+    fn wired_slots_use_provided_factories_and_do_not_keep_each_other_alive() {
+        let dirs = RussetDirs::under(std::path::Path::new("/nonexistent/russet-wire-test"));
+        let devices = DeviceSlot::new(DeviceBackend::None, LiveState::NotLive, "/nope".into());
+        let mut r = Router::<DaemonCtx>::new();
+        provide::<russet_toolchain::Toolchains>(&mut r, |env| {
+            // A factory reaches the other slots through its env (here: a config that cannot start).
+            let e = env.config().expect_err("ConfigService::load is an F0 stub");
+            Err(e.with_hint("provided"))
+        });
+        let factories = r.extensions_mut().remove::<ServiceFactories>().expect("registered");
+        let services = Services::wire(&dirs, &devices, factories);
+        let e = services.toolchains.get().expect_err("the provided factory fails");
+        assert_eq!(e.code(), codes::core::NOT_IMPLEMENTED);
+        assert_eq!(e.hint(), Some("provided"));
+        let weak = Arc::downgrade(&services.config.inner);
+        drop(services);
+        assert!(weak.upgrade().is_none(), "the factories hold their env weakly: no cycle");
     }
 
     #[tokio::test]

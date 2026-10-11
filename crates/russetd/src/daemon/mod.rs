@@ -9,6 +9,8 @@
 //! - [`logging`]—daily files, the reloadable filter, redaction, `daemon.logs.subscribe`.
 //! - [`panics`]—`state/panics/<ts>.txt`.
 //! - [`run`]—`russet daemon run` and the in-process daemon.
+//! - [`settings`]—`config.toml` and `mcp-policy.toml` values, through the config and MCP areas' hooks.
+//! - `journald`—the redacted journal output under systemd (Linux).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -29,10 +31,13 @@ use tokio_util::sync::CancellationToken;
 use self::logging::LogControl;
 
 pub mod backend;
+#[cfg(target_os = "linux")]
+pub mod journald;
 pub mod lock;
 pub mod logging;
 pub mod panics;
 pub mod run;
+pub mod settings;
 
 /// How long jobs get after `daemon.shuttingDown` before their process trees are killed (ARCHITECTURE §3.3
 /// item 5).
@@ -95,6 +100,11 @@ impl Connections {
         self.lock().get(id).map(|c| c.peer.clone())
     }
 
+    /// The workspace roots connection `id` named at `initialize` (ARCHITECTURE §7.4).
+    pub fn workspace_roots(&self, id: &str) -> Vec<String> {
+        self.lock().get(id).and_then(|c| c.peer.session().map(|s| s.workspace_roots.clone())).unwrap_or_default()
+    }
+
     /// Sends a notification to every connection `filter` accepts; never blocks.
     pub fn notify_where(&self, method: &str, params: &Value, filter: impl Fn(&Connection) -> bool) {
         let targets: Vec<Peer> = self.lock().values().filter(|c| filter(c)).map(|c| c.peer.clone()).collect();
@@ -146,7 +156,14 @@ pub struct DaemonState {
     endpoint: Mutex<String>,
     pub connections: Connections,
     pub logs: Arc<LogControl>,
-    pub idle_timeout: Option<Duration>,
+    /// `daemon.idle-timeout`; `None` never idles out.
+    idle_timeout: Mutex<Option<Duration>>,
+    /// The configuration hooks and what flags pinned ([`settings`]).
+    pub settings: settings::SettingsControl,
+    /// Whether this daemon holds `runtime/russetd.lock`, and so owns the home's persistent state (`state/jobs`
+    /// and the crash recovery of other areas, for example W7's sessions). An in-process daemon of a home whose
+    /// daemon runs does not.
+    pub owns_home: bool,
     keep_alive: Arc<AtomicUsize>,
     shutdown: CancellationToken,
     reason: Mutex<Option<(ShutdownReason, bool)>>,
@@ -161,6 +178,8 @@ impl DaemonState {
         home: Option<PathBuf>,
         logs: Arc<LogControl>,
         idle_timeout: Option<Duration>,
+        settings: settings::SettingsControl,
+        owns_home: bool,
         shutdown: CancellationToken,
     ) -> Self {
         let (executable, executable_id) = russet_core::platform::current_executable()
@@ -179,11 +198,23 @@ impl DaemonState {
             endpoint: Mutex::new("inproc".to_owned()),
             connections: Connections::default(),
             logs,
-            idle_timeout,
+            idle_timeout: Mutex::new(idle_timeout.filter(|t| !t.is_zero())),
+            settings,
+            owns_home,
             keep_alive: Arc::new(AtomicUsize::new(0)),
             shutdown,
             reason: Mutex::new(None),
         }
+    }
+
+    /// `daemon.idle-timeout` (`None`: never).
+    pub fn idle_timeout(&self) -> Option<Duration> {
+        *self.idle_timeout.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Changes the idle timeout (a reloaded `config.toml`); `None` or zero never idles out.
+    pub fn set_idle_timeout(&self, t: Option<Duration>) {
+        *self.idle_timeout.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = t.filter(|t| !t.is_zero());
     }
 
     /// The endpoint string.

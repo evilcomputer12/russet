@@ -42,7 +42,7 @@ impl JsonLines {
         f.write_all(&line).map_err(|e| Error::io(format!("appending to {}", self.path.display()), e))
     }
 
-    /// Every line that parses as `T` (unparseable lines, for example a torn last line, are skipped).
+    /// Every line that parses as `T` (unparsable lines, for example a torn last line, are skipped).
     pub fn read_all<T: DeserializeOwned>(&self) -> Result<Vec<T>> {
         read_lines(&self.path)
     }

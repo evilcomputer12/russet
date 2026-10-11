@@ -125,13 +125,31 @@ pub fn take_live_device_lock(
     }
 }
 
-/// The error a second daemon gets for the daemon lock.
+/// The error a second daemon gets for the daemon lock, naming the holder its record names (`{pid, inProcess}`).
 pub fn already_running(path: &Path) -> Error {
-    Error::new(
+    let holder: Option<serde_json::Value> =
+        std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok());
+    let pid = holder.as_ref().and_then(|h| h.get("pid")).and_then(serde_json::Value::as_u64);
+    let in_process =
+        holder.as_ref().and_then(|h| h.get("inProcess")).and_then(serde_json::Value::as_bool) == Some(true);
+    let who = match (pid, in_process) {
+        (Some(pid), true) => format!("an in-process daemon (`--no-daemon`, pid {pid})"),
+        (Some(pid), false) => format!("a daemon (pid {pid})"),
+        (None, _) => "a daemon".to_owned(),
+    };
+    let e = Error::new(
         codes::ipc::DAEMON_UNAVAILABLE,
-        format!("a daemon already runs for this home ({} is locked)", path.display()),
+        format!("{who} already runs for this home ({} is locked)", path.display()),
     )
-    .with_hint("Use it (`russet daemon status`), or stop it with `russet daemon stop`.")
+    .with_hint(if in_process {
+        "Let that `--no-daemon` command finish, then retry."
+    } else {
+        "Use it (`russet daemon status`), or stop it with `russet daemon stop`."
+    });
+    match holder {
+        Some(h) => e.with_details(serde_json::json!({"holder": h})),
+        None => e,
+    }
 }
 
 #[cfg(test)]
@@ -150,5 +168,18 @@ mod tests {
         drop(held);
         let again = take_live_device_lock(&path, &other).expect("io").expect("free again");
         assert_eq!(read_holder(again.path()), Some(other));
+    }
+
+    #[test]
+    fn the_already_running_error_names_the_holder() {
+        let tmp = russet_core::fsx::TempDir::new("home-lock").expect("tempdir");
+        let path = tmp.path().join("russetd.lock");
+        std::fs::write(&path, r#"{"pid": 4242, "inProcess": true}"#).expect("write");
+        let e = already_running(&path);
+        assert_eq!(e.code(), codes::ipc::DAEMON_UNAVAILABLE);
+        assert!(e.message().contains("in-process") && e.message().contains("4242"), "{}", e.message());
+        assert_eq!(e.details().and_then(|d| d["holder"]["pid"].as_u64()), Some(4242));
+        std::fs::write(&path, "").expect("write");
+        assert!(already_running(&path).message().starts_with("a daemon already runs"));
     }
 }

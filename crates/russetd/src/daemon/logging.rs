@@ -10,17 +10,17 @@
 //! pairs are masked in messages and values ([`russet_core::redact`]). Span fields (`conn`, `req`, `method`,
 //! `job`, …) are appended to their events.
 //!
-//! - Daemon: `state/logs/russetd.YYYY-MM-DD.log`, `log-retention-days` files (7), text or JSON
-//!   (`RUSSET_LOG_FORMAT=json`), stderr too in the foreground. Default filter
-//!   `info,idevice=warn,jktcp=warn,hyper=warn`, `RUSSET_LOG` overrides it.
+//! - Daemon: `state/logs/russetd.YYYY-MM-DD.log`, text or JSON (`RUSSET_LOG_FORMAT=json`), stderr too in the
+//!   foreground, or the journal instead of stderr under systemd (`journald`, Linux). Default filter
+//!   `info,idevice=warn,jktcp=warn,hyper=warn`; `RUSSET_LOG` overrides it, then `daemon.log-filter`.
+//! - Retention: files older than `daemon.log-retention-days` (7) are deleted at start, when the setting
+//!   changes and every six hours ([`LogControl::sweep`]).
 //! - CLI: stderr at `-v`/`-vv`/`-vvv` ([`cli_subscriber`]).
-//!
-//! journald output (core §12, under systemd) is deferred: `tracing-journald` formats fields itself and would
-//! bypass the redaction.
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use russet_core::dirs::RussetDirs;
@@ -42,11 +42,14 @@ const RECORD_CHANNEL: usize = 4096;
 
 type Reloader = Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>;
 
-/// The live logging controls: the filter and the record stream.
+/// The live logging controls: the filter, the retention and the record stream.
 pub struct LogControl {
     reload: Option<Reloader>,
     current: Mutex<String>,
     records: broadcast::Sender<Arc<DaemonLogRecord>>,
+    /// The daily files' directory (`None` without files: an in-process daemon).
+    dir: Option<PathBuf>,
+    retention_days: AtomicUsize,
 }
 
 impl std::fmt::Debug for LogControl {
@@ -62,7 +65,32 @@ impl LogControl {
     /// Controls without a global subscriber (an in-process daemon): the filter is only recorded.
     pub fn detached(filter: &str) -> Arc<Self> {
         let (records, _) = broadcast::channel(RECORD_CHANNEL);
-        Arc::new(Self { reload: None, current: Mutex::new(filter.to_owned()), records })
+        Arc::new(Self {
+            reload: None,
+            current: Mutex::new(filter.to_owned()),
+            records,
+            dir: None,
+            retention_days: AtomicUsize::new(LogOptions::default().retention_days),
+        })
+    }
+
+    /// `daemon.log-retention-days`.
+    pub fn retention_days(&self) -> usize {
+        self.retention_days.load(Ordering::SeqCst)
+    }
+
+    /// Changes the retention and deletes the files it no longer keeps.
+    pub fn set_retention_days(&self, days: usize) {
+        self.retention_days.store(days.max(1), Ordering::SeqCst);
+        self.sweep();
+    }
+
+    /// Deletes daily files older than the retention; returns how many.
+    pub fn sweep(&self) -> usize {
+        match &self.dir {
+            Some(dir) => sweep_old_logs(dir, self.retention_days(), std::time::SystemTime::now()),
+            None => 0,
+        }
     }
 
     /// The current filter directive.
@@ -133,17 +161,17 @@ pub struct LogGuard {
 }
 
 /// Installs the daemon's global subscriber: the reloadable filter, the daily files under `state/logs` and,
-/// in the foreground, stderr. Call once per process (`daemon run`); in-process daemons use
-/// [`LogControl::detached`].
+/// in the foreground, stderr (or the journal, when systemd connected stderr to it). Call once per process
+/// (`daemon run`); in-process daemons use [`LogControl::detached`].
 pub fn init_daemon(dirs: &RussetDirs, opts: &LogOptions) -> Result<(Arc<LogControl>, LogGuard)> {
     let dir = dirs.logs();
     russet_core::fsx::ensure_private_dir(&dir)?;
     sweep_old_logs(&dir, opts.retention_days, std::time::SystemTime::now());
+    // No `max_log_files`: the retention is a setting that can change while the daemon runs (LogControl::sweep).
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix("russetd")
         .filename_suffix("log")
-        .max_log_files(opts.retention_days.max(1))
         .build(&dir)
         .map_err(|e| {
             Error::new(russet_core::error::codes::core::IO, format!("opening the log in {}: {e}", dir.display()))
@@ -160,10 +188,20 @@ pub fn init_daemon(dirs: &RussetDirs, opts: &LogOptions) -> Result<(Arc<LogContr
         })),
         current: Mutex::new(filter_text),
         records,
+        dir: Some(dir),
+        retention_days: AtomicUsize::new(opts.retention_days.max(1)),
     });
     let file_layer = RedactingLayer::new(file_writer, opts.json).publishing(Arc::clone(&control));
-    let stderr_layer = opts.stderr.then(|| RedactingLayer::new(std::io::stderr, opts.json));
-    let subscriber = Registry::default().with(filter_layer).with(file_layer).with(stderr_layer);
+    #[cfg(target_os = "linux")]
+    let journal = opts.stderr && super::journald::stderr_is_journal();
+    #[cfg(not(target_os = "linux"))]
+    let journal = false;
+    let stderr_layer = (opts.stderr && !journal).then(|| RedactingLayer::new(std::io::stderr, opts.json));
+    #[cfg(target_os = "linux")]
+    let journal_layer = journal.then(super::journald::JournaldLayer::new);
+    #[cfg(not(target_os = "linux"))]
+    let journal_layer: Option<tracing_subscriber::layer::Identity> = None;
+    let subscriber = Registry::default().with(filter_layer).with(file_layer).with(stderr_layer).with(journal_layer);
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|e| Error::internal(format!("a global log subscriber is already installed: {e}")))?;
     Ok((control, LogGuard { _file: guard }))
@@ -284,8 +322,12 @@ fn level_of(level: &Level) -> TraceLevel {
     }
 }
 
-/// The redacted record of `event` within the spans of `ctx`.
-fn record_of<S: Subscriber + for<'a> LookupSpan<'a>>(event: &Event<'_>, ctx: &Context<'_, S>) -> DaemonLogRecord {
+/// The redacted record of `event` within the spans of `ctx` (span fields as a [`RedactingLayer`] recorded
+/// them).
+pub(crate) fn record_of<S: Subscriber + for<'a> LookupSpan<'a>>(
+    event: &Event<'_>,
+    ctx: &Context<'_, S>,
+) -> DaemonLogRecord {
     let meta = event.metadata();
     let mut c = Collector::default();
     event.record(&mut c);

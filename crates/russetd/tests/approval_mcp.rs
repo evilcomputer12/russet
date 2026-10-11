@@ -4,7 +4,9 @@
 //! Out-of-band approvals end to end (ARCHITECTURE §11.3; PLAN W2 tests): an `mcp` connection calling a tier-3
 //! method gets `perm.approvalRequired` with an `approvalId`, cannot call `approval.grant`, and the binding
 //! holds: a grant from a human covers exactly one call with the same arguments (mismatched and reused calls get
-//! `perm.approvalInvalid`). Expiry is covered by the unit tests of the approval service.
+//! `perm.approvalInvalid`). Expiry is covered by the unit tests of the approval service. Under the default
+//! policy's rate limit (`ship.upload` 1 per 10 min), the approved retry still runs: asking for an approval uses
+//! no token.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 #[path = "daemon_support.rs"]
@@ -128,6 +130,55 @@ async fn tier_three_calls_need_a_human_approval_bound_to_their_arguments() {
     ] {
         assert!(outcomes.contains(&expected), "{expected:?} missing in {outcomes:?}");
     }
+    daemon.stop().await.expect("stop");
+}
+
+#[tokio::test]
+async fn the_approved_retry_runs_under_the_default_rate_limit() {
+    let home = Home::new("approval-rate");
+    let mut o = home.options();
+    let mut policy = McpPolicy::default();
+    assert!(policy.rate_limits.contains_key("ship.upload"), "the default policy limits ship.upload");
+    policy.clients.insert("claude-code".into(), 3);
+    o.mcp_policy = policy;
+    let (daemon, human) = start(o).await;
+    let (agent, _) = daemon.connect(&client(ClientKind::Mcp, "claude-code", false)).await.expect("agent");
+    let params = json!({"project": "/p", "ipa": "/p/App.ipa"});
+    let e = agent
+        .call_raw("ship.upload", params.clone(), CallOptions::default())
+        .await
+        .expect_err("needs approval")
+        .to_error();
+    assert_eq!(e.code(), codes::perm::APPROVAL_REQUIRED);
+    let id = ApprovalId::parse(e.details().and_then(|d| d["approvalId"].as_str()).expect("approvalId")).expect("id");
+    // Asking again, or presenting a bad approval, still uses no token.
+    let e = agent.call_raw("ship.upload", params.clone(), CallOptions::default()).await.expect_err("again").to_error();
+    assert_eq!(e.code(), codes::perm::APPROVAL_REQUIRED);
+    let mut wrong = params.clone();
+    wrong["approval"] = json!("apr_01J00000000000000000000000");
+    let e = agent.call_raw("ship.upload", wrong, CallOptions::default()).await.expect_err("unknown").to_error();
+    assert_eq!(e.code(), codes::perm::APPROVAL_INVALID);
+    human.call::<ApprovalGrant>(ApprovalGrantParams { approval_id: id.clone(), scope: None }).await.expect("granted");
+    let mut approved = params.clone();
+    approved["approval"] = json!(id.as_str());
+    let e = agent
+        .call_raw("ship.upload", approved, CallOptions::default())
+        .await
+        .expect_err("W23's handler is a stub")
+        .to_error();
+    assert_eq!(e.code(), codes::core::NOT_IMPLEMENTED, "the approved retry passed the permission engine: {e:?}");
+    // That call used the token: the next one is limited before a human is asked.
+    let pending = |list: Vec<russet_protocol::approval::Approval>| list.len();
+    let before = pending(human.call::<ApprovalList>(ApprovalListParams { state: None }).await.expect("list").approvals);
+    let e = agent
+        .call_raw("ship.upload", json!({"project": "/p", "ipa": "/p/Next.ipa"}), CallOptions::default())
+        .await
+        .expect_err("limited")
+        .to_error();
+    assert_eq!(e.code(), codes::perm::RATE_LIMITED);
+    assert!(e.is_retryable());
+    let after = pending(human.call::<ApprovalList>(ApprovalListParams { state: None }).await.expect("list").approvals);
+    assert_eq!(before, after, "a limited call creates no approval");
     daemon.stop().await.expect("stop");
 }
 

@@ -13,10 +13,17 @@
 //!   [`JOB_GRACE`] (10 s) to return before its task is aborted, which kills its process trees.
 //! - **Persistence:** `state/jobs/index.jsonl` (one line per state change), `state/jobs/<id>/events.ndjson`
 //!   (every [`JobEvent`]) and `state/jobs/<id>/result.json` (`{job, result?, error?}`); a job's events are also
-//!   mirrored to `JobSpec::mirror_log` (build jobs: `<project>/.russet/logs/<job-id>.jsonl`).
+//!   mirrored to `JobSpec::mirror_log`, or `<mirror_dir>/<job-id>.jsonl` (build jobs:
+//!   `<project>/.russet/logs/<job-id>.jsonl`). Only the daemon that holds `runtime/russetd.lock` persists jobs
+//!   and recovers them; an in-process daemon of a home whose daemon runs keeps its jobs in memory.
 //! - **Retention:** the newest 200 jobs, none older than 30 days; compacted at start.
+//! - **Declarations:** what a long-running method's job locks, and whether it is heavy, is declared by the
+//!   method's area ([`declarations`]); code outside jobs takes the same locks with [`JobManager::lock`].
 
+pub mod declarations;
 pub mod layer;
+
+pub use declarations::{JobDeclarations, JobOptions, declare};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
@@ -48,7 +55,8 @@ pub const KEEP_DAYS: u64 = 30;
 /// Events of one job kept in memory for `job.log` and subscribers (all of them are on disk).
 pub const EVENT_RING: usize = 10_000;
 
-/// What a job locks exclusively (ARCHITECTURE §6.2).
+/// What a job locks exclusively (ARCHITECTURE §6.2). Code that takes more than one lock over time takes them
+/// in this order (project, device, SDK, named), so two holders never wait for each other.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LockKey {
     /// One build per project root.
@@ -109,6 +117,8 @@ pub struct JobSpec {
     pub heavy: bool,
     /// Also append every event to this JSON-lines file.
     pub mirror_log: Option<PathBuf>,
+    /// Also append every event to `<mirror_dir>/<job-id>.jsonl` (when `mirror_log` is not set).
+    pub mirror_dir: Option<PathBuf>,
 }
 
 impl JobSpec {
@@ -124,6 +134,7 @@ impl JobSpec {
             background: false,
             heavy: false,
             mirror_log: None,
+            mirror_dir: None,
         }
     }
 }
@@ -187,7 +198,7 @@ struct Inner {
     root: Option<PathBuf>,
     index: Option<JsonLines>,
     jobs: Mutex<BTreeMap<JobId, Arc<JobEntry>>>,
-    limits: JobLimits,
+    limits: Mutex<JobLimits>,
     slots: Mutex<Slots>,
     wake: Notify,
     updates: broadcast::Sender<JobNotice>,
@@ -228,7 +239,7 @@ impl JobManager {
                 root,
                 index,
                 jobs: Mutex::new(BTreeMap::new()),
-                limits,
+                limits: Mutex::new(limits),
                 slots: Mutex::new(Slots::default()),
                 wake: Notify::new(),
                 updates,
@@ -244,6 +255,48 @@ impl JobManager {
 
     fn lock_jobs(&self) -> std::sync::MutexGuard<'_, BTreeMap<JobId, Arc<JobEntry>>> {
         lock(&self.inner.jobs)
+    }
+
+    /// Whether jobs are persisted under `state/jobs`.
+    pub fn persistent(&self) -> bool {
+        self.inner.root.is_some()
+    }
+
+    /// The concurrency limits.
+    pub fn limits(&self) -> JobLimits {
+        *lock(&self.inner.limits)
+    }
+
+    /// Changes the concurrency limits (`daemon.max-parallel-jobs`, `daemon.max-build-jobs`); queued jobs start if
+    /// the new limits allow.
+    pub fn set_limits(&self, limits: JobLimits) {
+        *lock(&self.inner.limits) =
+            JobLimits { max_parallel: limits.max_parallel.max(1), max_heavy: limits.max_heavy.max(1) };
+        self.inner.wake.notify_waiters();
+    }
+
+    /// Takes `keys` for code that does not run as a job (`app.uninstall`, `sdk.remove`; ARCHITECTURE §6.2): waits
+    /// while a job or another holder has one of them, and holds them until the guard drops. `cancel` gives up
+    /// with `core.cancelled`. Inside a job, take further locks in [`LockKey`] order.
+    pub async fn lock(&self, keys: Vec<LockKey>, cancel: &CancellationToken) -> Result<HeldLocks> {
+        loop {
+            let woken = self.inner.wake.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            {
+                let mut s = lock(&self.inner.slots);
+                if !keys.iter().any(|k| s.held.contains(k)) {
+                    s.held.extend(keys.iter().cloned());
+                    return Ok(HeldLocks { keys, inner: Arc::downgrade(&self.inner) });
+                }
+            }
+            tokio::select! {
+                () = &mut woken => {}
+                () = cancel.cancelled() => {
+                    return Err(Error::new(codes::core::CANCELLED, "cancelled while waiting for a lock"));
+                }
+            }
+        }
     }
 
     /// Loads the index of earlier runs; `queued`/`running` jobs become `interrupted`. Returns how many were
@@ -348,6 +401,8 @@ impl JobManager {
             return Err(Error::new(codes::ipc::CONNECTION_CLOSED, "the daemon is shutting down").retryable(true));
         }
         let id = JobId::generate();
+        let mirror =
+            spec.mirror_log.clone().or_else(|| spec.mirror_dir.as_ref().map(|d| d.join(format!("{id}.jsonl"))));
         let dir = self.inner.root.as_ref().map(|r| r.join(id.as_str()));
         if let Some(d) = &dir {
             russet_core::fsx::ensure_private_dir(d)?;
@@ -382,7 +437,7 @@ impl JobManager {
             done,
             abort: Mutex::new(None),
             dir,
-            mirror: spec.mirror_log.clone(),
+            mirror,
             historic: false,
         });
         self.lock_jobs().insert(id.clone(), Arc::clone(&entry));
@@ -574,10 +629,11 @@ impl Inner {
         if let Some(l) = entry.locks.iter().find(|l| s.held.contains(*l)) {
             return Err(l.describe());
         }
-        if s.running >= self.limits.max_parallel {
+        let limits = *lock(&self.limits);
+        if s.running >= limits.max_parallel {
             return Err(format!("a free job slot ({} jobs run)", s.running));
         }
-        if entry.heavy && s.heavy >= self.limits.max_heavy {
+        if entry.heavy && s.heavy >= limits.max_heavy {
             return Err("the build slot (daemon.max-build-jobs)".to_owned());
         }
         s.running += 1;
@@ -702,6 +758,33 @@ fn finish(inner: &Inner, entry: &JobEntry, outcome: Outcome, cancelled: bool) {
     publish_info(inner, entry);
     // send_replace updates the value even when nobody is subscribed right now (a later `wait` reads it).
     entry.done.send_replace(true);
+}
+
+/// Locks taken with [`JobManager::lock`]; dropping releases them.
+#[derive(Debug)]
+pub struct HeldLocks {
+    keys: Vec<LockKey>,
+    inner: Weak<Inner>,
+}
+
+impl HeldLocks {
+    /// The keys held.
+    pub fn keys(&self) -> &[LockKey] {
+        &self.keys
+    }
+}
+
+impl Drop for HeldLocks {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.upgrade() {
+            let mut s = lock(&inner.slots);
+            for k in &self.keys {
+                s.held.remove(k);
+            }
+            drop(s);
+            inner.wake.notify_waiters();
+        }
+    }
 }
 
 /// A submitted job.

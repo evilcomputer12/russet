@@ -6,17 +6,29 @@
 //!
 //! W2 owns this file and the runtime modules (CORE-06, CORE-13). [`run`] is `russet daemon run`; [`InProcess`]
 //! is the same daemon behind an in-process duplex (`--no-daemon`, tests).
+//!
+//! **Registration hooks.** The handler seam gives an area one call, `handlers/<ns>.rs::register(r)`
+//! (ARCHITECTURE §5.3). Besides its handlers, an area declares there what the daemon needs to know about its
+//! methods and services; the values travel as router extensions and the daemon takes them when it starts:
+//! - [`jobs::declare`]: a long-running method's job locks, weight, event mirror, kind and title (§6.2);
+//! - [`perms::typed_text`]: the text a typed confirmation expects (§7.5);
+//! - [`perms::project_bundle_ids`]: the bundle IDs of a connection's projects (`Ownership`, §5.3);
+//! - [`ctx::provide`]: the constructor of a `DaemonCtx` service (`config`, `secrets`, `toolchains`, `debug`,
+//!   `accounts`);
+//! - [`daemon::settings::from_config`] and [`daemon::settings::mcp_policy`]: the daemon's `config.toml` settings
+//!   and `mcp-policy.toml` (§14.3, §14.6).
 
 // Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
 const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use russet_core::Result;
 use russet_core::dirs::RussetDirs;
-use russet_ipc::{ClientInfo, Endpoint, Peer};
+use russet_ipc::{ClientInfo, Endpoint, Peer, Router};
 use russet_protocol::initialize::InitializeResult;
 
 pub mod approvals;
@@ -33,19 +45,27 @@ pub mod state;
 pub mod subs;
 pub mod web;
 
-pub use ctx::{DaemonCtx, DeviceSlot, Service};
+pub use ctx::{DaemonCtx, DeviceSlot, Service, ServiceEnv};
 pub use daemon::backend::DeviceBackend;
 pub use daemon::logging::LogOptions;
-pub use jobs::JobLimits;
+pub use daemon::settings::DaemonSettings;
+pub use jobs::{JobLimits, JobOptions};
 pub use perms::McpPolicy;
 
+/// Extra registrations on the daemon's router after the handler seam (tests, embedders).
+pub type Registration = Arc<dyn Fn(&mut Router<DaemonCtx>) + Send + Sync>;
+
 /// How to run the daemon (`russet daemon run`).
-#[derive(Debug)]
 pub struct DaemonOptions {
     pub dirs: RussetDirs,
     pub endpoint: Endpoint,
     /// `daemon.idle-timeout` (default 30 min); `None` or zero never idles out.
     pub idle_timeout: Option<Duration>,
+    /// `--idle-timeout` was given: `daemon.idle-timeout` does not override it (ARCHITECTURE §14.1).
+    pub idle_timeout_pinned: bool,
+    /// Read `config.toml` and `mcp-policy.toml` through the areas' hooks ([`daemon::settings`]). `from_env`
+    /// sets it; daemons built with [`DaemonOptions::new`] run with exactly their options.
+    pub read_config: bool,
     /// Log to stderr too.
     pub foreground: bool,
     /// `--allow-live-device`: development builds otherwise refuse the `live` backend without `RUSSET_LANE=A`
@@ -67,6 +87,32 @@ pub struct DaemonOptions {
     pub mcp_policy: McpPolicy,
     /// `[web] listen` (`127.0.0.1:0`).
     pub web_listen: SocketAddr,
+    /// Registrations after the handler seam's, in order.
+    pub registrations: Vec<Registration>,
+}
+
+impl std::fmt::Debug for DaemonOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DaemonOptions")
+            .field("dirs", &self.dirs)
+            .field("endpoint", &self.endpoint)
+            .field("idle_timeout", &self.idle_timeout)
+            .field("idle_timeout_pinned", &self.idle_timeout_pinned)
+            .field("read_config", &self.read_config)
+            .field("foreground", &self.foreground)
+            .field("allow_live_device", &self.allow_live_device)
+            .field("device_backend", &self.device_backend)
+            .field("lane_a", &self.lane_a)
+            .field("live_device_lock", &self.live_device_lock)
+            .field("home", &self.home)
+            .field("detach", &self.detach)
+            .field("log", &self.log)
+            .field("limits", &self.limits)
+            .field("mcp_policy", &self.mcp_policy)
+            .field("web_listen", &self.web_listen)
+            .field("registrations", &self.registrations.len())
+            .finish()
+    }
 }
 
 impl DaemonOptions {
@@ -78,6 +124,8 @@ impl DaemonOptions {
             dirs,
             endpoint,
             idle_timeout: Some(daemon::DEFAULT_IDLE_TIMEOUT),
+            idle_timeout_pinned: false,
+            read_config: false,
             foreground: false,
             allow_live_device: false,
             device_backend: DeviceBackend::None,
@@ -89,13 +137,16 @@ impl DaemonOptions {
             limits: JobLimits::default(),
             mcp_policy: McpPolicy::default(),
             web_listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            registrations: Vec::new(),
         }
     }
 
     /// Options from the environment: `RUSSET_DAEMON`, `RUSSET_DEVICE_BACKEND` (default `live`), `RUSSET_LANE`,
-    /// `RUSSET_LIVE_DEVICE_LOCK` (debug builds), `RUSSET_HOME`, `RUSSET_LOG`, `RUSSET_LOG_FORMAT`.
+    /// `RUSSET_LIVE_DEVICE_LOCK` (debug builds), `RUSSET_HOME`, `RUSSET_LOG`, `RUSSET_LOG_FORMAT`; the daemon
+    /// also reads `config.toml` and `mcp-policy.toml` ([`DaemonOptions::read_config`]).
     pub fn from_env(dirs: RussetDirs) -> Result<Self> {
         let mut o = Self::new(dirs);
+        o.read_config = true;
         o.endpoint = Endpoint::from_env(&o.dirs)?;
         o.device_backend = DeviceBackend::from_env()?;
         o.lane_a = std::env::var("RUSSET_LANE").is_ok_and(|v| v == "A");
@@ -149,6 +200,11 @@ impl InProcess {
     /// The daemon's context (tests).
     pub fn ctx(&self) -> &DaemonCtx {
         &self.daemon.ctx
+    }
+
+    /// The ownership queries the permission engine uses (`Ownership`, ARCHITECTURE §5.3; tests).
+    pub fn ownership(&self) -> &dyn russet_core::rpc::Ownership {
+        self.daemon.ownership()
     }
 
     /// Stops the daemon like `daemon.shutdown`.

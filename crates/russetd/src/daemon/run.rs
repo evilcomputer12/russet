@@ -4,20 +4,28 @@
 //! `russet daemon run` and the in-process daemon (ARCHITECTURE §3.3; core §6.3).
 //!
 //! Start: take `runtime/russetd.lock` (another daemon of this home makes this one exit with
-//! `ipc.daemonUnavailable`, exit 12), set up logging and the panic hook, recover jobs, decide the live-device
-//! state, bind the endpoint (a stale socket is replaced), write `runtime/russetd.json`.
+//! `ipc.daemonUnavailable`, exit 12), set up logging and the panic hook, build the router (the handler seam and
+//! the areas' registration hooks), recover jobs, decide the live-device state, read the settings, bind the
+//! endpoint (a stale socket is replaced), write `runtime/russetd.json`.
 //!
-//! Stop (`daemon.shutdown`, SIGTERM/SIGINT, idle exit): stop accepting, broadcast `daemon.shuttingDown`,
-//! cancel jobs with 10 s of grace (none with `force`) and kill what is left, end leases and subscriptions,
-//! close connections, remove `russetd.json`, release the lock.
+//! Stop (`daemon.shutdown`, SIGTERM/SIGINT, idle exit): broadcast `daemon.shuttingDown`, cancel jobs with 10 s
+//! of grace (none with `force`) and kill what is left, end leases and subscriptions, close connections, remove
+//! `russetd.json`, then stop listening, remove the socket and release the lock (core §6.3). The endpoint stays
+//! until the jobs have had their grace: a client that connects meanwhile gets `ipc.daemonUnavailable` with
+//! `details.shuttingDown` from `initialize`, waits for this daemon to go and starts a new one, instead of
+//! starting a daemon that cannot take the lock.
 //!
 //! Idle exit: after `idle-timeout` with no connections, no queued or running jobs, no detached leases and
 //! nothing holding a keep-alive (the MCP HTTP endpoint).
+//!
+//! An in-process daemon (`--no-daemon`, tests) runs the same context without a socket. It owns the home's
+//! persistent state only if it can take `runtime/russetd.lock` (and then holds it until it stops): otherwise
+//! a daemon of the same home runs, and the in-process one keeps its jobs in memory and recovers nothing.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use russet_core::error::{Error, Result};
+use russet_core::error::Result;
 use russet_ipc::{ClientInfo, ListenOptions, Peer, Router, Server, in_process, serve_peer};
 use russet_protocol::NotificationMethod;
 use russet_protocol::daemon::{DaemonShuttingDown, DaemonShuttingDownParams, ShutdownReason};
@@ -27,20 +35,25 @@ use tokio_util::sync::CancellationToken;
 use super::backend::live_allowed;
 use super::lock::{FileLock, LockHolder, already_running, take_live_device_lock};
 use super::logging::LogControl;
+use super::settings::{ConfigHooks, Pinned, SettingsControl};
 use super::{DaemonState, SHUTDOWN_GRACE};
 use crate::approvals::ApprovalService;
 use crate::audit::AuditLog;
-use crate::ctx::{DaemonCtx, DeviceSlot, LiveRefusal, LiveState, Service};
+use crate::ctx::{DaemonCtx, DeviceSlot, LiveRefusal, LiveState, ServiceFactories, Services};
 use crate::jobs::JobManager;
+use crate::jobs::declarations::JobDeclarations;
 use crate::jobs::layer::DaemonLayer;
 use crate::leases::LeaseTable;
-use crate::perms::{DaemonAuthorizer, DaemonOwnership, PermissionEngine};
+use crate::perms::{BundleIdResolver, DaemonAuthorizer, DaemonOwnership, PermissionEngine, TypedTexts};
 use crate::subs::SubscriptionHub;
 use crate::web::WebEndpoint;
 use crate::{DaemonOptions, handlers};
 
 /// How long a starting daemon waits for the lock of a daemon that is still shutting down.
 const LOCK_WAIT: Duration = Duration::from_secs(5);
+
+/// How often the daemon deletes log files past their retention.
+const LOG_SWEEP_EVERY: Duration = Duration::from_secs(6 * 3600);
 
 /// A built daemon: its context, router and authorizer.
 pub(crate) struct Built {
@@ -49,23 +62,51 @@ pub(crate) struct Built {
     pub auth: Arc<DaemonAuthorizer>,
 }
 
-fn secrets_config() -> russet_secrets::SecretsConfig {
-    use russet_secrets::BackendChoice;
-    let backend = match std::env::var("RUSSET_SECRETS_BACKEND").unwrap_or_default().as_str() {
-        "keyring" => BackendChoice::Keyring,
-        "passphrase" => BackendChoice::Passphrase,
-        "env" => BackendChoice::Env,
-        "memory" => BackendChoice::Memory,
-        _ => BackendChoice::Auto,
-    };
-    russet_secrets::SecretsConfig { backend }
+/// The router with every namespace's handlers and the extra registrations, and what they declared.
+struct Registered {
+    router: Router<DaemonCtx>,
+    factories: ServiceFactories,
+    declarations: JobDeclarations,
+    typed: TypedTexts,
+    bundle_ids: Option<BundleIdResolver>,
+    config_hooks: ConfigHooks,
 }
 
-/// Assembles the context: the live-device state, the services, the router with every namespace's handlers
-/// and the daemon layer, and the authorizer.
-pub(crate) fn build(opts: &DaemonOptions, logs: Arc<LogControl>, shutdown: CancellationToken) -> Result<Built> {
+fn register(opts: &DaemonOptions) -> Registered {
+    let mut router = Router::new();
+    handlers::register_all(&mut router);
+    for extra in &opts.registrations {
+        extra(&mut router);
+    }
+    let ext = router.extensions_mut();
+    let factories = ext.remove::<ServiceFactories>().unwrap_or_default();
+    let declarations = ext.remove::<JobDeclarations>().unwrap_or_default();
+    let typed = ext.remove::<TypedTexts>().unwrap_or_default();
+    let bundle_ids = ext.remove::<BundleIdResolver>();
+    let config_hooks = ext.remove::<ConfigHooks>().unwrap_or_default();
+    Registered { router, factories, declarations, typed, bundle_ids, config_hooks }
+}
+
+/// The holder record written into `runtime/russetd.lock` (for the error of the next daemon).
+fn record_home_lock(lock: &mut FileLock, in_process: bool) {
+    let record = serde_json::json!({"pid": std::process::id(), "inProcess": in_process});
+    if let Err(e) = lock.write_contents(record.to_string().as_bytes()) {
+        tracing::debug!("cannot record the daemon lock's holder: {}", e.message());
+    }
+}
+
+/// Assembles the context: the router with every namespace's handlers and the daemon layer, the live-device
+/// state, the services, and the authorizer. `owns_home`: this daemon holds `runtime/russetd.lock`, so it
+/// persists and recovers jobs.
+pub(crate) fn build(
+    opts: &DaemonOptions,
+    logs: Arc<LogControl>,
+    shutdown: CancellationToken,
+    owns_home: bool,
+) -> Result<Built> {
     let dirs = opts.dirs.clone();
     dirs.ensure()?;
+    let Registered { mut router, factories, declarations, typed, bundle_ids, config_hooks } = register(opts);
     let backend = opts.device_backend.clone();
     let live = if backend.is_live() {
         if live_allowed(russet_core::build_info::is_development(), opts.lane_a, opts.allow_live_device) {
@@ -91,19 +132,27 @@ pub(crate) fn build(opts: &DaemonOptions, logs: Arc<LogControl>, shutdown: Cance
         LiveState::NotLive
     };
     let devices = DeviceSlot::new(backend.clone(), live, dirs.state.join("devices"));
+    let services = Services::wire(&dirs, &devices, factories);
     let audit = AuditLog::new(dirs.audit_log());
+    let pinned = Pinned { idle_timeout: opts.idle_timeout_pinned, log_filter: opts.log.filter.is_some() };
     let state = Arc::new(DaemonState::new(
         dirs.clone(),
         backend.to_string(),
         opts.home.clone(),
         logs,
         opts.idle_timeout,
+        SettingsControl::new(config_hooks, opts.read_config, pinned),
+        owns_home,
         shutdown.clone(),
     ));
     let approvals = ApprovalService::new(state.connections.clone(), audit.clone());
-    let jobs = JobManager::new(Some(dirs.jobs()), opts.limits, shutdown.clone());
+    if !owns_home {
+        tracing::info!("another daemon owns this home: jobs stay in memory and nothing is recovered");
+    }
+    let jobs = JobManager::new(owns_home.then(|| dirs.jobs()), opts.limits, shutdown.clone());
     let leases = LeaseTable::default();
     let perms = Arc::new(PermissionEngine::new(opts.mcp_policy.clone()));
+    perms.install_typed_texts(typed);
     let web = WebEndpoint::new(opts.web_listen, shutdown.clone());
     {
         let state = Arc::clone(&state);
@@ -114,40 +163,17 @@ pub(crate) fn build(opts: &DaemonOptions, logs: Arc<LogControl>, shutdown: Cance
         });
     }
 
-    let config = {
-        let dirs = dirs.clone();
-        Service::lazy("config", move || Ok(Arc::new(russet_config::ConfigService::load(&dirs)?)))
+    let ownership = DaemonOwnership {
+        jobs: jobs.clone(),
+        leases: leases.clone(),
+        connections: state.connections.clone(),
+        bundle_ids,
     };
-    let secrets: Service<dyn russet_secrets::SecretStore> = {
-        let dirs = dirs.clone();
-        Service::lazy("secrets", move || russet_secrets::open_default(&dirs, &secrets_config()))
-    };
-    let toolchains = Service::unavailable("toolchains", || {
-        Error::not_implemented("russet-toolchain has no constructor yet (W3, CORE-10)")
-            .with_hint("The toolchain service lands with W3; see docs/PLAN.md §4.3.")
-    });
-    let debug = {
-        let devices = devices.clone();
-        Service::lazy("debug", move || {
-            let services: Arc<dyn russet_debug::DeviceServices> = Arc::new(devices.clone());
-            Ok(Arc::new(russet_debug::DebugService::new(services, russet_debug::DebugConfig::default())))
-        })
-    };
-    let accounts = {
-        let (dirs, secrets) = (dirs.clone(), secrets.clone());
-        Service::lazy("accounts", move || {
-            let store = secrets.get()?;
-            let endpoints = russet_core::net::Endpoints::from_env()?;
-            Ok(Arc::new(russet_account::AccountService::new(&dirs, store, endpoints)?))
-        })
-    };
-
-    let ownership = DaemonOwnership { jobs: jobs.clone(), leases: leases.clone() };
     let ctx = DaemonCtx {
         dirs,
-        config,
-        secrets,
-        toolchains,
+        config: services.config,
+        secrets: services.secrets,
+        toolchains: services.toolchains,
         jobs,
         leases,
         subs: SubscriptionHub::default(),
@@ -156,14 +182,12 @@ pub(crate) fn build(opts: &DaemonOptions, logs: Arc<LogControl>, shutdown: Cance
         audit: audit.clone(),
         web,
         devices: devices.clone(),
-        debug,
-        accounts,
+        debug: services.debug,
+        accounts: services.accounts,
         shutdown,
         daemon: state,
     };
-    let mut router = Router::new();
-    handlers::register_all(&mut router);
-    router.layer(Arc::new(DaemonLayer { ownership: ownership.clone() }));
+    router.layer(Arc::new(DaemonLayer { ownership: ownership.clone(), declarations: Arc::new(declarations) }));
     let auth = Arc::new(DaemonAuthorizer { engine: perms, approvals, devices, ownership, audit });
     Ok(Built { ctx, router: Arc::new(router), auth })
 }
@@ -188,15 +212,21 @@ pub(crate) async fn stop(ctx: &DaemonCtx) {
 }
 
 /// Requests an idle shutdown after `idle-timeout` without connections, jobs, detached leases or keep-alives.
+/// The timeout is read on every tick, so a reloaded `daemon.idle-timeout` applies.
 async fn idle_watch(ctx: DaemonCtx) {
-    let Some(timeout) = ctx.daemon.idle_timeout.filter(|t| !t.is_zero()) else { return };
-    let tick = (timeout / 4).clamp(Duration::from_millis(50), Duration::from_secs(1));
     let mut idle_since: Option<Instant> = None;
     loop {
+        let timeout = ctx.daemon.idle_timeout();
+        let tick = timeout
+            .map_or(Duration::from_secs(1), |t| (t / 4).clamp(Duration::from_millis(50), Duration::from_secs(1)));
         tokio::select! {
             () = ctx.shutdown.cancelled() => return,
             () = tokio::time::sleep(tick) => {}
         }
+        let Some(timeout) = ctx.daemon.idle_timeout() else {
+            idle_since = None;
+            continue;
+        };
         let counts = ctx.jobs.counts();
         let busy = ctx.daemon.connections.count() > 0
             || counts.queued + counts.running > 0
@@ -228,7 +258,10 @@ async fn watch_signals(ctx: DaemonCtx) {
             () = ctx.shutdown.cancelled() => return,
             _ = term.recv() => break,
             _ = int.recv() => break,
-            _ = hup.recv() => tracing::info!("SIGHUP: configuration reload comes with the config service (W3)"),
+            _ = hup.recv() => {
+                let r = super::settings::reload(&ctx);
+                tracing::info!(settings = r.settings.is_some(), mcp_policy = r.mcp_policy, "SIGHUP: settings reloaded");
+            }
         }
     }
     ctx.daemon.request_shutdown(ShutdownReason::Signal, false);
@@ -244,12 +277,25 @@ async fn watch_signals(ctx: DaemonCtx) {
     ctx.daemon.request_shutdown(ShutdownReason::Signal, false);
 }
 
+/// Deletes log files past their retention every [`LOG_SWEEP_EVERY`].
+async fn log_maintenance(ctx: DaemonCtx) {
+    loop {
+        tokio::select! {
+            () = ctx.shutdown.cancelled() => return,
+            () = tokio::time::sleep(LOG_SWEEP_EVERY) => {
+                ctx.daemon.logs.sweep();
+            }
+        }
+    }
+}
+
 /// Takes `runtime/russetd.lock`, waiting up to [`LOCK_WAIT`] for a daemon that is still stopping.
 async fn take_daemon_lock(opts: &DaemonOptions) -> Result<FileLock> {
     let path = opts.dirs.daemon_lock();
     let deadline = Instant::now() + LOCK_WAIT;
     loop {
-        if let Some(lock) = FileLock::try_take(&path)? {
+        if let Some(mut lock) = FileLock::try_take(&path)? {
+            record_home_lock(&mut lock, false);
             return Ok(lock);
         }
         if Instant::now() >= deadline {
@@ -278,7 +324,11 @@ pub async fn run(opts: DaemonOptions) -> Result<()> {
     };
     super::panics::install_hook(opts.dirs.panics());
     let shutdown = CancellationToken::new();
-    let Built { ctx, router, auth } = build(&opts, logs, shutdown.clone())?;
+    let Built { ctx, router, auth } = build(&opts, logs, shutdown.clone(), true)?;
+    let reloaded = super::settings::reload(&ctx);
+    if reloaded != super::settings::Reloaded::default() {
+        tracing::info!(settings = ?reloaded.settings, mcp_policy = reloaded.mcp_policy, "configuration applied");
+    }
     let server = Server::bind(&opts.endpoint, ListenOptions::default()).await?;
     ctx.daemon.set_endpoint(server.endpoint());
     ctx.daemon.write_discovery(None)?;
@@ -290,16 +340,21 @@ pub async fn run(opts: DaemonOptions) -> Result<()> {
     );
     tokio::spawn(watch_signals(ctx.clone()));
     tokio::spawn(idle_watch(ctx.clone()));
+    tokio::spawn(log_maintenance(ctx.clone()));
     let accepting = CancellationToken::new();
     let serving = tokio::spawn(server.serve(router, ctx.clone(), auth, accepting.clone()));
     shutdown.cancelled().await;
+    // The endpoint stays while the jobs have their grace (module docs); then the listener closes and the
+    // socket goes, and the lock is released last (core §6.3).
+    stop(&ctx).await;
     accepting.cancel();
     match serving.await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => tracing::warn!("the listener stopped with an error: {}", e.message()),
         Err(e) => tracing::warn!("the listener task failed: {e}"),
     }
-    stop(&ctx).await;
+    // Connections accepted during the stop were refused at `initialize`; close any that remain.
+    ctx.daemon.connections.close_all();
     tracing::info!("russetd stopped");
     drop(log_guard);
     drop(lock);
@@ -307,18 +362,31 @@ pub async fn run(opts: DaemonOptions) -> Result<()> {
 }
 
 /// An in-process daemon (`--no-daemon` and tests): the same context, router and authorizer behind
-/// [`in_process`], without a socket, a lock file or global logging.
+/// [`in_process`], without a socket or global logging. It holds `runtime/russetd.lock` when it can (module
+/// docs).
 pub struct InProcessDaemon {
     pub(crate) ctx: DaemonCtx,
     router: Arc<Router<DaemonCtx>>,
     auth: Arc<DaemonAuthorizer>,
+    home_lock: std::sync::Mutex<Option<FileLock>>,
 }
 
 impl InProcessDaemon {
     pub(crate) fn new(opts: &DaemonOptions) -> Result<Self> {
+        opts.dirs.ensure()?;
+        let mut home_lock = FileLock::try_take(&opts.dirs.daemon_lock())?;
+        if let Some(lock) = home_lock.as_mut() {
+            record_home_lock(lock, true);
+        }
         let logs = LogControl::detached(opts.log.filter.as_deref().unwrap_or(super::logging::DEFAULT_FILTER));
-        let Built { ctx, router, auth } = build(opts, logs, CancellationToken::new())?;
-        Ok(Self { ctx, router, auth })
+        let Built { ctx, router, auth } = build(opts, logs, CancellationToken::new(), home_lock.is_some())?;
+        let _ = super::settings::reload(&ctx);
+        Ok(Self { ctx, router, auth, home_lock: std::sync::Mutex::new(home_lock) })
+    }
+
+    /// The ownership queries of the daemon's authorizer.
+    pub(crate) fn ownership(&self) -> &DaemonOwnership {
+        &self.auth.ownership
     }
 
     /// A new client connection, not initialized yet.
@@ -339,5 +407,6 @@ impl InProcessDaemon {
     pub(crate) async fn stop(&self) {
         self.ctx.daemon.request_shutdown(ShutdownReason::Request, false);
         stop(&self.ctx).await;
+        drop(self.home_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
     }
 }

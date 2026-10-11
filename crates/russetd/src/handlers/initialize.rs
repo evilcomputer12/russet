@@ -8,7 +8,8 @@
 //! records a shared device reservation, arranges the cleanup when the connection closes, and answers with the
 //! daemon's identity. On a protocol major mismatch an idle daemon (no jobs, leases or other connections)
 //! answers `ipc.protocolMismatch` with `restartable: true` and shuts down, so the client can start its own
-//! build (ARCHITECTURE §3.3 item 3).
+//! build (ARCHITECTURE §3.3 item 3). A daemon that is shutting down answers `ipc.daemonUnavailable` with
+//! `details.shuttingDown` (the client waits for it to go and starts a new one; core §6.3).
 
 use std::time::Duration;
 
@@ -17,11 +18,12 @@ use russet_ipc::{RequestCtx, Router};
 use russet_protocol::PROTOCOL;
 use russet_protocol::daemon::ShutdownReason;
 use russet_protocol::initialize::{
-    self as p, InitializeParams, InitializeResult, ProtocolMismatchDetails, ServerCapabilities, ServerEndpoints,
-    ServerFeatures,
+    self as p, DaemonUnavailableDetails, InitializeParams, InitializeResult, ProtocolMismatchDetails,
+    ServerCapabilities, ServerEndpoints, ServerFeatures,
 };
 
 use crate::DaemonCtx;
+use crate::daemon::SHUTDOWN_GRACE;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
@@ -30,6 +32,17 @@ pub fn register(r: &mut Router<DaemonCtx>) {
 
 async fn initialize(cx: DaemonCtx, rq: RequestCtx, params: InitializeParams) -> Result<InitializeResult> {
     let session = rq.peer.session().cloned().ok_or_else(|| Error::internal("initialize without a session"))?;
+    if cx.daemon.is_shutting_down() {
+        let (_, force) = cx.daemon.shutdown_reason();
+        let details = DaemonUnavailableDetails {
+            shutting_down: true,
+            grace_ms: Some(if force { 0 } else { russet_core::time::millis(SHUTDOWN_GRACE) }),
+        };
+        return Err(Error::new(codes::ipc::DAEMON_UNAVAILABLE, "the daemon is shutting down")
+            .with_hint("Retry in a moment: `russet` waits for it to stop and starts a new daemon.")
+            .with_details(serde_json::to_value(details).unwrap_or_default())
+            .retryable(true));
+    }
     if params.protocol.major != PROTOCOL.major {
         let counts = cx.jobs.counts();
         let restartable =

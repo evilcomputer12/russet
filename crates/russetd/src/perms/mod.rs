@@ -20,24 +20,36 @@
 //! `approval.grant` and `approval.deny` are also limited to `ide` and interactive `cli` connections. Device-plane
 //! methods first pass the daemon's live-backend guard (3019, ARCHITECTURE §3.3 item 7). Profiles are
 //! guardrails, not a sandbox (ARCHITECTURE §7.5).
+//!
+//! **Rate limits** (§11.3) are token buckets per (MCP client, method), checked before the approval so a call
+//! that could not run asks no human. A call that then needs an approval, or presents an invalid one, gives its
+//! token back: only calls that are allowed to run use the bucket, so the approved retry of a
+//! `ship.upload` limited to 1 per 10 min runs.
+//!
+//! **Registration hooks** for the areas, called from their `handlers/<ns>.rs::register`: [`typed_text`] (the
+//! text a typed confirmation expects, default the method name) and [`project_bundle_ids`] (how the bundle IDs
+//! of a connection's projects are read, for `Ownership::project_bundle_ids`; W5).
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use russet_core::error::{Error, codes};
 use russet_core::ids::{JobId, LeaseId};
 use russet_core::rpc::{ClientKind, Confirm, ConnInfo, Ownership, Permission};
-use russet_ipc::{Authorizer, ConfirmSpec, Decision, Grant, PeerIdentity, TransportKind};
-use russet_protocol::MethodInfo;
+use russet_ipc::{Authorizer, ConfirmSpec, Decision, Grant, PeerIdentity, Router, TransportKind};
 use russet_protocol::audit::AuditKind;
 use russet_protocol::common::ClientRef;
 use russet_protocol::initialize::InitializeParams;
+use russet_protocol::{MethodInfo, RpcMethod};
 use serde_json::Value;
 
+use crate::DaemonCtx;
 use crate::approvals::ApprovalService;
 use crate::audit::{AuditLog, audited};
 use crate::ctx::DeviceSlot;
+use crate::daemon::Connections;
 use crate::jobs::JobManager;
 use crate::leases::LeaseTable;
 
@@ -87,8 +99,47 @@ impl McpPolicy {
     }
 }
 
-/// A typed confirmation's expected text for a method (W12, W23 register theirs).
-pub type TypedText = fn(&Value) -> Option<String>;
+/// A typed confirmation's expected text for a method's raw params (W12, W23 register theirs).
+pub type TypedText = Arc<dyn Fn(&Value) -> Option<String> + Send + Sync>;
+
+/// The typed-confirmation texts registered with [`typed_text`] (a router extension until the daemon takes it).
+#[derive(Clone, Default)]
+pub struct TypedTexts(BTreeMap<String, TypedText>);
+
+impl std::fmt::Debug for TypedTexts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.0.keys()).finish()
+    }
+}
+
+/// Registers the text that method `M`'s typed confirmation expects (ARCHITECTURE §7.5: for example the team ID
+/// of `portal.certificates.revoke`); `None` falls back to the method name. Call it from the owning area's
+/// `handlers/<ns>.rs::register`.
+pub fn typed_text<M: RpcMethod>(r: &mut Router<DaemonCtx>, f: fn(&M::Params) -> Option<String>) {
+    let text: TypedText =
+        Arc::new(move |v: &Value| serde_json::from_value::<M::Params>(v.clone()).ok().and_then(|p| f(&p)));
+    r.extensions_mut().get_or_default::<TypedTexts>().0.insert(M::NAME.to_owned(), text);
+}
+
+/// How the bundle IDs of a project root are read (`project_bundle_ids`).
+pub type BundleIdsOf = Arc<dyn Fn(&Path) -> Vec<String> + Send + Sync>;
+
+/// The resolver registered with [`project_bundle_ids`] (a router extension until the daemon takes it).
+#[derive(Clone)]
+pub struct BundleIdResolver(pub BundleIdsOf);
+
+impl std::fmt::Debug for BundleIdResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BundleIdResolver")
+    }
+}
+
+/// Registers how the bundle IDs of a project root are read (W5, from `russet.toml` and the manifests). A
+/// connection's own bundle IDs are those of the workspace roots it named at `initialize` (ARCHITECTURE §7.4);
+/// `app.uninstall` from an MCP client is allowed for them (§5.3). Without a resolver a connection owns none.
+pub fn project_bundle_ids(r: &mut Router<DaemonCtx>, f: impl Fn(&Path) -> Vec<String> + Send + Sync + 'static) {
+    r.extensions_mut().insert(BundleIdResolver(Arc::new(f)));
+}
 
 #[derive(Debug)]
 struct Bucket {
@@ -97,11 +148,19 @@ struct Bucket {
 }
 
 /// Decides per connection and per call (`DaemonCtx.perms`).
-#[derive(Debug)]
 pub struct PermissionEngine {
     policy: RwLock<McpPolicy>,
     buckets: Mutex<HashMap<(String, String), Bucket>>,
-    typed: RwLock<BTreeMap<String, TypedText>>,
+    typed: RwLock<TypedTexts>,
+}
+
+impl std::fmt::Debug for PermissionEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PermissionEngine")
+            .field("policy", &self.policy())
+            .field("typed", &*self.typed.read().unwrap_or_else(std::sync::PoisonError::into_inner))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for PermissionEngine {
@@ -163,7 +222,11 @@ fn is_local_file_import(method: &str, params: &Value) -> bool {
 impl PermissionEngine {
     /// An engine with `policy`.
     pub fn new(policy: McpPolicy) -> Self {
-        Self { policy: RwLock::new(policy), buckets: Mutex::new(HashMap::new()), typed: RwLock::new(BTreeMap::new()) }
+        Self {
+            policy: RwLock::new(policy),
+            buckets: Mutex::new(HashMap::new()),
+            typed: RwLock::new(TypedTexts::default()),
+        }
     }
 
     /// The MCP policy.
@@ -176,13 +239,19 @@ impl PermissionEngine {
         *self.policy.write().unwrap_or_else(std::sync::PoisonError::into_inner) = p;
     }
 
-    /// Registers the expected text of `method`'s typed confirmation (default: the method name).
+    /// Registers the expected text of `method`'s typed confirmation (default: the method name). Areas use the
+    /// [`typed_text`] hook instead.
     pub fn set_typed_text(&self, method: &str, f: TypedText) {
-        self.typed.write().unwrap_or_else(std::sync::PoisonError::into_inner).insert(method.to_owned(), f);
+        self.typed.write().unwrap_or_else(std::sync::PoisonError::into_inner).0.insert(method.to_owned(), f);
+    }
+
+    /// Takes over the texts registered with [`typed_text`].
+    pub fn install_typed_texts(&self, texts: TypedTexts) {
+        self.typed.write().unwrap_or_else(std::sync::PoisonError::into_inner).0.extend(texts.0);
     }
 
     fn typed_text(&self, method: &str, params: &Value) -> String {
-        let f = self.typed.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(method).copied();
+        let f = self.typed.read().unwrap_or_else(std::sync::PoisonError::into_inner).0.get(method).cloned();
         f.and_then(|f| f(params)).unwrap_or_else(|| method.to_owned())
     }
 
@@ -252,8 +321,10 @@ impl PermissionEngine {
         }
     }
 
-    fn rate_limited(&self, client: &str, method: &str) -> Option<Error> {
-        let limit = self.policy().rate_limits.get(method).copied()?;
+    /// Takes a token of `client`'s bucket for `method`: `Ok(true)` when a limit applies and a token was taken,
+    /// `Ok(false)` without a limit, `perm.rateLimited` when the bucket is empty.
+    fn take_token(&self, client: &str, method: &str) -> Result<bool, Error> {
+        let Some(limit) = self.policy().rate_limits.get(method).copied() else { return Ok(false) };
         let now = Instant::now();
         let mut buckets = self.buckets.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let b = buckets
@@ -264,16 +335,23 @@ impl PermissionEngine {
         b.last = now;
         if b.tokens >= 1.0 {
             b.tokens -= 1.0;
-            None
+            Ok(true)
         } else {
-            Some(
-                Error::new(
-                    codes::perm::RATE_LIMITED,
-                    format!("{method} is limited to {} per {:?}", limit.calls, limit.per),
-                )
-                .with_hint("Wait and retry; the limits are set in mcp-policy.toml.")
-                .retryable(true),
+            Err(Error::new(
+                codes::perm::RATE_LIMITED,
+                format!("{method} is limited to {} per {:?}", limit.calls, limit.per),
             )
+            .with_hint("Wait and retry; the limits are set in mcp-policy.toml.")
+            .retryable(true))
+        }
+    }
+
+    /// Gives back a token taken for a call that did not run (it needs an approval first).
+    fn return_token(&self, client: &str, method: &str) {
+        let Some(limit) = self.policy().rate_limits.get(method).copied() else { return };
+        let mut buckets = self.buckets.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(b) = buckets.get_mut(&(client.to_owned(), method.to_owned())) {
+            b.tokens = (b.tokens + 1.0).min(f64::from(limit.calls));
         }
     }
 
@@ -329,13 +407,19 @@ impl PermissionEngine {
                     .with_hint("A human may raise the client's `tier-max` in mcp-policy.toml (ARCHITECTURE §11.3)."),
                 ));
             }
-            if let Some(e) = self.rate_limited(&conn.name, info.name) {
-                return decide(Decision::Deny(e));
-            }
+            let took = match self.take_token(&conn.name, info.name) {
+                Ok(took) => took,
+                Err(e) => return decide(Decision::Deny(e)),
+            };
             if t >= 2 {
                 return decide(match approvals.check_call(conn, info.name, params, t) {
                     Ok(()) => Decision::Allow,
-                    Err(e) => Decision::NeedsApproval(e),
+                    Err(e) => {
+                        if took {
+                            self.return_token(&conn.name, info.name);
+                        }
+                        Decision::NeedsApproval(e)
+                    }
                 });
             }
             return decide(Decision::Allow);
@@ -394,11 +478,14 @@ impl PermissionEngine {
     }
 }
 
-/// Ownership queries over the daemon's jobs and leases.
+/// Ownership queries over the daemon's jobs, leases and connections.
 #[derive(Debug, Clone)]
 pub struct DaemonOwnership {
     pub jobs: JobManager,
     pub leases: LeaseTable,
+    pub connections: Connections,
+    /// The resolver registered with [`project_bundle_ids`].
+    pub bundle_ids: Option<BundleIdResolver>,
 }
 
 impl Ownership for DaemonOwnership {
@@ -408,9 +495,13 @@ impl Ownership for DaemonOwnership {
     fn owns_lease(&self, conn: &str, lease: &LeaseId) -> bool {
         self.leases.owns(conn, lease)
     }
-    fn project_bundle_ids(&self, _conn: &str) -> Vec<String> {
-        // The project model is W5's; until a connection's project is known, no bundle id is "its own".
-        Vec::new()
+    fn project_bundle_ids(&self, conn: &str) -> Vec<String> {
+        let Some(BundleIdResolver(resolve)) = &self.bundle_ids else { return Vec::new() };
+        let mut ids: Vec<String> =
+            self.connections.workspace_roots(conn).iter().flat_map(|root| resolve(Path::new(root))).collect();
+        ids.sort();
+        ids.dedup();
+        ids
     }
 }
 
@@ -614,6 +705,51 @@ mod tests {
         let w = World { engine: PermissionEngine::new(policy), ..World::new() };
         assert!(matches!(w.decide(ClientKind::Mcp, false, "build.start", json!({})), Decision::Allow));
         assert_eq!(code(&w.decide(ClientKind::Mcp, false, "build.start", json!({}))), Some("perm.rateLimited"));
+    }
+
+    #[test]
+    fn a_call_that_waits_for_an_approval_keeps_its_rate_limit_token() {
+        // The default policy limits ship.upload to 1 per 10 min (§11.3).
+        let mut policy = McpPolicy::default();
+        policy.clients.insert("client".into(), 3);
+        let w = World { engine: PermissionEngine::new(policy), ..World::new() };
+        let params = json!({"project": "/p", "ipa": "/p/App.ipa"});
+        for _ in 0..3 {
+            let d = w.decide(ClientKind::Mcp, false, "ship.upload", params.clone());
+            assert_eq!(code(&d), Some("perm.approvalRequired"), "asking for approvals uses no token");
+        }
+        let bad = json!({"project": "/p", "ipa": "/p/App.ipa", "approval": "apr_01J00000000000000000000000"});
+        assert_eq!(code(&w.decide(ClientKind::Mcp, false, "ship.upload", bad)), Some("perm.approvalInvalid"));
+        // A call allowed to run takes the token; the next one is limited before any approval is asked for.
+        let pending: Vec<_> = w.approvals.list(None).into_iter().map(|a| a.approval_id).collect();
+        let c = conn(ClientKind::Ide, false);
+        w.approvals.grant(&pending[0], None, &c).expect("granted");
+        let mut approved = params.clone();
+        approved["approval"] = json!(pending[0].as_str());
+        assert!(matches!(w.decide(ClientKind::Mcp, false, "ship.upload", approved), Decision::Allow));
+        let before = w.approvals.list(None).len();
+        assert_eq!(code(&w.decide(ClientKind::Mcp, false, "ship.upload", params)), Some("perm.rateLimited"));
+        assert_eq!(w.approvals.list(None).len(), before, "a limited call asks no human");
+    }
+
+    #[test]
+    fn typed_texts_and_bundle_ids_come_from_registrations() {
+        let mut r = Router::<DaemonCtx>::new();
+        typed_text::<russet_protocol::portal::PortalCertificatesRevoke>(&mut r, |_| Some("ABCDE12345".into()));
+        project_bundle_ids(&mut r, |_root| vec!["dev.example.app".into()]);
+        let texts = r.extensions_mut().remove::<TypedTexts>().expect("registered");
+        assert!(r.extensions().get::<BundleIdResolver>().is_some());
+        let w = World::new();
+        w.engine.install_typed_texts(texts);
+        match w.decide(ClientKind::Cli, true, "portal.certificates.revoke", json!({"certificateId": "c"})) {
+            Decision::Confirm(ConfirmSpec { typed: Some(t), .. }) => assert_eq!(t, "ABCDE12345"),
+            other => panic!("expected a typed confirmation, got {other:?}"),
+        }
+        // Without a registration the expected text is the method name.
+        match w.decide(ClientKind::Cli, true, "ship.review.submit", json!({})) {
+            Decision::Confirm(ConfirmSpec { typed: Some(t), .. }) => assert_eq!(t, "ship.review.submit"),
+            other => panic!("expected a typed confirmation, got {other:?}"),
+        }
     }
 
     #[test]
