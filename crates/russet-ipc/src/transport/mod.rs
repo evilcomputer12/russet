@@ -11,6 +11,7 @@
 
 use std::fmt;
 use std::net::SocketAddr;
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
