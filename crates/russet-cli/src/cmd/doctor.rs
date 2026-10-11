@@ -121,7 +121,8 @@ pub(crate) fn human(r: &p::DoctorReport) -> String {
         out.push(name);
         for c in r.checks.iter().filter(|c| c.category == cat) {
             out.push(format!("  {:<4}  {:<width$}  {}", status_label(c.status), c.id, c.message));
-            let pad = " ".repeat(8 + width);
+            // Under the message: "  " + the 4-wide status + "  " + the id column + "  ".
+            let pad = " ".repeat(width + 10);
             let problem = matches!(c.status, p::DoctorStatus::Fail | p::DoctorStatus::Warn);
             if problem && let Some(d) = &c.detail {
                 out.push(format!("{pad}{d}"));
@@ -247,6 +248,9 @@ mod tests {
         assert!(lines[host + 2].contains("warn") && lines[host + 2].contains("host.disk"), "{text}");
         assert!(text.contains("FAIL  toolchain.lldb"), "{text}");
         assert!(text.contains("hint: do this") && text.contains("fix: `russet doctor --fix --check toolchain.lldb`"));
+        let fail = lines.iter().position(|l| l.contains("FAIL  toolchain.lldb")).expect("the failure");
+        let message_column = lines[fail].find("toolchain.lldb says hello").expect("message");
+        assert_eq!(lines[fail + 1].find("hint:"), Some(message_column), "hints line up under the message:\n{text}");
         assert_eq!(lines.last().copied(), Some("1 passed, 1 warning, 1 failed, 0 skipped"));
     }
 }
