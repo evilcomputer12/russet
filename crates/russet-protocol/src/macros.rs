@@ -12,8 +12,9 @@
 /// ```
 ///
 /// `permission_fn` names a `fn(&Params, &ConnInfo, &dyn Ownership) -> russet_core::Result<Permission>` that
-/// overrides [`Method::permission`](crate::Method::permission) [D 66]. Params and Result must derive
-/// `Serialize, Deserialize, JsonSchema` and `TS`.
+/// overrides [`Method::permission`](crate::Method::permission) [D 66]; the method's
+/// [`MethodInfo`](crate::MethodInfo) then has `dynamic_permission` set and its `permission_of` calls the function.
+/// Params and Result must derive `Serialize, Deserialize, JsonSchema` and `TS`.
 #[macro_export]
 macro_rules! rpc_method {
     (
@@ -67,8 +68,14 @@ macro_rules! __rpc_method {
         }
 
         impl $crate::RpcMethod for $marker {
-            const INFO: $crate::MethodInfo = $crate::MethodInfo::of::<$marker>();
+            const INFO: $crate::MethodInfo = $crate::__rpc_method!(@info $marker $($pfn)?);
         }
+    };
+    (@info $marker:ident) => {
+        $crate::MethodInfo::of::<$marker>()
+    };
+    (@info $marker:ident $pfn:path) => {
+        $crate::MethodInfo::dynamic::<$marker>()
     };
 }
 

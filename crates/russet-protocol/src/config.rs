@@ -26,7 +26,8 @@ pub type ConfigSetParams = Unspecified;
 /// Result of `config.set`.
 pub type ConfigSetResult = Unspecified;
 crate::rpc_method!(
-    /// `config.set` (class `system`). W3 (Wave 1).
+    /// `config.set` (class `project` for the project and local scopes, `system` for global; resolved per call,
+    /// ceiling `system`). W3 (Wave 1).
     ConfigSet,
     "config.set",
     ConfigSetParams => ConfigSetResult,
@@ -49,7 +50,8 @@ pub type ConfigUnsetParams = Unspecified;
 /// Result of `config.unset`.
 pub type ConfigUnsetResult = Unspecified;
 crate::rpc_method!(
-    /// `config.unset` (class `system`). W3 (Wave 1).
+    /// `config.unset` (class `project` for the project and local scopes, `system` for global; resolved per
+    /// call, ceiling `system`). W3 (Wave 1).
     ConfigUnset,
     "config.unset",
     ConfigUnsetParams => ConfigUnsetResult,

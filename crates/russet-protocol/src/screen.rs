@@ -26,7 +26,8 @@ pub type ScreenMirrorStartParams = Unspecified;
 /// Result of `screen.mirror.start`.
 pub type ScreenMirrorStartResult = Unspecified;
 crate::rpc_method!(
-    /// `screen.mirror.start` (class `device`). W10 (Wave 2).
+    /// `screen.mirror.start` (class `read`, `input: true` → `device`; resolved per call, ceiling `device`).
+    /// W10 (Wave 2).
     ScreenMirrorStart,
     "screen.mirror.start",
     ScreenMirrorStartParams => ScreenMirrorStartResult,

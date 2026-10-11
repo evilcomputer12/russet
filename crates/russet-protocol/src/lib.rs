@@ -15,12 +15,15 @@
 // Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
 const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
 
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
+
 #[macro_use]
 mod macros;
 mod registry;
 
 pub use registry::{
-    MethodInfo, Namespace, NotificationInfo, RpcMethod, RpcNotification, TypeHooks, client_methods,
+    MethodInfo, Namespace, NotificationInfo, PermissionOf, RpcMethod, RpcNotification, TypeHooks, client_methods,
     namespace_of_module, namespaces, notifications, registry,
 };
 pub use russet_core::error::ErrorData;

@@ -50,7 +50,8 @@ pub type JobCancelParams = Unspecified;
 /// Result of `job.cancel`.
 pub type JobCancelResult = Unspecified;
 crate::rpc_method!(
-    /// `job.cancel` (class `system`). W2 (Wave 1).
+    /// `job.cancel` (class: the owner → `read`, anyone else → `system`; resolved per call, ceiling `system`).
+    /// W2 (Wave 1).
     JobCancel,
     "job.cancel",
     JobCancelParams => JobCancelResult,

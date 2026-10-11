@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, Result, codes};
-use russet_core::rpc::{ClientKind, ConnInfo, Method, NotificationMethod, Permission};
+use russet_core::rpc::{ClientKind, ConnInfo, Method, NotificationMethod, Ownership, Permission};
 use russet_protocol::initialize::{InitializeParams, InitializeResult};
 use russet_protocol::{MethodInfo, RpcMethod, RpcNotification};
 use secrecy::SecretString;
@@ -165,6 +165,10 @@ impl<C: Clone + Send + Sync + 'static> Router<C> {
     }
 
     /// Registers the handler of method `M`. Registering a name twice is a programming error.
+    ///
+    /// Params that do not deserialize currently give `core.invalidArgument` (1006). W2 (freeze F1) maps them to
+    /// JSON-RPC `-32602` with `details.path` at the IPC layer (ARCHITECTURE §13.1) and keeps 1006 for semantic
+    /// validation inside handlers.
     pub fn request<M, F, Fut>(&mut self, handler: F) -> &mut Self
     where
         M: RpcMethod,
@@ -175,6 +179,7 @@ impl<C: Clone + Send + Sync + 'static> Router<C> {
         let erased: RequestHandler<C> = Arc::new(move |cx, rq, params| {
             let handler = Arc::clone(&handler);
             Box::pin(async move {
+                // TODO(W2, F1): -32602 with details.path instead of 1006 (ARCHITECTURE §13.1).
                 let params: M::Params = serde_json::from_value(params).map_err(|e| {
                     Error::new(codes::core::INVALID_ARGUMENT, format!("invalid params for {}: {e}", M::NAME))
                 })?;
@@ -278,7 +283,16 @@ pub trait Authorizer: Send + Sync {
     /// uid, SID and token checks.
     fn on_connect(&self, id: &PeerIdentity) -> Result<()>;
     fn on_initialize(&self, id: &PeerIdentity, p: &InitializeParams) -> Result<Grant>;
-    fn decide(&self, grant: &Grant, method: &MethodInfo, params: &serde_json::Value) -> Decision;
+    /// The verdict for one call. The call's class is `(method.permission_of)(params, conn, ownership)`
+    /// (ARCHITECTURE §7.5 [D 66]): the ceiling for static rows, [`Method::permission`] for the dynamic ones.
+    fn decide(
+        &self,
+        grant: &Grant,
+        method: &MethodInfo,
+        params: &serde_json::Value,
+        conn: &ConnInfo,
+        ownership: &dyn Ownership,
+    ) -> Decision;
 }
 
 /// Listener options.
@@ -361,6 +375,7 @@ mod tests {
         assert_eq!(ok.map(|r| r.map_err(|e| e.code())), Some(Ok(serde_json::json!({}))));
         let missing = rt.block_on(router.dispatch((), rq(), DaemonStatus::NAME, serde_json::json!({})));
         assert!(missing.is_none());
+        // F0 behaviour; W2 (F1) answers JSON-RPC -32602 for these at the IPC layer (ARCHITECTURE §13.1).
         let bad = rt.block_on(router.dispatch((), rq(), "daemon.ping", serde_json::json!(7)));
         assert_eq!(bad.map(|r| r.map_err(|e| e.code())), Some(Err(codes::core::INVALID_ARGUMENT)));
     }

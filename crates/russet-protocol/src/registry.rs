@@ -9,10 +9,12 @@
 
 use std::sync::LazyLock;
 
+use russet_core::error::{Error, codes};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
+use serde::Deserialize;
 use ts_rs::TS;
 
-use crate::{Confirm, Method, NotificationMethod, Permission};
+use crate::{Confirm, ConnInfo, Method, NotificationMethod, Ownership, Permission};
 
 /// Schema and TypeScript hooks of one DTO type, so generators can work from the registry alone.
 #[derive(Clone, Copy)]
@@ -42,12 +44,24 @@ fn schema_of<T: JsonSchema>(g: &mut SchemaGenerator) -> Schema {
     g.subschema_for::<T>()
 }
 
+/// The per-call class of a method from its raw params [D 66]: [`Method::permission`] behind a type-erased
+/// call, so the router and the permission engine need no concrete method type.
+pub type PermissionOf = fn(&serde_json::Value, &ConnInfo, &dyn Ownership) -> russet_core::Result<Permission>;
+
 /// Static description of a request method.
 #[derive(Debug, Clone, Copy)]
 pub struct MethodInfo {
     pub name: &'static str,
     /// The ceiling class (ARCHITECTURE §7.5, §8 "Class").
     pub permission: Permission,
+    /// Whether the class is resolved per call: the §8 rows written "x (cond → y)" or "owner or system",
+    /// declared with `rpc_method!(…, permission_fn = …)`. [`Self::permission`] is then the ceiling.
+    pub dynamic_permission: bool,
+    /// The class of one call (ARCHITECTURE §7.5). Static rows return [`Self::permission`] without reading the
+    /// params. Dynamic rows deserialize them and call [`Method::permission`]: params that do not deserialize
+    /// give `core.invalidArgument` (the IPC layer answers JSON-RPC `-32602` for them, ARCHITECTURE §13.1), and a
+    /// row may refuse with `perm.denied` (`app.uninstall` from MCP).
+    pub permission_of: PermissionOf,
     pub confirm: Confirm,
     pub long_running: bool,
     pub params: TypeHooks,
@@ -55,7 +69,8 @@ pub struct MethodInfo {
 }
 
 impl MethodInfo {
-    /// The description of `M`; `rpc_method!` stores it as [`RpcMethod::INFO`].
+    /// The description of `M`, whose class is [`Method::PERMISSION`] on every call; `rpc_method!` stores it as
+    /// [`RpcMethod::INFO`].
     pub const fn of<M>() -> Self
     where
         M: Method,
@@ -65,12 +80,43 @@ impl MethodInfo {
         Self {
             name: M::NAME,
             permission: M::PERMISSION,
+            dynamic_permission: false,
+            permission_of: ceiling_of::<M>,
             confirm: M::CONFIRM,
             long_running: M::LONG_RUNNING,
             params: TypeHooks::of::<M::Params>(),
             result: TypeHooks::of::<M::Result>(),
         }
     }
+
+    /// The description of `M`, whose [`Method::permission`] depends on params or ownership;
+    /// `rpc_method!(…, permission_fn = …)` stores it as [`RpcMethod::INFO`].
+    pub const fn dynamic<M>() -> Self
+    where
+        M: Method,
+        M::Params: TS,
+        M::Result: TS,
+    {
+        Self { dynamic_permission: true, permission_of: per_call_permission_of::<M>, ..Self::of::<M>() }
+    }
+}
+
+fn ceiling_of<M: Method>(
+    _params: &serde_json::Value,
+    _c: &ConnInfo,
+    _o: &dyn Ownership,
+) -> russet_core::Result<Permission> {
+    Ok(M::PERMISSION)
+}
+
+fn per_call_permission_of<M: Method>(
+    params: &serde_json::Value,
+    conn: &ConnInfo,
+    ownership: &dyn Ownership,
+) -> russet_core::Result<Permission> {
+    let params = M::Params::deserialize(params)
+        .map_err(|e| Error::new(codes::core::INVALID_ARGUMENT, format!("invalid params for {}: {e}", M::NAME)))?;
+    M::permission(&params, conn, ownership)
 }
 
 /// Static description of a notification.
@@ -227,6 +273,62 @@ mod tests {
         for m in client_methods() {
             assert_eq!(m.permission, Permission::None, "{}: client-side requests carry no class", m.name);
         }
+    }
+
+    struct NoOwnership;
+
+    impl Ownership for NoOwnership {
+        fn owns_job(&self, _conn: &str, _job: &crate::JobId) -> bool {
+            false
+        }
+        fn owns_lease(&self, _conn: &str, _lease: &crate::LeaseId) -> bool {
+            false
+        }
+        fn project_bundle_ids(&self, _conn: &str) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    fn conn(kind: crate::ClientKind) -> ConnInfo {
+        ConnInfo { id: "c-1".into(), kind, name: "test".into(), interactive: false, shared_lease: None }
+    }
+
+    #[test]
+    fn the_dynamic_rows_are_the_documented_ones() {
+        // ARCHITECTURE §5.3 `Method::permission` and the §8 rows written "x (cond → y)" or "owner or system".
+        let dynamic: BTreeSet<&str> = registry().iter().filter(|m| m.dynamic_permission).map(|m| m.name).collect();
+        let expected = BTreeSet::from([
+            "app.uninstall",
+            "config.set",
+            "config.unset",
+            "doctor.run",
+            "job.cancel",
+            "lease.release",
+            "screen.mirror.start",
+        ]);
+        assert_eq!(dynamic, expected);
+    }
+
+    #[test]
+    fn the_per_call_class_is_reachable_through_the_registry() {
+        let find = |name: &str| registry().iter().find(|m| m.name == name).copied().expect(name);
+        let cli = conn(crate::ClientKind::Cli);
+        // Static rows answer their ceiling without reading the params.
+        let list = find("device.list");
+        assert_eq!((list.permission_of)(&serde_json::json!(7), &cli, &NoOwnership).ok(), Some(Permission::Read));
+        // Dynamic rows deserialize the params and call Method::permission.
+        let doctor = find("doctor.run");
+        assert!((doctor.permission_of)(&serde_json::json!({}), &cli, &NoOwnership).is_ok());
+        let bad = (doctor.permission_of)(&serde_json::json!(7), &cli, &NoOwnership).map_err(|e| e.code());
+        assert_eq!(bad, Err(codes::core::INVALID_ARGUMENT));
+        let uninstall = find("app.uninstall");
+        let mcp = conn(crate::ClientKind::Mcp);
+        let denied = (uninstall.permission_of)(&serde_json::json!({}), &mcp, &NoOwnership).map_err(|e| e.code());
+        assert_eq!(denied, Err(codes::perm::DENIED));
+        assert_eq!(
+            (uninstall.permission_of)(&serde_json::json!({}), &cli, &NoOwnership).ok(),
+            Some(Permission::Device)
+        );
     }
 
     #[test]

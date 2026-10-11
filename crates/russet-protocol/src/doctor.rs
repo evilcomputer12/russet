@@ -14,7 +14,8 @@ pub type DoctorRunParams = Unspecified;
 /// Result of `doctor.run`.
 pub type DoctorRunResult = Unspecified;
 crate::rpc_method!(
-    /// `doctor.run` (class `system`). W3 (+ area checks) (Wave 1).
+    /// `doctor.run` (class `read`, `fix` → `system`; resolved per call, ceiling `system`). MCP lists `doctor_run`
+    /// at tier 0 without `fix` (ARCHITECTURE §11.4). W3 (+ area checks) (Wave 1).
     DoctorRun,
     "doctor.run",
     DoctorRunParams => DoctorRunResult,

@@ -40,7 +40,8 @@ pub type AppUninstallParams = Unspecified;
 /// Result of `app.uninstall`.
 pub type AppUninstallResult = Unspecified;
 crate::rpc_method!(
-    /// `app.uninstall` (class `device`). W4 (Wave 1).
+    /// `app.uninstall` (class `device`; from MCP only the project's own or `dev.russet.test.*` bundle IDs, else
+    /// `perm.denied`; resolved per call). W4 (Wave 1).
     AppUninstall,
     "app.uninstall",
     AppUninstallParams => AppUninstallResult,

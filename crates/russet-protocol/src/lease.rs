@@ -26,7 +26,8 @@ pub type LeaseReleaseParams = Unspecified;
 /// Result of `lease.release`.
 pub type LeaseReleaseResult = Unspecified;
 crate::rpc_method!(
-    /// `lease.release` (class `system`). W2 (Wave 1).
+    /// `lease.release` (class: the owner → `read`, anyone else → `system`; resolved per call, ceiling `system`).
+    /// W2 (Wave 1).
     LeaseRelease,
     "lease.release",
     LeaseReleaseParams => LeaseReleaseResult,
