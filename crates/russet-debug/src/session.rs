@@ -518,6 +518,20 @@ fn rotate(sessions: &Path, keep: usize) {
 /// russet-core's `SessionId::generate` is W2's (CORE-02); until it lands this builds the same shape and goes
 /// through serde, the only public constructor of the newtype.
 pub fn new_session_id() -> SessionId {
+    prefixed_ulid(SessionId::PREFIX)
+}
+
+/// A prefixed ULID id of any of russet-core's id newtypes (`ses_`, `sub_`, …), built through serde.
+pub fn prefixed_ulid<T: serde::de::DeserializeOwned>(prefix: &str) -> T {
+    let text = format!("{prefix}{}", ulid());
+    match serde_json::from_value(serde_json::Value::String(text)) {
+        Ok(id) => id,
+        Err(_) => unreachable!("an id newtype deserializes from any string"),
+    }
+}
+
+/// A ULID: 48-bit millisecond time and 80 random bits in Crockford base32 (26 characters).
+pub fn ulid() -> String {
     use std::hash::{BuildHasher, Hasher};
     use std::sync::atomic::AtomicU64;
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -532,14 +546,7 @@ pub fn new_session_id() -> SessionId {
         random = (random << 64) | u128::from(h.finish());
     }
     let value = (ms << 80) | (random & ((1 << 80) - 1));
-    let mut text = String::with_capacity(30);
-    text.push_str(SessionId::PREFIX);
-    for i in (0..26).rev() {
-        let idx = ((value >> (i * 5)) & 0x1f) as usize;
-        text.push(char::from(ALPHABET[idx]));
-    }
-    serde_json::from_value(serde_json::Value::String(text))
-        .unwrap_or_else(|_| unreachable!("a string always deserializes"))
+    (0..26).rev().map(|i| char::from(ALPHABET[((value >> (i * 5)) & 0x1f) as usize])).collect()
 }
 
 #[cfg(test)]

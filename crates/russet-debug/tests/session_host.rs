@@ -89,7 +89,7 @@ fn debug_request(f: &Fixture, lease: SessionLease, attach_mode: AttachMode) -> D
         },
         platform: LldbPlatform::Host,
         init: InitSettings::default(),
-        script_dir: None,
+        script_root: None,
     }
 }
 

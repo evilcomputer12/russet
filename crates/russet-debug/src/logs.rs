@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use russet_protocol::common::{LogEntry, LogLevel, LogSource};
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::broadcast;
 
@@ -28,33 +27,7 @@ pub const CAPACITY: usize = 10_000;
 /// The stdio/os_trace dedup window.
 pub const DEDUP_WINDOW: Duration = Duration::from_millis(50);
 
-/// What `run.output.query` filters on.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OutputFilter {
-    /// Only these sources (all when empty).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sources: Vec<LogSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_level: Option<LogLevel>,
-    /// A plain substring of the message.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub contains: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subsystem: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-}
-
-impl OutputFilter {
-    pub fn matches(&self, e: &LogEntry) -> bool {
-        (self.sources.is_empty() || self.sources.contains(&e.source))
-            && self.min_level.is_none_or(|l| e.level >= l)
-            && self.contains.as_deref().is_none_or(|c| e.message.contains(c))
-            && self.subsystem.as_deref().is_none_or(|s| e.subsystem.as_deref() == Some(s))
-            && self.category.as_deref().is_none_or(|c| e.category.as_deref() == Some(c))
-    }
-}
+pub use russet_protocol::run::OutputFilter;
 
 struct Stamped {
     epoch_ms: i64,
@@ -294,7 +267,7 @@ mod tests {
         v.push(e);
         let only_errors = OutputFilter { min_level: Some(LogLevel::Error), ..OutputFilter::default() };
         assert_eq!(v.query(None, None, &only_errors).0.len(), 1);
-        let only_stdout = OutputFilter { sources: vec![LogSource::Stdout], ..OutputFilter::default() };
+        let only_stdout = OutputFilter { sources: Some(vec![LogSource::Stdout]), ..OutputFilter::default() };
         assert_eq!(v.query(None, None, &only_stdout).0[0].message, "PROBE seq=1");
         let sub = OutputFilter { subsystem: Some("dev.russet.probe".into()), ..OutputFilter::default() };
         assert_eq!(v.query(None, None, &sub).0[0].message, "boom");

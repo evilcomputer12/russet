@@ -24,7 +24,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use russet_core::Result;
 use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, codes};
@@ -53,6 +52,10 @@ pub use russet_protocol::common::{
     SessionSummary,
 };
 pub use session::{SessionHandle, new_session_id};
+
+/// `async_trait`, for implementations of [`DeviceServices`] and for russetd's pipeline ports: russetd's manifest
+/// is a seam file without the crate, and the macro's expansion names only `core` and `std` items.
+pub use async_trait::async_trait;
 
 use crate::broker::{Broker, BrokerEvent, EndpointSpec};
 use crate::launch::{InstalledAppInfo, LaunchChannel, LaunchSpec, LaunchStrategy, Launched};
@@ -296,9 +299,9 @@ pub struct DebugRequest {
     pub target: DebugTarget,
     pub platform: LldbPlatform,
     pub init: InitSettings,
-    /// Where `attach.lldb` goes: `<project>/.russet/debug/<sid>/` (ARCHITECTURE §14.8). `None`:
-    /// `state/sessions/<sid>/`.
-    pub script_dir: Option<PathBuf>,
+    /// `attach.lldb` goes to `<script_root>/<sid>/attach.lldb`; the pipeline passes `<project>/.russet/debug`
+    /// (ARCHITECTURE §14.8). `None`: `state/sessions/<sid>/`.
+    pub script_root: Option<PathBuf>,
 }
 
 /// `debug.attach` to a running process. W11 defines the fields.
@@ -398,6 +401,7 @@ pub struct DebugService {
     dev: Arc<dyn DeviceServices>,
     cfg: DebugConfig,
     sessions: Mutex<BTreeMap<String, SessionHandle>>,
+    created: broadcast::Sender<SessionHandle>,
 }
 
 impl std::fmt::Debug for DebugService {
@@ -412,7 +416,13 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl DebugService {
     pub fn new(dev: Arc<dyn DeviceServices>, cfg: DebugConfig) -> Self {
-        Self { dev, cfg, sessions: Mutex::new(BTreeMap::new()) }
+        let (created, _) = broadcast::channel(64);
+        Self { dev, cfg, sessions: Mutex::new(BTreeMap::new()), created }
+    }
+
+    /// Sessions as they are created (`run.subscribe` without a session id).
+    pub fn watch_new(&self) -> broadcast::Receiver<SessionHandle> {
+        self.created.subscribe()
     }
 
     pub fn config(&self) -> &DebugConfig {
@@ -564,10 +574,10 @@ impl DebugService {
             AttachMode::Broker => lldb::attach_commands(&plan),
             AttachMode::LegacyAsync => lldb::legacy_async_commands(&plan, pid, launched.executable.as_deref()),
         };
-        let script_dir = r
-            .script_dir
-            .clone()
-            .or_else(|| self.cfg.state_dir.as_ref().map(|d| d.join("sessions").join(h.id().as_str())));
+        let script_dir = match &r.script_root {
+            Some(root) => Some(root.join(h.id().as_str())),
+            None => self.cfg.state_dir.as_ref().map(|d| d.join("sessions").join(h.id().as_str())),
+        };
         let attach_script = match script_dir {
             Some(dir) => {
                 let path = dir.join("attach.lldb");
@@ -635,6 +645,7 @@ impl DebugService {
             state_dir: self.cfg.state_dir.clone(),
             log_capacity: self.cfg.log_capacity,
         });
+        let _ = self.created.send(h.clone());
         let mut map = lock(&self.sessions);
         map.insert(h.id().as_str().to_owned(), h.clone());
         // Forget the oldest ended sessions beyond `keep_ended`.
