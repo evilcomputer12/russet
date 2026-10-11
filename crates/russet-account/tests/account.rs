@@ -253,6 +253,37 @@ async fn plans_zero_mutations_for_the_existing_xtool_profile() {
         .unwrap();
     assert!(v.ok, "{:#?}", v.findings);
 
+    // The pipeline's form: a product built with the canonical ID is signed as the provisioned (effective) one.
+    let canonical = e.tmp.path().join("Canonical.app");
+    std::fs::create_dir_all(&canonical).unwrap();
+    let mut info = plist::Dictionary::new();
+    for (k, v) in
+        [("CFBundleIdentifier", "com.example.hello"), ("CFBundleExecutable", "Hello"), ("CFBundlePackageType", "APPL")]
+    {
+        info.insert(k.into(), plist::Value::String(v.into()));
+    }
+    plist::Value::Dictionary(info).to_file_xml(canonical.join("Info.plist")).unwrap();
+    std::fs::write(canonical.join("Hello"), russet_macho::fixture::MachOBuilder::executable().build()).unwrap();
+    let mut req = SignAppRequest::from_outcome(canonical.clone(), Distribution::Development, &out);
+    assert_eq!(req.bundle_ids.get(""), Some(&bundle));
+    req.output = Some(e.tmp.path().join("signed/Canonical.app"));
+    req.get_task_allow = Some(true);
+    req.lint = None;
+    let report = svc.sign_app(req).await.unwrap();
+    assert_eq!(report.bundles[0].bundle_id, bundle);
+    let id_of = |p: &std::path::Path| {
+        plist::Value::from_file(p.join("Info.plist")).unwrap().into_dictionary().unwrap()["CFBundleIdentifier"]
+            .as_string()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(id_of(&report.output), bundle);
+    assert_eq!(id_of(&canonical), "com.example.hello", "the unsigned product keeps its ID");
+    assert!(russet_sign::verify(&report.output, &VerifyOptions::default()).unwrap().ok);
+    let mut bad = SignAppRequest::from_outcome(canonical, Distribution::Development, &out);
+    bad.bundle_ids.insert("PlugIns/Nope.appex".into(), "x.y".into());
+    assert_eq!(svc.sign_app(bad).await.unwrap_err().code(), codes::sign::BUNDLE_INVALID);
+
     // Without a cached profile for the bundle, signing explains what to do.
     let other = e.tmp.path().join("Other.app");
     std::fs::create_dir_all(&other).unwrap();

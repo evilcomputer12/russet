@@ -30,7 +30,8 @@ Accounts, identities, DevPortal, provisioning planner and applier, free-team pol
   ARCHITECTURE §16.5 (a lenient subset until W3's `ConfigService` and W5's `BundleIdPolicy` land).
 - `AccountService` (`DaemonCtx.accounts`) ties it together: plans applicable for 10 minutes (then
   `provision.planStale`; the clock is injectable), a read-only `verify`, `plan_project`, `sign_app` (identity and
-  per-bundle profile from the cache, signing on a blocking thread), and `known_teams` (what the daemon masks).
+  per-bundle profile from the cache, signing on a blocking thread; `SignAppRequest::from_outcome` is the pipeline's
+  form after a zero-mutation apply, with the plan's effective bundle IDs), and `known_teams` (what the daemon masks).
 - Doctor: `account.configured`, `account.identity`, `account.xtool-files` (files only, no network, no secrets).
 
 Tests run against synthetic PKI and a wiremock App Store Connect fake. Checks against the owner's real artifacts

@@ -2363,7 +2363,10 @@ the contract points among these are listed as contract change requests for the l
   written, and a run that fails before signing removes the copy it made. `BundleSigningInput` keeps its two F0
   fields; `get-task-allow` and the `CFBundleIdentifier` rewrite are `SignOptions` fields. Post-sign verification
   always runs and fails with `sign.verifyFailed` (5009); lint errors fail with `sign.lintFailed`. A build product
-  that is unsigned or only linker-signed skips the L-SIG lint rules with an info finding.
+  that is unsigned or only linker-signed skips the L-SIG lint rules with an info finding. The pipeline's step is
+  `SignAppRequest::from_outcome(app, distribution, &outcome)` after a zero-mutation `provision.apply`: it takes
+  the plan's identity, cached profiles and effective bundle IDs (§16.5), so a product whose `Info.plist` carries
+  the canonical ID is rewritten to the provisioned one in the signed copy (the unsigned product keeps its ID).
 - **Lints** (§8.6): L-MACHO-002's platform check (not iOS) is an error under `device-install` too, because dyld on
   the device refuses such an image; its SDK floor stays `app-store` only. L-MACHO-003 (minos above
   `MinimumOSVersion`) is a warning under `device-install` (the device installs it) and an error under `app-store`.

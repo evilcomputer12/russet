@@ -17,6 +17,7 @@ use russet_sign::{
 use crate::AccountService;
 use crate::identity::{IdentityId, SigningIdentity};
 use crate::profiles::{ProfileQuery, kind_for};
+use crate::provision::ProvisionOutcome;
 
 /// What to sign and how.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,9 @@ pub struct SignAppRequest {
     pub profiles: BTreeMap<String, PathBuf>,
     /// Requested entitlements by bundle path.
     pub entitlements: BTreeMap<String, PathBuf>,
+    /// Effective bundle IDs by bundle path (ARCHITECTURE §16.5): a bundle whose `CFBundleIdentifier` differs is
+    /// rewritten before signing, and its profile is chosen for the effective ID.
+    pub bundle_ids: BTreeMap<String, String>,
     /// `get-task-allow` for every app-like bundle (debug builds); `None` takes each profile's value.
     pub get_task_allow: Option<bool>,
     pub merge_policy: MergePolicy,
@@ -50,6 +54,7 @@ impl SignAppRequest {
             identity: None,
             profiles: BTreeMap::new(),
             entitlements: BTreeMap::new(),
+            bundle_ids: BTreeMap::new(),
             get_task_allow: None,
             merge_policy: MergePolicy::Least,
             output: None,
@@ -57,6 +62,19 @@ impl SignAppRequest {
             lint: Some(LintProfile::DeviceInstall),
             fixes: PreSignFixes::default(),
         }
+    }
+
+    /// The pipeline's signing step after `provision.apply`: the outcome's identity, cached profiles and
+    /// effective bundle IDs (so a product built with the canonical ID is signed as the provisioned one).
+    pub fn from_outcome(path: PathBuf, distribution: Distribution, outcome: &ProvisionOutcome) -> Self {
+        let mut r = Self::new(path);
+        r.distribution = distribution;
+        r.identity = outcome.identity.clone();
+        for b in &outcome.bundles {
+            r.profiles.insert(b.rel_path.clone(), b.profile_path.clone());
+            r.bundle_ids.insert(b.rel_path.clone(), b.bundle_id.clone());
+        }
+        r
     }
 }
 
@@ -75,8 +93,18 @@ impl AccountService {
             .all()
             .into_iter()
             .filter(|b| b.kind.needs_profile())
-            .map(|b| (b.rel_path.clone(), b.identifier().unwrap_or_default().to_owned()))
+            .map(|b| {
+                let id = r.bundle_ids.get(&b.rel_path).map_or(b.identifier().unwrap_or_default(), String::as_str);
+                (b.rel_path.clone(), id.to_owned())
+            })
             .collect();
+        if let Some(rel) = r.bundle_ids.keys().find(|rel| !bundles.iter().any(|(b, _)| b == *rel)) {
+            return Err(Error::new(
+                codes::sign::BUNDLE_INVALID,
+                format!("{} has no app-like bundle at `{rel}` to give a bundle ID", r.path.display()),
+            )
+            .with_hint("Effective bundle IDs name the app (\"\") or its extensions by their path inside the app."));
+        }
         let explicit: BTreeMap<String, ProvisioningProfile> = r
             .profiles
             .iter()
@@ -144,6 +172,13 @@ impl AccountService {
                 )
             })
             .collect();
+        // Only the bundles whose Info.plist names another ID are rewritten.
+        let rewrites: BTreeMap<String, String> = r
+            .bundle_ids
+            .iter()
+            .filter(|(rel, id)| app.find(rel).and_then(|b| b.identifier()) != Some(id.as_str()))
+            .map(|(rel, id)| (rel.clone(), id.clone()))
+            .collect();
         let loaded = self.identities().load_async(&identity.id).await?.into_inner();
         let options = SignOptions {
             output: r.output.clone().map_or(SignOutput::InPlace, SignOutput::CopyTo),
@@ -152,7 +187,7 @@ impl AccountService {
             fixes: r.fixes,
             lint: r.lint,
             get_task_allow: r.get_task_allow,
-            bundle_ids: BTreeMap::new(),
+            bundle_ids: rewrites,
         };
         let path = r.path.clone();
         tokio::task::spawn_blocking(move || {
