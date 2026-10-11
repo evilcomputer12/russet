@@ -1,18 +1,64 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! `portal.*`: developer-portal records (UDIDs masked unless revealed to ide). Owner: W6 (Wave 1), W12 (Wave 2).
+//! `portal.*`: developer-portal records (ARCHITECTURE §8.4). Owner: W6 (Wave 1), W12 (Wave 2).
 //!
-//! F0 stub (W1): every name of ARCHITECTURE §8.4 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
-//! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+//! The list rows read App Store Connect with GET-scoped tokens. UDIDs and device names are masked unless an
+//! `ide` connection asks with `reveal: true`. The Wave-2 rows keep placeholder DTOs ([`Unspecified`]).
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
 
-/// Params of `portal.certificates.list`: `{accountId?, filter?} → records`.
-pub type PortalCertificatesListParams = Unspecified;
+/// Params shared by the `portal.*.list` rows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalListParams {
+    /// Omitted: the default account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account_id: Option<String>,
+    /// A filter value: the certificate type (`DEVELOPMENT`), the bundle-ID prefix, or the profile type
+    /// (`IOS_APP_DEVELOPMENT`), depending on the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub filter: Option<String>,
+    /// `portal.devices.list` from an `ide` connection: unmasked UDIDs and names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reveal: Option<bool>,
+}
+
+/// A portal certificate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalCertificate {
+    pub id: String,
+    /// `DEVELOPMENT`, `DISTRIBUTION`, … (open).
+    pub certificate_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub serial: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub expires: Option<String>,
+    /// Whether a local identity holds its private key.
+    pub local_identity: bool,
+}
+
+/// Params of `portal.certificates.list`.
+pub type PortalCertificatesListParams = PortalListParams;
 /// Result of `portal.certificates.list`.
-pub type PortalCertificatesListResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalCertificatesListResult {
+    pub certificates: Vec<PortalCertificate>,
+}
 crate::rpc_method!(
     /// `portal.certificates.list` (class `read`). W6 (Wave 1).
     PortalCertificatesList,
@@ -21,10 +67,36 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `portal.devices.list`: `{accountId?, filter?} → records`.
-pub type PortalDevicesListParams = Unspecified;
+/// A registered device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalDevice {
+    pub id: String,
+    /// Masked (`0000…5F60`) unless revealed.
+    pub udid: String,
+    /// Omitted unless revealed (device names often name a person).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub platform: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub device_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub status: Option<String>,
+}
+
+/// Params of `portal.devices.list`.
+pub type PortalDevicesListParams = PortalListParams;
 /// Result of `portal.devices.list`.
-pub type PortalDevicesListResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalDevicesListResult {
+    pub devices: Vec<PortalDevice>,
+}
 crate::rpc_method!(
     /// `portal.devices.list` (class `read`). W6 (Wave 1).
     PortalDevicesList,
@@ -33,10 +105,30 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `portal.bundleIds.list`: `{accountId?, filter?} → records`.
-pub type PortalBundleIdsListParams = Unspecified;
+/// A registered bundle ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalBundleId {
+    pub id: String,
+    pub identifier: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub platform: Option<String>,
+    /// Enabled capability types (open strings).
+    pub capabilities: Vec<String>,
+}
+
+/// Params of `portal.bundleIds.list`.
+pub type PortalBundleIdsListParams = PortalListParams;
 /// Result of `portal.bundleIds.list`.
-pub type PortalBundleIdsListResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalBundleIdsListResult {
+    pub bundle_ids: Vec<PortalBundleId>,
+}
 crate::rpc_method!(
     /// `portal.bundleIds.list` (class `read`). W6 (Wave 1).
     PortalBundleIdsList,
@@ -45,10 +137,35 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `portal.profiles.list`: `{accountId?, filter?} → records`.
-pub type PortalProfilesListParams = Unspecified;
+/// A portal profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalProfile {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    /// `IOS_APP_DEVELOPMENT`, … (open).
+    pub profile_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub uuid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub expires: Option<String>,
+}
+
+/// Params of `portal.profiles.list`.
+pub type PortalProfilesListParams = PortalListParams;
 /// Result of `portal.profiles.list`.
-pub type PortalProfilesListResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalProfilesListResult {
+    pub profiles: Vec<PortalProfile>,
+}
 crate::rpc_method!(
     /// `portal.profiles.list` (class `read`). W6 (Wave 1).
     PortalProfilesList,

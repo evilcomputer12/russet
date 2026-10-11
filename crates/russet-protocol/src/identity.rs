@@ -1,18 +1,62 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! `identity.*`: signing identities. Owner: W6 (Wave 1), W12 (Wave 2).
+//! `identity.*`: signing identities (ARCHITECTURE §8.4; SIGN §6.3). Owner: W6 (Wave 1), W12 (Wave 2).
 //!
-//! F0 stub (W1): every name of ARCHITECTURE §8.4 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
-//! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+//! The `importP12`/`exportP12` rows keep placeholder DTOs ([`Unspecified`]) until W12 defines them.
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
 
-/// Params of `identity.list`: `{team?} → {identities: SigningIdentity[]}`.
-pub type IdentityListParams = Unspecified;
+/// A certificate kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum CertificateKind {
+    Development,
+    Distribution,
+}
+
+/// A signing identity's public part (`SigningIdentity`). The private key never leaves the daemon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SigningIdentity {
+    /// `<team>/<serial>`: what `sign.run {identityId}` takes.
+    pub id: String,
+    /// Masked (`*******XYZ`).
+    pub team_id: String,
+    pub kind: CertificateKind,
+    /// Uppercase hex without leading zeros (the portal's form).
+    pub serial: String,
+    pub label: String,
+    /// RFC 3339.
+    pub not_after: String,
+    pub expired: bool,
+    /// Lower-case hex SHA-1 of the certificate.
+    pub sha1: String,
+    /// `xtool` for the one-time import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub imported_from: Option<String>,
+}
+
+/// Params of `identity.list`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityListParams {
+    /// Only this team's identities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub team: Option<String>,
+}
 /// Result of `identity.list`.
-pub type IdentityListResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityListResult {
+    pub identities: Vec<SigningIdentity>,
+}
 crate::rpc_method!(
     /// `identity.list` (class `read`). W6 (Wave 1).
     IdentityList,
