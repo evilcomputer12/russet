@@ -157,7 +157,10 @@ fn foreign_holder(lock: &Path, home: &Path) -> Option<(u32, String)> {
     let text = std::fs::read_to_string(lock).ok()?;
     let (pid, held_home) = parse_holder(&text)?;
     let alive = Path::new("/proc").join(pid.to_string()).exists() || !cfg!(target_os = "linux");
-    let same = Path::new(&held_home).canonicalize().ok() == home.canonicalize().ok() || Path::new(&held_home) == home;
+    let same = match (Path::new(&held_home).canonicalize(), home.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => Path::new(&held_home) == home,
+    };
     (alive && !same).then_some((pid, held_home))
 }
 
