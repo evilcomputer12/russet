@@ -4,8 +4,8 @@
 //! `toolchain` handlers (ARCHITECTURE §8.1, §16). Owner: W3 (`toolchain.pins.update`: W26).
 //!
 //! [`list`], [`resolve`], [`install`], [`uninstall`] and [`gc`] work on the services alone and are tested without
-//! a daemon (`tests/toolchain_handlers.rs`). `toolchain.changed` comes from `Toolchains::subscribe`; the daemon
-//! core (W2) forwards each [`changed_params`] to every connection.
+//! a daemon (`tests/toolchain_handlers.rs`). `toolchain.changed` comes from `Toolchains::subscribe`:
+//! [`forward_changes`] sends each change to every connection through the daemon runtime's [`Notify`].
 
 use russet_config::ConfigService;
 use russet_core::error::Result;
@@ -15,14 +15,16 @@ use russet_protocol::toolchain as p;
 use russet_toolchain::{Component, Provenance, Requirement, SdkInfo, ToolInfo, Toolchains};
 use tokio_util::sync::CancellationToken;
 
-use super::config::{config_of, project_root, toolchains_of};
+use super::config::{Notify, config_of, forward, project_root, toolchains_of};
 use super::not_implemented;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::ToolchainList, _, _>(|cx: DaemonCtx, _rq, params| async move {
-        list(&*toolchains_of(&cx)?, params).await
+        // The configuration is needed only for a project's pins.
+        let config = if params.project.is_some() { Some(config_of(&cx)?) } else { None };
+        list(&*toolchains_of(&cx)?, config.as_deref(), params).await
     });
     r.request::<p::ToolchainResolve, _, _>(|cx: DaemonCtx, _rq, params| async move {
         resolve(&*toolchains_of(&cx)?, &*config_of(&cx)?, params).await
@@ -136,10 +138,48 @@ pub fn wire_sdk(s: &SdkInfo) -> p::SdkInfo {
     }
 }
 
-/// `toolchain.list`.
-pub async fn list(toolchains: &Toolchains, params: p::ToolchainListParams) -> Result<p::ToolchainListResult> {
-    project_root(params.project.as_deref())?;
-    let tools = toolchains.probe_all(params.refresh.unwrap_or(false)).await;
+/// The components a project's `[toolchain]` and `[debug]` sections choose.
+const PINNABLE: [Component; 5] =
+    [Component::Swift, Component::DarwinSdk, Component::Linker, Component::Lldb, Component::LldbDap];
+
+/// `toolchain.list`: every candidate in resolution order. With a project, the candidates its pins exclude are
+/// `ok: false` with the reason in `problems`, and a tool the project names by path comes first, so the first `ok`
+/// candidate of each component is the one `toolchain.resolve` picks for that project. `config` is needed only
+/// with a project.
+pub async fn list(
+    toolchains: &Toolchains,
+    config: Option<&ConfigService>,
+    params: p::ToolchainListParams,
+) -> Result<p::ToolchainListResult> {
+    let root = project_root(params.project.as_deref())?;
+    let mut tools = toolchains.probe_all(params.refresh.unwrap_or(false)).await;
+    if let (Some(root), Some(config)) = (root.as_deref(), config) {
+        for c in PINNABLE {
+            let req = requirement(config, Some(root), c)?;
+            if let Some(path) = req.path() {
+                let named = match toolchains.resolve(c, &req).await {
+                    Ok(t) => t,
+                    Err(e) => ToolInfo {
+                        component: c,
+                        version: String::new(),
+                        path: path.into(),
+                        provenance: Provenance::ProjectPin,
+                        env: Default::default(),
+                        ok: false,
+                        problems: vec![e.message().to_owned()],
+                    },
+                };
+                let at = tools.iter().position(|t| t.component == c).unwrap_or(tools.len());
+                tools.insert(at, named);
+            }
+            for t in tools.iter_mut().filter(|t| t.component == c) {
+                if let Some(why) = toolchains.unmet(t, &req) {
+                    t.ok = false;
+                    t.problems.push(why);
+                }
+            }
+        }
+    }
     let sdks = toolchains.sdks().await?;
     Ok(p::ToolchainListResult {
         tools: tools.iter().map(wire_tool).collect(),
@@ -221,4 +261,14 @@ pub async fn gc(toolchains: &Toolchains, params: p::ToolchainGcParams) -> Result
 /// The `toolchain.changed` params of a change the manager reported.
 pub fn changed_params(components: &[Component]) -> p::ToolchainChangedParams {
     p::ToolchainChangedParams { components: components.iter().copied().map(wire_component).collect() }
+}
+
+/// Sends `toolchain.changed` through `notify` for every install, uninstall and GC of `toolchains` until
+/// `shutdown`. The daemon runtime calls it once, when it starts the toolchain manager.
+pub fn forward_changes(
+    toolchains: &Toolchains,
+    shutdown: CancellationToken,
+    notify: Notify,
+) -> tokio::task::JoinHandle<()> {
+    forward::<p::ToolchainChanged, _>(toolchains.subscribe(), shutdown, notify, |c: &Vec<Component>| changed_params(c))
 }

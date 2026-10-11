@@ -112,7 +112,8 @@ pub struct PinsInfo {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolchainListParams {
-    /// The project root, for its `[toolchain]` pins.
+    /// The project root, for its `[toolchain]` and `[debug]` pins: candidates they exclude are listed with
+    /// `ok: false` and the reason in `problems`, and a tool the project names by path comes first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub project: Option<String>,
@@ -122,7 +123,8 @@ pub struct ToolchainListParams {
     pub refresh: Option<bool>,
 }
 
-/// Result of `toolchain.list`: every candidate of every component, in resolution order.
+/// Result of `toolchain.list`: every candidate of every component, in resolution order; the first `ok` candidate
+/// of a component is the one `toolchain.resolve` picks (for the given project).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolchainListResult {

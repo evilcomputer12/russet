@@ -106,3 +106,36 @@ fn changes_map_to_the_notification() {
     let n = h::changed_params(&c);
     assert_eq!(serde_json::to_value(&n).expect("ser"), json!({"scope": "project", "path": "/p/russet.toml"}));
 }
+
+/// What a recording `Notify` was asked to send.
+type Sent = std::sync::Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>;
+
+/// A `Notify` that records what it is asked to send.
+fn recorder() -> (h::Notify, Sent) {
+    let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = sent.clone();
+    let notify: h::Notify =
+        std::sync::Arc::new(move |m: &'static str, v| sink.lock().expect("sent").push((m.to_owned(), v)));
+    (notify, sent)
+}
+
+#[tokio::test]
+async fn config_changes_are_forwarded_to_every_connection_until_shutdown() {
+    let home = TempDir::new();
+    std::fs::create_dir_all(RussetDirs::under(home.path()).config).expect("config dir");
+    let svc = service(home.path());
+    let (notify, sent) = recorder();
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let task = h::forward_changes(&svc, shutdown.clone(), notify);
+    svc.set(russet_config::ConfigScope::Global, None, "daemon.max-build-jobs", json!(2)).expect("set");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while sent.lock().expect("sent").is_empty() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let first = sent.lock().expect("sent").first().cloned().expect("a config.changed");
+    assert_eq!(first.0, "config.changed");
+    assert_eq!(first.1["scope"], "global");
+    assert!(first.1["path"].as_str().is_some_and(|p| p.ends_with("config.toml")), "{}", first.1);
+    shutdown.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(5), task).await.expect("stops").expect("no panic");
+}

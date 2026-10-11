@@ -99,7 +99,7 @@ fn toolchains(home: &Path, host: HostEnv) -> Toolchains {
 async fn list_resolve_and_sdk_list() {
     let tmp = TempDir::new();
     let tc = toolchains(&tmp.path().join("home"), fixture(tmp.path()));
-    let list = th::list(&tc, p::ToolchainListParams::default()).await.expect("list");
+    let list = th::list(&tc, None, p::ToolchainListParams::default()).await.expect("list");
     assert_eq!(list.pins.source, "embedded");
     let linkers: Vec<_> = list.tools.iter().filter(|t| t.component == p::ToolComponent::Linker).collect();
     assert_eq!(linkers.len(), 2);
@@ -134,6 +134,61 @@ async fn list_resolve_and_sdk_list() {
     let linker = th::resolve(&tc, &svc, params(p::ToolComponent::Linker)).await.expect("project linker");
     assert_eq!(linker.path, project.join("tools/ld64.lld").display().to_string());
     assert_eq!((linker.version.as_str(), linker.provenance), ("23.1.4", p::ToolProvenance::ProjectPin));
+    // A tool the project names that does not work is an error, never a "resolved" tool.
+    script(&project.join("tools/ld64.lld"), "exit 3");
+    let err = th::resolve(&tc, &svc, params(p::ToolComponent::Linker)).await.expect_err("broken project linker");
+    assert_eq!(err.code(), codes::toolchain::BROKEN);
+}
+
+/// The first `ok` candidate of each component in `list`.
+fn selected(list: &p::ToolchainListResult, c: p::ToolComponent) -> Option<&p::ToolInfo> {
+    list.tools.iter().find(|t| t.component == c && t.ok)
+}
+
+#[tokio::test]
+async fn list_with_a_project_shows_what_the_project_resolves_to() {
+    let tmp = TempDir::new();
+    let tc = toolchains(&tmp.path().join("home"), fixture(tmp.path()));
+    let svc =
+        ConfigService::with_env(&RussetDirs::under(&tmp.path().join("home")), EnvOverrides::default()).expect("config");
+    let project = tmp.path().join("app");
+    std::fs::create_dir_all(&project).expect("project");
+    let with_project = || p::ToolchainListParams { project: Some(project.display().to_string()), refresh: None };
+
+    // No pins: the same selection as without a project.
+    let plain = th::list(&tc, None, p::ToolchainListParams::default()).await.expect("list");
+    let list = th::list(&tc, Some(&svc), with_project()).await.expect("list");
+    assert_eq!(list.tools, plain.tools);
+
+    // A Swift pin the host lacks, the llvm LLDB flavor, and a linker named by path.
+    script(&project.join("tools/ld64.lld"), "echo 'LLD 23.1.4'");
+    std::fs::write(
+        project.join("russet.toml"),
+        "[toolchain]\nswift = \"6.5\"\nlinker = \"tools/ld64.lld\"\n[debug]\nlldb = \"llvm\"\n",
+    )
+    .expect("pins");
+    let list = th::list(&tc, Some(&svc), with_project()).await.expect("list");
+    assert_eq!(selected(&list, p::ToolComponent::Swift), None, "{:?}", list.tools);
+    let swift = list.tools.iter().find(|t| t.component == p::ToolComponent::Swift).expect("swift");
+    assert!(swift.problems.iter().any(|p| p.contains("requires swift 6.5")), "{:?}", swift.problems);
+    let linker = selected(&list, p::ToolComponent::Linker).expect("the project's linker");
+    assert_eq!((linker.provenance.clone(), linker.version.as_str()), (p::ToolProvenance::ProjectPin, "23.1.4"));
+    let linkers: Vec<_> = list.tools.iter().filter(|t| t.component == p::ToolComponent::Linker).collect();
+    assert_eq!(linkers.len(), 3, "the named linker comes first, then the probed ones");
+    assert!(linkers[1].problems.iter().any(|p| p.contains("the project names")), "{:?}", linkers[1]);
+    assert_eq!(selected(&list, p::ToolComponent::Lldb), None, "the fixture has no llvm LLDB");
+    let lldb = list.tools.iter().find(|t| t.component == p::ToolComponent::Lldb).expect("swift lldb");
+    assert!(lldb.problems.iter().any(|p| p.contains("asks for the llvm lldb")), "{:?}", lldb.problems);
+
+    // The project's choices match what toolchain.resolve picks.
+    std::fs::write(project.join("russet.toml"), "[toolchain]\nswift = \"6.4\"\n").expect("pins");
+    let list = th::list(&tc, Some(&svc), with_project()).await.expect("list");
+    let resolve =
+        |c: p::ToolComponent| p::ToolchainResolveParams { component: c, project: Some(project.display().to_string()) };
+    for c in [p::ToolComponent::Swift, p::ToolComponent::Linker, p::ToolComponent::Lldb] {
+        let resolved = th::resolve(&tc, &svc, resolve(c)).await.expect("resolves");
+        assert_eq!(selected(&list, c), Some(&resolved), "{c:?}");
+    }
 }
 
 #[tokio::test]
@@ -213,31 +268,104 @@ async fn doctor_passes_toolchain_and_secrets_and_skips_usbmux_in_lane_d() {
     assert!(g.hint.is_some());
 }
 
-#[tokio::test]
-async fn an_lldb_without_remote_ios_fails_with_an_automatic_fix() {
-    let tmp = TempDir::new();
-    let home = tmp.path().join("home");
-    let host = fixture(tmp.path());
-    // Swift's LLDB without the remote-ios platform: the check fails and offers the automatic fix.
-    script(&tmp.path().join("swift/usr/bin/lldb"), "echo 'lldb version 21.0.0'");
-    let dirs = RussetDirs::under(&home);
-    let services = DoctorServices {
+fn services_for(home: &Path, host: HostEnv) -> DoctorServices {
+    let dirs = RussetDirs::under(home);
+    DoctorServices {
         dirs: dirs.clone(),
         config: Ok(Arc::new(ConfigService::with_env(&dirs, EnvOverrides::default()).expect("config"))),
         secrets: Ok(Arc::new(MemoryStore::new())),
-        toolchains: Ok(Arc::new(toolchains(&home, host))),
+        // Offline: a fix that tried to download would fail instead of reaching the network.
+        toolchains: Ok(Arc::new(toolchains(home, host).with_offline(true))),
         device_backend: "scripted:/tmp/s.toml".into(),
         live_refused: false,
         usbmux_address: None,
-    };
+    }
+}
+
+fn w3_registry() -> russet_doctor::Registry {
     let mut registry = russet_doctor::Registry::new();
     for c in dh::checks() {
         registry.register(c);
     }
-    let params = d::DoctorRunParams { checks: Some(vec!["toolchain.lldb".into()]), ..Default::default() };
-    let report = dh::run(&registry, &services, params).await.expect("doctor");
+    registry
+}
+
+#[tokio::test]
+async fn an_lldb_without_remote_ios_is_the_users_to_fix() {
+    let tmp = TempDir::new();
+    let home = tmp.path().join("home");
+    let host = fixture(tmp.path());
+    // Swift's LLDB without the remote-ios platform: installing python-shared would not help.
+    script(&tmp.path().join("swift/usr/bin/lldb"), "echo 'lldb version 21.0.0'");
+    let services = services_for(&home, host);
+    let registry = w3_registry();
+    let only = |fix: bool| d::DoctorRunParams {
+        checks: Some(vec!["toolchain.lldb".into()]),
+        fix: fix.then_some(true),
+        ..Default::default()
+    };
+    let report = dh::run(&registry, &services, only(false)).await.expect("doctor");
     let c = status_of(&report, "toolchain.lldb");
     assert_eq!(c.status, d::DoctorStatus::Fail, "{c:?}");
     assert!(c.message.contains("remote-ios"), "{}", c.message);
+    assert_eq!(c.fix, Some(d::DoctorFix::Manual));
+    let report = dh::run(&registry, &services, only(true)).await.expect("doctor --fix");
+    let c = status_of(&report, "toolchain.lldb");
+    assert_eq!((c.status, c.fix.clone()), (d::DoctorStatus::Fail, Some(d::DoctorFix::Manual)), "nothing installed");
+    assert!(c.detail.is_none(), "no fix was attempted: {:?}", c.detail);
+}
+
+#[tokio::test]
+async fn a_missing_linker_is_fixed_by_darwin_tools_unless_the_project_wants_another() {
+    let tmp = TempDir::new();
+    let home = tmp.path().join("home");
+    let mut host = fixture(tmp.path());
+    // No SDK bundle (so no bundle linker), only the system LLD 23.1.1, which is too old.
+    host.swift_sdk_dirs.clear();
+    let services = services_for(&home, host);
+    let registry = w3_registry();
+    let params = |project: Option<&Path>| d::DoctorRunParams {
+        checks: Some(vec!["toolchain.linker".into()]),
+        project: project.map(|p| p.display().to_string()),
+        ..Default::default()
+    };
+    let report = dh::run(&registry, &services, params(None)).await.expect("doctor");
+    let c = status_of(&report, "toolchain.linker");
+    assert_eq!(c.status, d::DoctorStatus::Fail, "{c:?}");
     assert_eq!(c.fix, Some(d::DoctorFix::Auto { applied: false }));
+    assert!(c.hint.as_deref().is_some_and(|h| h.contains("darwin-tools")), "{:?}", c.hint);
+
+    let project = tmp.path().join("app");
+    std::fs::create_dir_all(&project).expect("project");
+    std::fs::write(project.join("russet.toml"), "[toolchain]\nlinker = \"llvm@>=23.1.3\"\n").expect("pin");
+    let report = dh::run(&registry, &services, params(Some(&project))).await.expect("doctor");
+    let c = status_of(&report, "toolchain.linker");
+    assert_eq!((c.status, c.fix.clone()), (d::DoctorStatus::Fail, Some(d::DoctorFix::Manual)));
+}
+
+#[tokio::test]
+async fn toolchain_changes_are_forwarded_to_every_connection_until_shutdown() {
+    let tmp = TempDir::new();
+    let home = tmp.path().join("home");
+    let tc = toolchains(&home, fixture(tmp.path()));
+    // A leftover managed install nothing selects: GC removes it and reports the linker as changed.
+    let old = RussetDirs::under(&home).data.join("toolchains/darwin-tools/0.9.0");
+    std::fs::create_dir_all(&old).expect("old install");
+    std::fs::write(old.join(".russet-install.json"), "{}").expect("marker");
+    let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = sent.clone();
+    let notify: russetd::handlers::config::Notify =
+        Arc::new(move |m: &'static str, v| sink.lock().expect("sent").push((m.to_owned(), v)));
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let task = th::forward_changes(&tc, shutdown.clone(), notify);
+    let gc = th::gc(&tc, p::ToolchainGcParams { dry_run: None }).await.expect("gc");
+    assert_eq!(gc.removed.len(), 1);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while sent.lock().expect("sent").is_empty() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let got = sent.lock().expect("sent").clone();
+    assert_eq!(got, vec![("toolchain.changed".to_owned(), serde_json::json!({"components": ["linker"]}))]);
+    shutdown.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(5), task).await.expect("stops").expect("no panic");
 }

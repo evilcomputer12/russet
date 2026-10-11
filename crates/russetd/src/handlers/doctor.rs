@@ -16,7 +16,9 @@ use std::sync::Arc;
 use russet_config::ConfigService;
 use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, Result, codes};
-use russet_doctor::{Category, Check, CheckCx, CheckResult, Filter, Fix, Registry, Requires, Status, async_trait};
+use russet_doctor::{
+    Category, Check, CheckCx, CheckResult, Diagnosis, Filter, Fix, Registry, Requires, Status, async_trait,
+};
 use russet_ipc::Router;
 use russet_protocol::doctor as p;
 use russet_secrets::SecretStore;
@@ -206,9 +208,10 @@ fn missing_service(cx: &CheckCx, what: &'static str) -> CheckResult {
         .unwrap_or_else(|| CheckResult::skip(format!("{what} is not available in this context")))
 }
 
-/// A check over one daemon service.
+/// A check over one daemon service. Each type has `diagnose(cx) -> Diagnosis` (the result and how to fix it, which
+/// may depend on the cause) and `apply_fix(cx)`.
 macro_rules! check {
-    ($ty:ident, $id:literal, $title:literal, $cat:expr, $req:expr, $fix:expr) => {
+    ($ty:ident, $id:literal, $title:literal, $cat:expr, $req:expr) => {
         struct $ty;
         impl $ty {
             const ID: &'static str = $id;
@@ -228,47 +231,52 @@ macro_rules! check {
                 $req
             }
             async fn run(&self, cx: &CheckCx) -> CheckResult {
-                $ty::check(cx).await
+                $ty::diagnose(cx).await.result
+            }
+            async fn diagnose(&self, cx: &CheckCx) -> Diagnosis {
+                $ty::diagnose(cx).await
             }
             async fn fix(&self, cx: &CheckCx) -> Result<()> {
                 $ty::apply_fix(cx).await
-            }
-            fn fix_kind(&self) -> Fix {
-                $fix
             }
         }
     };
 }
 
-check!(ConfigGlobal, "config.global", "Global configuration files", Category::Config, Requires::default(), Fix::Manual);
+check!(ConfigGlobal, "config.global", "Global configuration files", Category::Config, Requires::default());
 check!(
     ConfigProject,
     "config.project",
     "Project configuration (russet.toml, russet.local.toml)",
     Category::Config,
-    Requires { project: true, ..Requires::default() },
-    Fix::Manual
+    Requires { project: true, ..Requires::default() }
 );
-check!(SecretsBackend, "secrets.backend", "Secret store", Category::Secrets, Requires::default(), Fix::Manual);
-check!(ToolchainSwift, "toolchain.swift", "Swift toolchain", Category::Toolchain, Requires::default(), Fix::Manual);
-check!(ToolchainSdk, "toolchain.sdk", "Darwin SDK", Category::Toolchain, Requires::default(), Fix::Manual);
-check!(
-    ToolchainLinker,
-    "toolchain.linker",
-    "Linker for the Xcode 27 SDK",
-    Category::Toolchain,
-    Requires::default(),
-    Fix::Auto
-);
-check!(ToolchainLldb, "toolchain.lldb", "LLDB", Category::Toolchain, Requires::default(), Fix::Auto);
-check!(ToolchainLldbDap, "toolchain.lldb-dap", "lldb-dap", Category::Toolchain, Requires::default(), Fix::Auto);
-check!(ToolchainXtool, "toolchain.xtool", "xtool (optional)", Category::Toolchain, Requires::default(), Fix::None);
+check!(SecretsBackend, "secrets.backend", "Secret store", Category::Secrets, Requires::default());
+check!(ToolchainSwift, "toolchain.swift", "Swift toolchain", Category::Toolchain, Requires::default());
+check!(ToolchainSdk, "toolchain.sdk", "Darwin SDK", Category::Toolchain, Requires::default());
+check!(ToolchainLinker, "toolchain.linker", "Linker for the Xcode 27 SDK", Category::Toolchain, Requires::default());
+check!(ToolchainLldb, "toolchain.lldb", "LLDB", Category::Toolchain, Requires::default());
+check!(ToolchainLldbDap, "toolchain.lldb-dap", "lldb-dap", Category::Toolchain, Requires::default());
+check!(ToolchainXtool, "toolchain.xtool", "xtool (optional)", Category::Toolchain, Requires::default());
 
 fn no_fix() -> Result<()> {
     Err(Error::new(codes::core::NOT_IMPLEMENTED, "no automatic fix").with_hint("Follow the check's hint."))
 }
 
+/// A result whose failure the user fixes by following its hint.
+fn manual(result: CheckResult) -> Diagnosis {
+    Diagnosis::new(result, Fix::Manual)
+}
+
+/// The managed component whose install fixes `e` (the resolver's `install` detail), if one does.
+fn fixing_install(e: &Error) -> Option<String> {
+    e.to_data().details?.get("install")?.as_str().map(str::to_owned)
+}
+
 impl ConfigGlobal {
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        manual(Self::check(cx).await)
+    }
     async fn check(cx: &CheckCx) -> CheckResult {
         let Some(config) = cx.extension::<ConfigService>() else { return missing_service(cx, CONFIG) };
         let global = match config.global_loaded() {
@@ -295,6 +303,9 @@ impl ConfigGlobal {
 }
 
 impl ConfigProject {
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        manual(Self::check(cx).await)
+    }
     async fn check(cx: &CheckCx) -> CheckResult {
         let Some(config) = cx.extension::<ConfigService>() else { return missing_service(cx, CONFIG) };
         let Some(root) = cx.project.as_deref() else { return CheckResult::skip("no project") };
@@ -316,6 +327,9 @@ impl ConfigProject {
 }
 
 impl SecretsBackend {
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        manual(Self::check(cx).await)
+    }
     async fn check(cx: &CheckCx) -> CheckResult {
         let Some(h) = cx.extension::<SecretsHandle>() else { return missing_service(cx, SECRETS) };
         let info = h.0.status().await;
@@ -359,6 +373,9 @@ async fn tool_requirement(
 }
 
 impl ToolchainSwift {
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        manual(Self::check(cx).await)
+    }
     async fn check(cx: &CheckCx) -> CheckResult {
         let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
         let req = match tool_requirement(cx, Component::Swift).await {
@@ -393,6 +410,9 @@ impl ToolchainSwift {
 }
 
 impl ToolchainSdk {
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        manual(Self::check(cx).await)
+    }
     async fn check(cx: &CheckCx) -> CheckResult {
         let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
         match tc.sdks().await {
@@ -423,17 +443,26 @@ impl ToolchainSdk {
 }
 
 impl ToolchainLinker {
-    async fn check(cx: &CheckCx) -> CheckResult {
-        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        let Some(tc) = cx.extension::<Toolchains>() else { return manual(missing_service(cx, TOOLCHAINS)) };
         let req = match tool_requirement(cx, Component::Linker).await {
             Ok(r) => r,
-            Err(r) => return r,
+            Err(r) => return manual(r),
         };
         let linker = match tc.resolve(Component::Linker, &req).await {
             Ok(l) => l,
+            // Installing darwin-tools fixes a missing or unsupported linker, unless the project asks for another.
             Err(e) => {
-                return CheckResult::from_error(Status::Fail, &e)
-                    .with_hint("Run `russet doctor --fix --check toolchain.linker` to install darwin-tools 1.1.0.");
+                let r = CheckResult::from_error(Status::Fail, &e);
+                return match fixing_install(&e) {
+                    Some(c) => Diagnosis::new(
+                        r.with_hint(format!(
+                            "Run `russet doctor --fix --check toolchain.linker` (or `russet toolchain install {c}`)."
+                        )),
+                        Fix::Auto,
+                    ),
+                    None => manual(r),
+                };
             }
         };
         let source = match &linker.provenance {
@@ -465,7 +494,7 @@ impl ToolchainLinker {
         if !rejected.is_empty() {
             msg = format!("{msg}; {}", rejected.join("; "));
         }
-        CheckResult::pass(msg)
+        Diagnosis::new(CheckResult::pass(msg), Fix::None)
     }
     async fn apply_fix(cx: &CheckCx) -> Result<()> {
         install(cx, Component::Linker).await
@@ -482,19 +511,17 @@ async fn install(cx: &CheckCx, c: Component) -> Result<()> {
     tc.install(c, "", &LogProgress, &CancellationToken::new()).await.map(drop)
 }
 
-async fn lldb_check(cx: &CheckCx, c: Component) -> CheckResult {
-    let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
+/// LLDB and lldb-dap: the automatic fix (installing python-shared) is offered only when a missing libpython is
+/// the cause; an LLDB without `remote-ios`, or no LLDB at all, is the user's to fix.
+async fn lldb_diagnose(cx: &CheckCx, c: Component) -> Diagnosis {
+    let Some(tc) = cx.extension::<Toolchains>() else { return manual(missing_service(cx, TOOLCHAINS)) };
     let req = match tool_requirement(cx, c).await {
         Ok(r) => r,
-        Err(r) => return r,
+        Err(r) => return manual(r),
     };
     match tc.resolve(c, &req).await {
         Ok(t) => {
-            let flavor = if t.env.contains_key("PYTHONHOME") || t.env.contains_key("LD_LIBRARY_PATH") {
-                "swift"
-            } else {
-                "llvm"
-            };
+            let flavor = t.lldb_flavor();
             let python = match t.env.get("PYTHONHOME") {
                 Some(home) => {
                     let py = tc.resolve(Component::LibPython, &russet_toolchain::Requirement::any()).await.ok();
@@ -505,21 +532,30 @@ async fn lldb_check(cx: &CheckCx, c: Component) -> CheckResult {
                 }
                 None => String::new(),
             };
-            CheckResult::pass(format!("{flavor} {} {} at {}{python}", c.as_str(), t.version, t.path.display()))
+            Diagnosis::new(
+                CheckResult::pass(format!("{flavor} {} {} at {}{python}", c.as_str(), t.version, t.path.display())),
+                Fix::None,
+            )
         }
         Err(e) => {
-            let mut r = CheckResult::from_error(Status::Fail, &e);
-            if e.code() == codes::toolchain::BROKEN {
-                r = r.with_hint("Run `russet doctor --fix --check toolchain.lldb` to install python-shared (34 MB).");
+            let r = CheckResult::from_error(Status::Fail, &e);
+            match fixing_install(&e) {
+                Some(py) => Diagnosis::new(
+                    r.with_hint(format!(
+                        "Run `russet doctor --fix --check toolchain.{}` to install {py} (34 MB).",
+                        c.as_str()
+                    )),
+                    Fix::Auto,
+                ),
+                None => manual(r),
             }
-            r
         }
     }
 }
 
 impl ToolchainLldb {
-    async fn check(cx: &CheckCx) -> CheckResult {
-        lldb_check(cx, Component::Lldb).await
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        lldb_diagnose(cx, Component::Lldb).await
     }
     async fn apply_fix(cx: &CheckCx) -> Result<()> {
         install(cx, Component::LibPython).await
@@ -527,8 +563,8 @@ impl ToolchainLldb {
 }
 
 impl ToolchainLldbDap {
-    async fn check(cx: &CheckCx) -> CheckResult {
-        lldb_check(cx, Component::LldbDap).await
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        lldb_diagnose(cx, Component::LldbDap).await
     }
     async fn apply_fix(cx: &CheckCx) -> Result<()> {
         install(cx, Component::LibPython).await
@@ -536,6 +572,9 @@ impl ToolchainLldbDap {
 }
 
 impl ToolchainXtool {
+    async fn diagnose(cx: &CheckCx) -> Diagnosis {
+        manual(Self::check(cx).await)
+    }
     async fn check(cx: &CheckCx) -> CheckResult {
         let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
         match tc.resolve(Component::Xtool, &russet_toolchain::Requirement::any()).await {

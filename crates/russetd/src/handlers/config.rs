@@ -4,8 +4,9 @@
 //! `config` handlers (ARCHITECTURE §8.1, §14). Owner: W3.
 //!
 //! The handlers are thin: [`get`], [`set`], [`unset`] and [`schema`] work on a [`ConfigService`] alone, so they
-//! are tested without a daemon (`tests/config_handlers.rs`). `config.changed` is produced by
-//! `ConfigService::subscribe`; the daemon core (W2) forwards each [`changed_params`] to every connection.
+//! are tested without a daemon (`tests/config_handlers.rs`). `config.changed` comes from
+//! `ConfigService::subscribe`: [`forward_changes`] sends each change to every connection through the [`Notify`] the
+//! daemon runtime (W2) passes when the service starts.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,9 +14,12 @@ use std::sync::Arc;
 use russet_config::{ConfigFile, ConfigScope, ConfigService, ReadScope, SourceScope};
 use russet_core::error::{Error, Result, codes};
 use russet_ipc::Router;
+use russet_protocol::NotificationMethod;
 use russet_protocol::config as p;
 use russet_secrets::SecretStore;
 use russet_toolchain::Toolchains;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 use crate::DaemonCtx;
 
@@ -169,4 +173,50 @@ pub fn schema(config: &ConfigService, params: p::ConfigSchemaParams) -> p::Confi
 /// The `config.changed` params of a change the service reported.
 pub fn changed_params(c: &russet_config::ConfigChanged) -> p::ConfigChangedParams {
     p::ConfigChangedParams { scope: wire_scope(c.scope), path: path_string(&c.path) }
+}
+
+/// Sends one notification (method name, params) to every connection without blocking; the daemon runtime's
+/// broadcast (ARCHITECTURE §9.1, "delivered to: all").
+pub type Notify = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
+
+/// Forwards every item of `rx` as notification `N` until `shutdown` fires or the sender is gone.
+pub(crate) fn forward<N, T>(
+    mut rx: broadcast::Receiver<T>,
+    shutdown: CancellationToken,
+    notify: Notify,
+    params: impl Fn(&T) -> N::Params + Send + 'static,
+) -> tokio::task::JoinHandle<()>
+where
+    N: NotificationMethod,
+    T: Clone + Send + 'static,
+{
+    tokio::spawn(async move {
+        loop {
+            let item = tokio::select! {
+                () = shutdown.cancelled() => break,
+                item = rx.recv() => item,
+            };
+            match item {
+                Ok(v) => match serde_json::to_value(params(&v)) {
+                    Ok(json) => notify(N::NAME, json),
+                    Err(e) => tracing::warn!(target: "russetd::notify", "cannot encode {}: {e}", N::NAME),
+                },
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(target: "russetd::notify", "{} dropped {n} changes in a burst", N::NAME);
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    })
+}
+
+/// Sends `config.changed` through `notify` for every change of `config` (edits through Russet and, while the
+/// watcher runs, edits on disk) until `shutdown`. The daemon runtime calls it once, when it starts the
+/// configuration service.
+pub fn forward_changes(
+    config: &ConfigService,
+    shutdown: CancellationToken,
+    notify: Notify,
+) -> tokio::task::JoinHandle<()> {
+    forward::<p::ConfigChanged, _>(config.subscribe(), shutdown, notify, changed_params)
 }
