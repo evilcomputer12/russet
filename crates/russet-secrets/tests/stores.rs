@@ -12,7 +12,8 @@ use russet_core::secret::Redacted;
 use russet_secrets::passphrase::{KdfCost, PassphraseKeySource};
 use russet_secrets::sealed::SealedStore;
 use russet_secrets::{
-    BackendChoice, BackendKind, SecretBytes, SecretId, SecretKind, SecretStore, SecretsConfig, memory, open_default,
+    BackendChoice, BackendKind, SecretBytes, SecretId, SecretKind, SecretStore, SecretsConfig, SecretsEnv, memory,
+    open_with,
 };
 
 /// Cheap Argon2 parameters, so the suite stays fast; one test uses the real cost.
@@ -130,22 +131,20 @@ async fn the_default_argon2_cost_works() {
 async fn auto_keeps_the_backend_that_sealed_the_store() {
     let tmp = tempfile::tempdir().expect("tmp");
     let dirs = RussetDirs::under(tmp.path());
-    let cfg = SecretsConfig {
-        backend: BackendChoice::Passphrase,
-        passphrase: Some(Redacted("pw".into())),
-        ..SecretsConfig::default()
-    };
-    let store = open_default(&dirs, &cfg).expect("open");
+    let cfg = SecretsConfig { backend: BackendChoice::Passphrase };
+    let env = SecretsEnv { passphrase: Some(Redacted("pw".into())), ..SecretsEnv::default() };
+    let store = open_with(&dirs, &cfg, &env).expect("open");
     store.put(&id(SecretKind::GithubToken, "gh"), "gh", SecretBytes::new(b"t".to_vec())).await.expect("put");
 
     // auto with a session bus would pick the keyring for a new store, but this one was sealed by the passphrase.
-    let auto = SecretsConfig { backend: BackendChoice::Auto, session_bus: true, ..cfg.clone() };
-    let reopened = open_default(&dirs, &auto).expect("auto");
+    let auto = SecretsConfig { backend: BackendChoice::Auto };
+    let bus = SecretsEnv { session_bus: true, ..env.clone() };
+    let reopened = open_with(&dirs, &auto, &bus).expect("auto");
     assert_eq!(reopened.backend().kind, BackendKind::PassphraseFile);
     assert_eq!(reopened.get(&id(SecretKind::GithubToken, "gh")).await.expect("get").expect("v").expose(), b"t");
 
-    let keyring = SecretsConfig { backend: BackendChoice::Keyring, ..cfg };
-    let err = open_default(&dirs, &keyring).map(|_| ()).expect_err("conflicting backend");
+    let keyring = SecretsConfig { backend: BackendChoice::Keyring };
+    let err = open_with(&dirs, &keyring, &env).map(|_| ()).expect_err("conflicting backend");
     assert_eq!(err.code(), codes::secrets::LOCKED);
 }
 
@@ -153,19 +152,15 @@ async fn auto_keeps_the_backend_that_sealed_the_store() {
 fn two_russet_homes_get_two_keyring_entries() {
     let a = tempfile::tempdir().expect("a");
     let b = tempfile::tempdir().expect("b");
-    let cfg = |home: &Path| SecretsConfig {
-        backend: BackendChoice::Keyring,
-        russet_home: Some(home.to_path_buf()),
-        ..SecretsConfig::default()
-    };
-    // open_default never touches the keyring; the entry is named without I/O.
-    let sa = open_default(&RussetDirs::under(a.path()), &cfg(a.path())).expect("a");
-    let sb = open_default(&RussetDirs::under(b.path()), &cfg(b.path())).expect("b");
+    let cfg = SecretsConfig { backend: BackendChoice::Keyring };
+    let env = |home: &Path| SecretsEnv { russet_home: Some(home.to_path_buf()), ..SecretsEnv::default() };
+    // open_with never touches the keyring; the entry is named without I/O.
+    let sa = open_with(&RussetDirs::under(a.path()), &cfg, &env(a.path())).expect("a");
+    let sb = open_with(&RussetDirs::under(b.path()), &cfg, &env(b.path())).expect("b");
     let (ea, eb) = (sa.backend().keyring_entry.expect("entry a"), sb.backend().keyring_entry.expect("entry b"));
     assert!(ea.starts_with("master-key-") && eb.starts_with("master-key-"));
     assert_ne!(ea, eb);
-    let no_home = SecretsConfig { backend: BackendChoice::Keyring, ..SecretsConfig::default() };
-    assert_eq!(no_home.keyring_entry_name(), "master-key");
+    assert_eq!(SecretsEnv::default().keyring_entry_name(), "master-key");
 }
 
 #[tokio::test]

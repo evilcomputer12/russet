@@ -230,10 +230,25 @@ impl BackendChoice {
     }
 }
 
-/// Secret-store configuration.
+/// Secret-store configuration: the backend choice (F0 shape; `RUSSET_SECRETS_BACKEND`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SecretsConfig {
     pub backend: BackendChoice,
+}
+
+impl SecretsConfig {
+    /// Reads `RUSSET_SECRETS_BACKEND`; an unknown value is `secrets.unavailable` with a hint.
+    pub fn from_env() -> Result<Self> {
+        let backend = std::env::var("RUSSET_SECRETS_BACKEND").ok().filter(|s| !s.is_empty());
+        Ok(Self { backend: backend.map(|s| BackendChoice::parse(&s)).transpose()?.unwrap_or_default() })
+    }
+}
+
+/// What the environment adds to [`SecretsConfig`]: `RUSSET_HOME` (the keyring entry is per home [D 83]),
+/// `RUSSET_SECRETS_PASSPHRASE` and whether a D-Bus session bus exists. [`open_default`] reads it from the
+/// process; tests pass their own to [`open_with`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SecretsEnv {
     /// `RUSSET_HOME`, when set: the keyring entry becomes `master-key-<sha256(RUSSET_HOME)[..8]>` [D 83].
     pub russet_home: Option<PathBuf>,
     /// An explicit keyring entry (the env-gated keyring test uses a unique one); overrides the default name.
@@ -244,22 +259,21 @@ pub struct SecretsConfig {
     pub session_bus: bool,
 }
 
-impl SecretsConfig {
-    /// Reads `RUSSET_SECRETS_BACKEND`, `RUSSET_SECRETS_PASSPHRASE`, `RUSSET_HOME` and the D-Bus session address.
-    pub fn from_env() -> Result<Self> {
+impl SecretsEnv {
+    /// Reads `RUSSET_HOME`, `RUSSET_SECRETS_PASSPHRASE` and the D-Bus session address of this process.
+    pub fn from_env() -> Self {
         let var = |v: &str| std::env::var(v).ok().filter(|s| !s.is_empty());
-        Ok(Self {
-            backend: var("RUSSET_SECRETS_BACKEND").map(|s| BackendChoice::parse(&s)).transpose()?.unwrap_or_default(),
+        Self {
             russet_home: var("RUSSET_HOME").map(PathBuf::from),
             keyring_entry: None,
             passphrase: var(passphrase::PASSPHRASE_VAR).map(Redacted),
             session_bus: cfg!(windows)
                 || var("DBUS_SESSION_BUS_ADDRESS").is_some()
                 || var("XDG_RUNTIME_DIR").is_some_and(|d| std::path::Path::new(&d).join("bus").exists()),
-        })
+        }
     }
 
-    /// The keyring entry name this configuration uses.
+    /// The keyring entry name this environment uses.
     pub fn keyring_entry_name(&self) -> String {
         self.keyring_entry.clone().unwrap_or_else(|| keyring::entry_name(self.russet_home.as_deref()))
     }
@@ -315,30 +329,35 @@ pub fn secrets_dir(dirs: &RussetDirs) -> PathBuf {
 /// does not answer and `RUSSET_SECRETS_PASSPHRASE` is set), else the passphrase store when a passphrase is set,
 /// else the keyring (which then reports itself unavailable, with a hint).
 pub fn open_default(dirs: &RussetDirs, cfg: &SecretsConfig) -> Result<Arc<dyn SecretStore>> {
+    open_with(dirs, cfg, &SecretsEnv::from_env())
+}
+
+/// [`open_default`] with an explicit environment (tests).
+pub fn open_with(dirs: &RussetDirs, cfg: &SecretsConfig, env: &SecretsEnv) -> Result<Arc<dyn SecretStore>> {
     let dir = secrets_dir(dirs);
     let sealed_with = sealed::sealed_by(&dir);
     let keyring_store =
-        || sealed::SealedStore::new(dir.clone(), Box::new(keyring::KeyringKeySource::new(cfg.keyring_entry_name())));
+        || sealed::SealedStore::new(dir.clone(), Box::new(keyring::KeyringKeySource::new(env.keyring_entry_name())));
     let passphrase_store = || {
         sealed::SealedStore::new(
             dir.clone(),
             Box::new(passphrase::PassphraseKeySource::new(
                 dir.clone(),
-                cfg.passphrase.as_ref().map(|p| p.0.clone()),
+                env.passphrase.as_ref().map(|p| p.0.clone()),
                 passphrase::KdfCost::DEFAULT,
             )),
         )
     };
     // A new store with both candidates: the keyring if it answers on first use, else the passphrase (core §9.6).
-    if cfg.backend == BackendChoice::Auto && sealed_with.is_none() && cfg.session_bus && cfg.passphrase.is_some() {
+    if cfg.backend == BackendChoice::Auto && sealed_with.is_none() && env.session_bus && env.passphrase.is_some() {
         return Ok(Arc::new(auto::AutoStore::new(keyring_store(), passphrase_store())));
     }
     let choice = match cfg.backend {
         BackendChoice::Auto => match sealed_with {
             Some(BackendKind::PassphraseFile) => BackendChoice::Passphrase,
             Some(_) => BackendChoice::Keyring,
-            None if cfg.session_bus => BackendChoice::Keyring,
-            None if cfg.passphrase.is_some() => BackendChoice::Passphrase,
+            None if env.session_bus => BackendChoice::Keyring,
+            None if env.passphrase.is_some() => BackendChoice::Passphrase,
             None => BackendChoice::Keyring,
         },
         explicit => explicit,

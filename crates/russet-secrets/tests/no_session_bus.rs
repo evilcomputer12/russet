@@ -8,7 +8,7 @@
 use std::process::Command;
 
 use russet_core::dirs::RussetDirs;
-use russet_secrets::{BackendKind, SecretBytes, SecretId, SecretKind, SecretsConfig, open_default};
+use russet_secrets::{BackendKind, SecretBytes, SecretId, SecretKind, SecretsConfig, SecretsEnv, open_default};
 
 const CHILD_MARKER: &str = "RUSSET_SECRETS_NO_BUS_CHILD";
 
@@ -40,8 +40,9 @@ fn child_stores_a_secret_without_dbus() {
     }
     assert!(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none());
     let cfg = SecretsConfig::from_env().expect("config");
-    assert!(!cfg.session_bus);
-    let home = cfg.russet_home.clone().expect("RUSSET_HOME");
+    let env = SecretsEnv::from_env();
+    assert!(!env.session_bus);
+    let home = env.russet_home.clone().expect("RUSSET_HOME");
     let store = open_default(&RussetDirs::under(&home), &cfg).expect("open");
     assert_eq!(store.backend().kind, BackendKind::PassphraseFile);
     let rt = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
@@ -82,8 +83,9 @@ fn child_falls_back_to_the_passphrase() {
         return;
     }
     let cfg = SecretsConfig::from_env().expect("config");
-    assert!(cfg.session_bus, "a (broken) session bus is configured");
-    let home = cfg.russet_home.clone().expect("RUSSET_HOME");
+    let env = SecretsEnv::from_env();
+    assert!(env.session_bus, "a (broken) session bus is configured");
+    let home = env.russet_home.clone().expect("RUSSET_HOME");
     let store = open_default(&RussetDirs::under(&home), &cfg).expect("open");
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).build().expect("runtime");
     rt.block_on(async {

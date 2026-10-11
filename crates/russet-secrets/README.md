@@ -12,6 +12,9 @@ SecretStore over a keyring-core master key and sealed files; passphrase, env and
   (the master key in the OS keyring), `passphrase` (Argon2id, `RUSSET_SECRETS_PASSPHRASE`), `env` (read-only CI
   variables) or `memory` (tests). `auto` keeps the backend that sealed `data/secrets` (`store.json`); for a new
   store it takes the keyring when a session bus exists, else the passphrase store when a passphrase is set.
+  `SecretsConfig` keeps its F0 shape (`{ backend }`); what the process environment adds (`RUSSET_HOME`, the
+  passphrase, whether a session bus exists) is `SecretsEnv`, which `open_default` reads and tests pass to
+  `open_with(dirs, cfg, env)`.
 - Keyring and passphrase stores share one sealed layout in `data/secrets/` (0700, files 0600):
   `<sha256(id)>.sealed` (XChaCha20-Poly1305, AAD = id ‖ kind ‖ version), `index.json` (names only),
   `master.check` (detects a wrong passphrase or a replaced key before anything is overwritten), `store.json`,

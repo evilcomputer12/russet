@@ -26,9 +26,10 @@ async fn doctor_on_the_dev_box() {
     let home = std::env::temp_dir().join(format!("russet-w3-doctor-{}-{nanos}", std::process::id()));
     let dirs = RussetDirs::under(&home);
     let config = Arc::new(ConfigService::load(&dirs).expect("config"));
-    let mut secrets_cfg = russet_secrets::SecretsConfig::from_env().expect("secrets config");
-    secrets_cfg.russet_home = Some(home.clone());
-    let secrets = russet_secrets::open_default(&dirs, &secrets_cfg).expect("secrets");
+    let secrets_cfg = russet_secrets::SecretsConfig::from_env().expect("secrets config");
+    let secrets_env =
+        russet_secrets::SecretsEnv { russet_home: Some(home.clone()), ..russet_secrets::SecretsEnv::from_env() };
+    let secrets = russet_secrets::open_with(&dirs, &secrets_cfg, &secrets_env).expect("secrets");
     let toolchains = Arc::new(russet_toolchain::Toolchains::load(&dirs).expect("toolchains"));
     let services = DoctorServices::from_env(&dirs, config, secrets, toolchains);
     let report = dh::run(&russetd::doctor_registry::registry(), &services, d::DoctorRunParams::default()).await;

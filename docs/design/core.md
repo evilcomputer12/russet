@@ -532,7 +532,9 @@ Errors report the file, line and column. Spans come from `toml_edit` and key pat
 > `put/get/delete/list/backend`) plus `SecretStore::status()` (an async probe with a default) and
 > `BackendInfo.keyring_entry`. Backends: `SealedStore` with `KeyringKeySource` or `PassphraseKeySource`,
 > `EnvStore` (read-only CI variables), `MemoryStore` (tests); `redact` holds the field-name and JWT/PEM/Bearer
-> helpers. See §9.6 for the on-disk layout.
+> helpers. `SecretsConfig` is `{backend}`; `open_default` reads the rest of its inputs (`RUSSET_HOME`, the
+> passphrase, the session bus) into a `SecretsEnv`, and `open_with(dirs, cfg, env)` takes one explicitly (tests).
+> See §9.6 for the on-disk layout.
 
 ```rust
 pub struct SecretRef(String);   // stable id, e.g. "asc/team-main", "appleid/me@example.com", "cert/dev-ABCDE12345"
