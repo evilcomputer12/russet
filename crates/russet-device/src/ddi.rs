@@ -155,6 +155,28 @@ pub fn parse_mounted(entries: &[plist::Value]) -> Option<MountedImage> {
     })
 }
 
+/// The cryptexes in a cryptexd `copy-installed` reply (its `argv`): the `remote-cryptex-array` entries with a
+/// `remote-cryptex-identifier` and a `remote-cryptex-version` (the fields idevice's `copy_installed` reads).
+pub fn parse_installed(reply: Option<&plist::Value>) -> Vec<InstalledCryptex> {
+    let Some(array) = reply.and_then(|r| r.as_dictionary()).and_then(|d| d.get("remote-cryptex-array")) else {
+        return Vec::new();
+    };
+    array
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|e| {
+                    let e = e.as_dictionary()?;
+                    Some(InstalledCryptex {
+                        identifier: e.get("remote-cryptex-identifier")?.as_string()?.to_owned(),
+                        version: e.get("remote-cryptex-version")?.as_string()?.to_owned(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The DDI form expected for an iOS major version (17–26.x personalized DMG, 27+ Cryptex1).
 pub fn expected_kind(ios_major: Option<u32>) -> DdiKind {
     match ios_major {
@@ -309,10 +331,51 @@ fn check_cryptexd_reply(routine: &str, reply: &plist::Value) -> Result<()> {
     Ok(())
 }
 
+/// The RemoteXPC calls a cryptex install makes: the seam that lets the install's call site be checked without a
+/// device (what it sends, in which order). [`RemoteXpcClient`] is the real one.
+#[async_trait::async_trait]
+pub trait CryptexChannel: Send {
+    /// Sends one message on the root channel (expecting a reply).
+    async fn send_object(&mut self, msg: XPCObject) -> Result<()>;
+    /// Streams one announced file transfer.
+    async fn send_file_transfer(&mut self, msg_id: u64, data: &[u8]) -> Result<()>;
+    /// The reply.
+    async fn recv(&mut self) -> Result<plist::Value>;
+}
+
+#[async_trait::async_trait]
+impl<R: ReadWrite + Send> CryptexChannel for RemoteXpcClient<R> {
+    async fn send_object(&mut self, msg: XPCObject) -> Result<()> {
+        RemoteXpcClient::send_object(self, msg, true).await.map_err(|e| from_idevice(e, "cryptexd install"))
+    }
+
+    async fn send_file_transfer(&mut self, msg_id: u64, data: &[u8]) -> Result<()> {
+        RemoteXpcClient::send_file_transfer(self, msg_id, data)
+            .await
+            .map_err(|e| from_idevice(e, &format!("uploading cryptex transfer {msg_id}")))
+    }
+
+    async fn recv(&mut self) -> Result<plist::Value> {
+        RemoteXpcClient::recv(self).await.map_err(|e| from_idevice(e, "cryptexd install reply"))
+    }
+}
+
 /// The Cryptex1 install with the persistence fix, on one cryptexd connection.
 pub async fn install_cryptex(stream: Box<dyn ReadWrite>, assets: &Cryptex1Assets, im4m: Vec<u8>) -> Result<()> {
+    let mut xpc = RemoteXpcClient::new(stream).await.map_err(|e| from_idevice(e, "cryptexd connect"))?;
+    xpc.do_handshake().await.map_err(|e| from_idevice(e, "cryptexd handshake"))?;
+    install_cryptex_over(&mut xpc, assets, &im4m).await
+}
+
+/// The install routine on an open channel: the request with Xcode's values (`persistence` 2, `nonce-persistence` 1,
+/// [`cryptex_install_argv`]), the five payloads as transfers 1…5 in [`TRANSFER_KEYS`] order, then the reply check.
+pub async fn install_cryptex_over<C: CryptexChannel + ?Sized>(
+    xpc: &mut C,
+    assets: &Cryptex1Assets,
+    im4m: &[u8],
+) -> Result<()> {
     let properties = assets.cryptex1_properties().map_err(|e| from_idevice(e, "reading the cryptex identity"))?;
-    let payloads: [&[u8]; 5] = [&assets.image, &assets.trustcache, &im4m, &assets.info, &assets.volumehash];
+    let payloads: [&[u8]; 5] = [&assets.image, &assets.trustcache, im4m, &assets.info, &assets.volumehash];
     let sizes = payloads.map(|p| p.len() as u64);
     let argv = cryptex_install_argv(
         properties,
@@ -320,17 +383,11 @@ pub async fn install_cryptex(stream: Box<dyn ReadWrite>, assets: &Cryptex1Assets
         idevice::cryptexd::DDI_PERSISTENCE,
         idevice::cryptexd::DDI_NONCE_PERSISTENCE,
     );
-    let mut xpc = RemoteXpcClient::new(stream).await.map_err(|e| from_idevice(e, "cryptexd connect"))?;
-    xpc.do_handshake().await.map_err(|e| from_idevice(e, "cryptexd handshake"))?;
-    xpc.send_object(XPCObject::Dictionary(cryptex_install_request(argv)), true)
-        .await
-        .map_err(|e| from_idevice(e, "cryptexd install"))?;
+    xpc.send_object(XPCObject::Dictionary(cryptex_install_request(argv))).await?;
     for (i, payload) in payloads.iter().enumerate() {
-        xpc.send_file_transfer(i as u64 + 1, payload)
-            .await
-            .map_err(|e| from_idevice(e, &format!("uploading the cryptex {}", TRANSFER_KEYS[i])))?;
+        xpc.send_file_transfer(i as u64 + 1, payload).await?;
     }
-    let reply = xpc.recv().await.map_err(|e| from_idevice(e, "cryptexd install reply"))?;
+    let reply = xpc.recv().await?;
     check_cryptexd_reply("install", &reply)
 }
 
@@ -363,8 +420,17 @@ impl DeviceHandle {
         CryptexdClient::new(stream).await.map_err(|e| from_idevice(e, "cryptexd connect"))
     }
 
+    /// cryptexd `copy-installed` as it answered: the reply's `argv` (lab recordings; [`parse_installed`] reads it).
+    pub async fn copy_installed_raw(&self) -> Result<Option<plist::Value>> {
+        self.cryptexd()
+            .await?
+            .invoke("copy-installed", Dictionary::new())
+            .await
+            .map_err(|e| from_idevice(e, "cryptexd copy-installed"))
+    }
+
     async fn installed_cryptexes(&self) -> Result<Vec<InstalledCryptex>> {
-        self.cryptexd().await?.copy_installed().await.map_err(|e| from_idevice(e, "cryptexd copy-installed"))
+        Ok(parse_installed(self.copy_installed_raw().await?.as_ref()))
     }
 
     fn ios_major(&self) -> Option<u32> {
@@ -629,8 +695,48 @@ mod tests {
   </dict>
 </dict></plist>"#;
 
+    /// cryptexd `copy-installed` (its reply's `argv`) as the rig answered it on 2026-10-11 with the same DDI
+    /// (recorded with `devlab cryptexd-installed`; the reply holds no personal data).
+    const COPY_INSTALLED_27A5228H: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>remote-cryptex-array</key>
+	<array>
+		<dict>
+			<key>remote-cryptex-identifier</key>
+			<string>com.apple.MobileAsset.DDI</string>
+			<key>remote-cryptex-version</key>
+			<string>27.1.5228.8</string>
+		</dict>
+	</array>
+</dict>
+</plist>"#;
+
     fn entries() -> Vec<plist::Value> {
         vec![plist::from_bytes(COPY_DEVICES_27A5228H.as_bytes()).expect("fixture parses")]
+    }
+
+    fn installed() -> Vec<InstalledCryptex> {
+        let reply: plist::Value = plist::from_bytes(COPY_INSTALLED_27A5228H.as_bytes()).expect("fixture parses");
+        parse_installed(Some(&reply))
+    }
+
+    #[test]
+    fn the_recorded_replies_give_the_rig_status() {
+        assert_eq!(installed(), ddi_cryptex("27.1.5228.8"));
+        let m = parse_mounted(&entries()).expect("mounted");
+        let s = status_from(Some(&m), &installed(), None, Some(27));
+        assert_eq!(
+            (s.mounted, s.kind, s.version.as_deref(), s.product_build.as_deref(), s.source),
+            (true, DdiKind::Cryptex1, Some("27.1.5228.8"), Some("27A5228h"), DdiOrigin::Unknown)
+        );
+        // An empty or odd reply means no cryptex, never an error.
+        assert!(parse_installed(None).is_empty());
+        assert!(parse_installed(Some(&plist::Value::Dictionary(plist::Dictionary::new()))).is_empty());
+        let mut odd = plist::Dictionary::new();
+        odd.insert("remote-cryptex-array".into(), plist::Value::Array(vec![plist::Value::String("x".into())]));
+        assert!(parse_installed(Some(&plist::Value::Dictionary(odd))).is_empty());
     }
 
     fn ddi_cryptex(version: &str) -> Vec<InstalledCryptex> {

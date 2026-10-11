@@ -35,9 +35,23 @@ use crate::tunnel::{Tunnel, TunnelConfig};
 
 /// The label idevice puts into lockdown requests.
 const LABEL: &str = "russet";
-/// Reconnect backoff for the mux `Listen` connection (device.md §6.1).
+/// Reconnect backoff for the mux `Listen` connection. device.md §6.1 sketches 0.25, 1, 3, 10 s, but DEV-02 wants a
+/// restarted usbmuxd to re-list the device within 5 s: with that schedule a restart slower than about 4 s waited until
+/// 14 s. A failed connect to a local socket costs nothing, so retry every second for the first minute, then every 5 s.
 const LISTEN_BACKOFF: [Duration; 4] =
-    [Duration::from_millis(250), Duration::from_secs(1), Duration::from_secs(3), Duration::from_secs(10)];
+    [Duration::from_millis(250), Duration::from_millis(500), Duration::from_secs(1), Duration::from_secs(5)];
+/// How many reconnect attempts use the 1 s step before the 5 s one.
+const LISTEN_FAST_ATTEMPTS: usize = 60;
+
+/// The delay before reconnect attempt `attempt` (0-based) of the mux `Listen` connection.
+pub(crate) fn listen_backoff(attempt: usize) -> Duration {
+    match attempt {
+        0 => LISTEN_BACKOFF[0],
+        1 => LISTEN_BACKOFF[1],
+        n if n < LISTEN_FAST_ATTEMPTS => LISTEN_BACKOFF[2],
+        _ => LISTEN_BACKOFF[3],
+    }
+}
 
 /// The real connector.
 #[derive(Debug)]
@@ -50,6 +64,8 @@ pub struct LiveConnector {
     /// One tunnel slot per device.
     tunnels: Arc<Mutex<HashMap<Udid, Arc<TunnelSlot>>>>,
     generation: Arc<AtomicU64>,
+    /// CoreDeviceProxy opens that were refused and retried ([`OPEN_BACKOFF`]); the HIL budget test asserts 0.
+    open_retries: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Default)]
@@ -133,7 +149,14 @@ impl LiveConnector {
             devices: Arc::default(),
             tunnels: Arc::default(),
             generation: Arc::new(AtomicU64::new(0)),
+            open_retries: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    /// How many tunnel opens the device refused and this connector retried. Retries hide refusals from callers, so
+    /// the HIL "100 session opens with 0 failures" budget checks this as well.
+    pub fn tunnel_open_retries(&self) -> u64 {
+        self.open_retries.load(Ordering::SeqCst)
     }
 
     /// The mux endpoint in use.
@@ -228,7 +251,7 @@ impl LiveConnector {
             if guard.is_none() {
                 let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
                 let provider = self.provider(udid).await?;
-                match open_with_retry(&provider, &self.tunnel_cfg, generation).await {
+                match open_with_retry(&provider, &self.tunnel_cfg, generation, &self.open_retries).await {
                     Ok(t) => {
                         slot.set_status(TunnelStatusRecord {
                             state: "up".into(),
@@ -444,9 +467,13 @@ impl ServiceConnector for LiveConnector {
                 if tx.is_closed() {
                     return;
                 }
-                match watch_once(&endpoint, &devices, &tunnels, &tx).await {
-                    Ok(()) => attempt = 0,
-                    Err(e) => tracing::debug!(error = %e.message(), "mux listen ended"),
+                let mut listened = false;
+                if let Err(e) = watch_once(&endpoint, &devices, &tunnels, &tx, &mut listened).await {
+                    tracing::debug!(error = %e.message(), "mux listen ended");
+                }
+                // A session that got as far as `Listen` restarts the backoff, however it ended.
+                if listened {
+                    attempt = 0;
                 }
                 // The mux went away: every device it reported is gone until it comes back.
                 let gone: Vec<Udid> =
@@ -456,7 +483,7 @@ impl ServiceConnector for LiveConnector {
                         return;
                     }
                 }
-                let delay = LISTEN_BACKOFF[attempt.min(LISTEN_BACKOFF.len() - 1)];
+                let delay = listen_backoff(attempt);
                 attempt += 1;
                 tokio::time::sleep(delay).await;
             }
@@ -553,7 +580,12 @@ const OPEN_BACKOFF: [Duration; 5] = [
     Duration::from_millis(2400),
 ];
 
-async fn open_with_retry(provider: &MuxProvider, cfg: &TunnelConfig, generation: u64) -> Result<Tunnel> {
+async fn open_with_retry(
+    provider: &MuxProvider,
+    cfg: &TunnelConfig,
+    generation: u64,
+    retries: &AtomicU64,
+) -> Result<Tunnel> {
     let mut attempt = 0;
     loop {
         match Tunnel::open_usb(provider, cfg, generation).await {
@@ -563,7 +595,8 @@ async fn open_with_retry(provider: &MuxProvider, cfg: &TunnelConfig, generation:
                     && [codes::device::DISCONNECTED, codes::device::TUNNEL_FAILED, codes::device::IO]
                         .contains(&e.code()) =>
             {
-                tracing::debug!(attempt, error = %e.message(), "CoreDeviceProxy refused the tunnel; retrying");
+                retries.fetch_add(1, Ordering::SeqCst);
+                tracing::info!(attempt, error = %e.message(), "CoreDeviceProxy refused the tunnel; retrying");
                 tokio::time::sleep(OPEN_BACKOFF[attempt]).await;
                 attempt += 1;
             }
@@ -578,8 +611,10 @@ async fn watch_once(
     devices: &Arc<Mutex<HashMap<Udid, MuxDevice>>>,
     tunnels: &Arc<Mutex<HashMap<Udid, Arc<TunnelSlot>>>>,
     tx: &tokio::sync::mpsc::Sender<DeviceEvent>,
+    listened: &mut bool,
 ) -> Result<()> {
     let mut listen = MuxClient::connect(endpoint).await?.listen().await?;
+    *listened = true;
     loop {
         // Stop listening as soon as nobody watches (the manager is gone), not at the next mux event.
         let ev = tokio::select! {
@@ -624,4 +659,29 @@ async fn watch_once(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// DEV-02: a usbmuxd restart re-lists the device within 5 s. Reconnect attempts start 0.25 s after the loss and
+    /// come at least every second for a minute, so any restart shorter than 4 s is seen within 5 s.
+    #[test]
+    fn the_listen_backoff_retries_every_second_for_a_minute() {
+        let mut t = Duration::ZERO;
+        let mut attempts = Vec::new();
+        for a in 0..70 {
+            t += listen_backoff(a);
+            attempts.push(t);
+        }
+        assert_eq!(attempts[0], Duration::from_millis(250));
+        assert!(attempts.windows(2).take(59).all(|w| w[1] - w[0] <= Duration::from_secs(1)));
+        // The first attempt after a restart that took 4 s comes before 5 s.
+        let restart = Duration::from_secs(4);
+        let seen = attempts.iter().find(|t| **t >= restart).expect("an attempt after the restart");
+        assert!(*seen <= Duration::from_secs(5), "{seen:?}");
+        // After a minute of outage it backs off to 5 s.
+        assert_eq!(listen_backoff(65), Duration::from_secs(5));
+    }
 }

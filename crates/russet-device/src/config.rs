@@ -209,12 +209,20 @@ pub fn parse_duration(s: &str) -> Option<Duration> {
     (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
 }
 
+/// Serializes this process's read-modify-write edits of config files (two `device.alias.set` calls at once would
+/// otherwise each write their own copy and lose the other's alias).
+static CONFIG_EDITS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Sets `[devices.aliases] <alias> = "<udid>"` in `<config_dir>/config.toml`, keeping comments and order; an
-/// empty `udid` removes the alias. Written atomically (temporary file + rename).
+/// empty `udid` removes the alias. Written atomically (temporary file + rename), one edit at a time.
+///
+/// Until W3's `ConfigEditor` lands this is russet-device's own editor; it follows the same rules (comments kept, an
+/// existing file keeps its mode, a new one is 0600) and is replaced by `config.set` through the editor after W3.
 pub fn set_alias(config_dir: &Path, alias: &str, udid: &str) -> Result<PathBuf> {
     if alias.is_empty() || !alias.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err(crate::error::invalid_argument(format!("alias {alias:?}: use letters, digits, `-` and `_` only")));
     }
+    let _edit = CONFIG_EDITS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let path = config_dir.join("config.toml");
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -246,32 +254,50 @@ pub fn set_alias(config_dir: &Path, alias: &str, udid: &str) -> Result<PathBuf> 
     Ok(path)
 }
 
-/// Writes `bytes` to a temporary file next to `path` and renames it over `path` (mode 0600 on Unix).
+/// Writes `bytes` to a uniquely named temporary file next to `path` and renames it over `path`. An existing file
+/// keeps its mode; a new one is 0600 (Unix). The temporary file is removed when anything fails.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(dir)
         .map_err(|e| Error::new(codes::core::IO, format!("cannot create {}: {e}", dir.display())).caused_by(e))?;
     let tmp = dir.join(format!(
-        ".{}.{}.tmp",
+        ".{}.{}-{}.tmp",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
-        std::process::id()
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     let io =
         |e: std::io::Error| Error::new(codes::core::IO, format!("cannot write {}: {e}", path.display())).caused_by(e);
-    {
+    let written = (|| -> std::io::Result<()> {
         let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
+        opts.write(true).create_new(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
             opts.mode(0o600);
+            let mut f = opts.open(&tmp)?;
+            if let Ok(m) = std::fs::metadata(path) {
+                f.set_permissions(std::fs::Permissions::from_mode(m.permissions().mode() & 0o7777))?;
+            }
+            f.write_all(bytes)?;
+            f.sync_all()?;
         }
-        let mut f = opts.open(&tmp).map_err(io)?;
-        f.write_all(bytes).map_err(io)?;
-        f.sync_all().map_err(io)?;
+        #[cfg(not(unix))]
+        {
+            let mut f = opts.open(&tmp)?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, path)
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(io(e));
     }
-    std::fs::rename(&tmp, path).map_err(io)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -334,5 +360,43 @@ pymobiledevice3 = "off"
         cfg.apply_toml(&std::fs::read_to_string(&path).expect("read"), &path).expect("valid");
         assert!(cfg.aliases.is_empty());
         assert!(set_alias(dir.path(), "bad alias", "x").is_err());
+    }
+
+    #[test]
+    fn concurrent_alias_edits_keep_every_alias_and_the_file_mode() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema = 1\n").expect("seed");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("chmod");
+        }
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let d = dir.path().to_path_buf();
+                std::thread::spawn(move || {
+                    set_alias(&d, &format!("phone{i}"), &format!("00008101-00000000000000{i:02}"))
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().expect("join").expect("set");
+        }
+        let mut cfg = DeviceConfig::default();
+        cfg.apply_toml(&std::fs::read_to_string(&path).expect("read"), &path).expect("valid");
+        assert_eq!(cfg.aliases.len(), 8, "no edit lost: {:?}", cfg.aliases);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777, 0o640);
+        }
+        // No temporary files are left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("dir")
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
     }
 }

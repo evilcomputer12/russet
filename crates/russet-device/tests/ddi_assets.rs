@@ -9,7 +9,10 @@ use std::path::Path;
 
 use idevice::cryptexd::Cryptex1Assets;
 use russet_core::error::codes;
-use russet_device::ddi::{DdiOrigin, MountRecord, cryptex_install_argv, ddi_build, resolve_restore_dir, sha384_hex};
+use russet_device::ddi::{
+    CryptexChannel, DdiOrigin, MountRecord, TRANSFER_KEYS, cryptex_install_argv, ddi_build, install_cryptex_over,
+    resolve_restore_dir, sha384_hex,
+};
 
 const IMAGE: &str = "022-00002-411.dmg";
 const TRUSTCACHE: &str = "Firmware/022-00002-411.dmg.trustcache";
@@ -110,6 +113,69 @@ async fn a_bare_restore_directory_also_works() {
     assert_eq!(ddi_build(&restore, &restore).as_deref(), Some("27Z999z"));
     let assets = Cryptex1Assets::load(&restore).await.expect("payloads");
     assert_eq!(assets.info, b"<plist/>");
+}
+
+/// Records what a cryptex install sends.
+#[derive(Default)]
+struct Recorder {
+    sent: Vec<idevice::xpc::XPCObject>,
+    transfers: Vec<(u64, Vec<u8>)>,
+    reply: Option<plist::Value>,
+}
+
+#[async_trait::async_trait]
+impl CryptexChannel for Recorder {
+    async fn send_object(&mut self, msg: idevice::xpc::XPCObject) -> russet_core::Result<()> {
+        self.sent.push(msg);
+        Ok(())
+    }
+    async fn send_file_transfer(&mut self, msg_id: u64, data: &[u8]) -> russet_core::Result<()> {
+        self.transfers.push((msg_id, data.to_vec()));
+        Ok(())
+    }
+    async fn recv(&mut self) -> russet_core::Result<plist::Value> {
+        Ok(self.reply.take().unwrap_or_else(|| dict(vec![("error", plist::Value::Integer(0u64.into()))])))
+    }
+}
+
+/// The install's call site (not just `cryptex_install_argv`): the request it sends carries `persistence` 2 and
+/// `nonce-persistence` 1 (device.md U9), announces the five payloads with their real sizes, and streams them as
+/// transfers 1…5 in that order; cryptexd's errno fails the mount.
+#[tokio::test]
+async fn the_install_call_site_sends_xcode_persistence_and_the_payloads_in_order() {
+    use idevice::xpc::XPCObject;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let restore = tmp.path().join("Restore");
+    write_restore(&restore, "27Z999z");
+    let assets = Cryptex1Assets::load(&restore).await.expect("payloads");
+    let im4m = b"synthetic ticket".to_vec();
+    let mut rec = Recorder::default();
+    install_cryptex_over(&mut rec, &assets, &im4m).await.expect("install");
+
+    assert_eq!(rec.sent.len(), 1);
+    let XPCObject::Dictionary(req) = &rec.sent[0] else { panic!("a dictionary request") };
+    assert_eq!(req.get("routine"), Some(&XPCObject::String("install".into())));
+    let Some(XPCObject::Dictionary(argv)) = req.get("argv") else { panic!("argv") };
+    assert_eq!(argv.get("persistence"), Some(&XPCObject::UInt64(2)));
+    assert_eq!(argv.get("nonce-persistence"), Some(&XPCObject::UInt64(1)));
+    assert_eq!(argv.get("image-type-index"), Some(&XPCObject::Int64(10)));
+    let payloads: [&[u8]; 5] = [&assets.image, &assets.trustcache, &im4m, &assets.info, &assets.volumehash];
+    for (i, key) in TRANSFER_KEYS.iter().enumerate() {
+        let Some(XPCObject::FileTransfer { msg_id, data }) = argv.get(*key) else { panic!("{key} is a transfer") };
+        assert_eq!(*msg_id, i as u64 + 1, "{key}");
+        let XPCObject::Dictionary(size) = data.as_ref() else { panic!("{key} size") };
+        assert_eq!(size.get("s"), Some(&XPCObject::UInt64(payloads[i].len() as u64)), "{key} size");
+    }
+    let order: Vec<u64> = rec.transfers.iter().map(|(id, _)| *id).collect();
+    assert_eq!(order, vec![1, 2, 3, 4, 5]);
+    for (i, (_, bytes)) in rec.transfers.iter().enumerate() {
+        assert_eq!(bytes.as_slice(), payloads[i], "transfer {}", i + 1);
+    }
+
+    let mut refused =
+        Recorder { reply: Some(dict(vec![("error", plist::Value::Integer(17u64.into()))])), ..Default::default() };
+    let err = install_cryptex_over(&mut refused, &assets, &im4m).await.expect_err("errno 17");
+    assert_eq!(err.code(), codes::device::DDI_PERSONALIZATION_FAILED);
 }
 
 #[test]

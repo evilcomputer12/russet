@@ -29,6 +29,7 @@ pub mod fallback;
 pub mod files;
 pub mod ids;
 pub mod io;
+pub mod live_lock;
 pub mod logs;
 pub mod manager;
 pub mod model;

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! Hardware-in-the-loop tests (device.md §15.4; PLAN §4.4 tests): lane A only. Every test returns at once (and
-//! passes) unless `RUSSET_HIL_UDID` is set **and** `RUSSET_LANE=A` (PLAN §0 rule 4).
+//! Hardware-in-the-loop tests (device.md §15.4; PLAN §4.4 tests): lane A only, so every test is `#[ignore]`d and a
+//! plain `cargo test` lists them as ignored. Run with `--ignored`, they still refuse to touch a phone (and say
+//! `SKIPPED`) unless `RUSSET_HIL_UDID` is set **and** `RUSSET_LANE=A` (PLAN §0 rule 4), and they take the host-wide
+//! live-device lock first, so they never run while a live daemon owns the phone (ARCHITECTURE §3.3 item 7).
 //!
 //! - `RUSSET_HIL_UDID`: the device's UDID, or `only` for the only attached device;
 //! - `RUSSET_HIL_BUNDLE`: an installed, debuggable app for the launch and log tests;
@@ -10,7 +12,7 @@
 //! - `RUSSET_HOME`: the lane-A home (`~/russet-lab/home-A`) whose `config.toml` the device plane reads.
 //!
 //! Run them serially: `RUSSET_LANE=A RUSSET_HIL_UDID=only RUSSET_HIL_BUNDLE=… cargo test -p russet-device --test hil
-//! -- --test-threads=1`. Output never prints UDIDs or device names.
+//! -- --ignored --test-threads=1`. Output never prints UDIDs or device names.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,24 +30,38 @@ struct Hil {
     manager: Arc<DeviceManager>,
     conn: Arc<LiveConnector>,
     handle: DeviceHandle,
+    /// Held for the test's life; released after the manager is gone (fields drop in order).
+    _lock: russet_device::live_lock::LiveDeviceLock,
 }
 
+/// The HIL harness, or `None` (with a `SKIPPED` line) when this is not a configured lane-A run.
 async fn hil() -> Option<Hil> {
-    let udid = std::env::var("RUSSET_HIL_UDID").ok().filter(|s| !s.is_empty())?;
+    let Some(udid) = std::env::var("RUSSET_HIL_UDID").ok().filter(|s| !s.is_empty()) else {
+        eprintln!("SKIPPED: RUSSET_HIL_UDID is not set (lane A only; see tests/hil.rs)");
+        return None;
+    };
     if std::env::var("RUSSET_LANE").ok().as_deref() != Some("A") {
-        eprintln!("skipped: RUSSET_HIL_UDID is set but RUSSET_LANE is not A (PLAN §0 rule 4)");
+        eprintln!("SKIPPED: RUSSET_HIL_UDID is set but RUSSET_LANE is not A (PLAN §0 rule 4)");
         return None;
     }
-    let home = std::env::var_os("RUSSET_HOME").map(std::path::PathBuf::from)?;
+    let Some(home) = std::env::var_os("RUSSET_HOME").map(std::path::PathBuf::from) else {
+        eprintln!("SKIPPED: RUSSET_HOME is not set (the lane-A home, ~/russet-lab/home-A)");
+        return None;
+    };
+    // Never next to a live daemon: take the host-wide live-device lock before any connector exists.
+    let lock = russet_device::live_lock::take(&home).unwrap_or_else(|e| {
+        panic!("{} {}", e.message(), e.to_data().details.map(|d| d.to_string()).unwrap_or_default())
+    });
     let cfg = DeviceConfig::load(&RussetDirs::under(&home)).expect("the lane-A config");
     let conn = Arc::new(LiveConnector::new(&cfg).expect("live connector"));
     let manager = DeviceManager::start(cfg, conn.clone() as Arc<dyn ServiceConnector>).await.expect("device manager");
     let sel = if udid == "only" { DeviceSelector::Only } else { DeviceSelector::parse(Some(&udid)) };
     let handle = manager.get(&sel).expect("the HIL device is attached");
-    Some(Hil { manager, conn, handle })
+    Some(Hil { manager, conn, handle, _lock: lock })
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
 async fn hil_device_list_reports_the_identity_quickly() {
     let _serial = SERIAL.lock().await;
     let Some(h) = hil().await else { return };
@@ -59,6 +75,7 @@ async fn hil_device_list_reports_the_identity_quickly() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
 async fn hil_readiness_and_ddi_status() {
     let _serial = SERIAL.lock().await;
     let Some(h) = hil().await else { return };
@@ -71,6 +88,7 @@ async fn hil_readiness_and_ddi_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
 async fn hil_100_session_opens_without_a_failure() {
     let _serial = SERIAL.lock().await;
     let Some(h) = hil().await else { return };
@@ -87,11 +105,15 @@ async fn hil_100_session_opens_without_a_failure() {
     }
     times.sort();
     let p95 = times[94];
-    eprintln!("100 session opens: median {:?}, p95 {p95:?}", times[49]);
+    let retries = h.conn.tunnel_open_retries();
+    eprintln!("100 session opens: median {:?}, p95 {p95:?}, refused-and-retried opens: {retries}", times[49]);
     assert!(p95 < Duration::from_millis(300), "p95 {p95:?}");
+    // "0 failures" counts the opens the connector retried behind the caller's back, too.
+    assert_eq!(retries, 0, "the device refused {retries} tunnel open(s)");
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
 async fn hil_afc_through_the_tunnel_is_fast_both_ways() {
     use idevice::afc::AfcClient;
     use idevice::afc::opcode::AfcFopenMode;
@@ -151,6 +173,7 @@ fn make_ipa(app: &std::path::Path, out: &std::path::Path) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
 async fn hil_installs_an_app_and_an_ipa() {
     let _serial = SERIAL.lock().await;
     let Some(h) = hil().await else { return };
@@ -170,6 +193,7 @@ async fn hil_installs_an_app_and_an_ipa() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
 async fn hil_suspended_launch_sigcont_console_first_logs_and_exit() {
     let _serial = SERIAL.lock().await;
     let Some(h) = hil().await else { return };
@@ -221,6 +245,7 @@ async fn hil_suspended_launch_sigcont_console_first_logs_and_exit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
 async fn hil_a_dead_tunnel_is_rebuilt_on_the_next_call() {
     let _serial = SERIAL.lock().await;
     let Some(h) = hil().await else { return };

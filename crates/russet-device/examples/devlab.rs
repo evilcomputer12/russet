@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `devlab`: drives russet-device's live backend directly, without a daemon, for lane-A checks (PLAN §0 rule 4)
-//! until W2's daemon and CLI carry the same calls. Output is redacted: UDIDs keep only their chip prefix and
-//! device names are never printed (AGENTS.md §8).
+//! until W2's daemon and CLI carry the same calls. It refuses without `RUSSET_LANE=A` and holds the host-wide
+//! live-device lock while it runs (a live daemon in the meantime gets 3019). Output is redacted: UDIDs keep only
+//! their chip prefix and device names are never printed (AGENTS.md §8).
 //!
 //! ```text
 //! RUSSET_LANE=A cargo run -p russet-device --example devlab -- list
@@ -111,6 +112,8 @@ async fn run() -> russet_core::Result<()> {
     let home = std::env::var_os("RUSSET_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("russet-devlab"));
+    // Never next to a live daemon (ARCHITECTURE §3.3 item 7): the host-wide live-device lock, held until exit.
+    let _lock = russet_device::live_lock::take(&home)?;
     let dirs = RussetDirs::under(&home);
     let mut cfg = DeviceConfig::load(&dirs)?;
     if let Some(d) = std::env::var("DEVLAB_KEEP_WARM_MS").ok().and_then(|v| v.parse().ok()) {
@@ -174,6 +177,49 @@ async fn run() -> russet_core::Result<()> {
                 c.ticket_bytes,
                 &c.image_sha384[..16]
             );
+        }
+        "cryptexd-installed" => {
+            // The raw cryptexd copy-installed reply, for the recorded fixture in ddi.rs. `--shape` prints only the key
+            // paths and value types (to review what the reply holds before printing values).
+            let h = mgr.get(&sel)?;
+            let raw = h.copy_installed_raw().await?;
+            fn shape(v: &plist::Value, path: &str, out: &mut Vec<String>) {
+                match v {
+                    plist::Value::Dictionary(d) => {
+                        for (k, x) in d {
+                            shape(x, &format!("{path}/{k}"), out);
+                        }
+                    }
+                    plist::Value::Array(a) => {
+                        for (i, x) in a.iter().enumerate() {
+                            shape(x, &format!("{path}[{i}]"), out);
+                        }
+                    }
+                    plist::Value::String(_) => out.push(format!("{path}: string")),
+                    plist::Value::Integer(_) => out.push(format!("{path}: integer")),
+                    plist::Value::Boolean(_) => out.push(format!("{path}: bool")),
+                    plist::Value::Data(d) => out.push(format!("{path}: data[{}]", d.len())),
+                    plist::Value::Date(_) => out.push(format!("{path}: date")),
+                    plist::Value::Real(_) => out.push(format!("{path}: real")),
+                    _ => out.push(format!("{path}: other")),
+                }
+            }
+            match raw {
+                None => println!("(no argv)"),
+                Some(v) if has(&args, "--shape") => {
+                    let mut out = Vec::new();
+                    shape(&v, "", &mut out);
+                    out.iter().for_each(|l| println!("{l}"));
+                }
+                Some(v) => {
+                    let mut xml = Vec::new();
+                    plist::to_writer_xml(&mut xml, &v)
+                        .map_err(|e| russet_device::error::invalid_argument(format!("{e}")))?;
+                    println!("{}", String::from_utf8_lossy(&xml));
+                }
+            }
+            let parsed = russet_device::ddi::parse_installed(h.copy_installed_raw().await?.as_ref());
+            eprintln!("parsed: {parsed:?}");
         }
         "ddi-mount" => {
             let h = mgr.get(&sel)?;
