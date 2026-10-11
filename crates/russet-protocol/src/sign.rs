@@ -115,6 +115,10 @@ pub struct SignRunParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lint: Option<LintProfile>,
+    /// Skip the post-sign lints (verification still runs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub no_lint: Option<bool>,
 }
 
 /// One signed app-like bundle.

@@ -61,7 +61,11 @@ pub async fn run(svc: &AccountService, params: p::SignRunParams) -> Result<p::Si
     req.output = params.output.as_deref().map(|o| absolute(o, "output")).transpose()?;
     req.get_task_allow = params.get_task_allow;
     req.device = params.device;
-    req.lint = Some(lint_profile(params.lint.unwrap_or(p::LintProfile::DeviceInstall)));
+    req.lint = if params.no_lint == Some(true) {
+        None
+    } else {
+        Some(lint_profile(params.lint.unwrap_or(p::LintProfile::DeviceInstall)))
+    };
     let mut fixes = PreSignFixes::default();
     for name in &params.no_fix {
         if !fixes.disable(name) {
