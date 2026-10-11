@@ -209,6 +209,8 @@ pub struct Toolchains {
     dirs: RussetDirs,
     pins: Arc<PinManifest>,
     pins_source: String,
+    /// Why the embedded manifest was refused, if it was.
+    pins_error: Option<(russet_core::ErrorCode, String)>,
     host: HostEnv,
     raw: Arc<dyn Exec>,
     exec: Arc<CachedExec>,
@@ -258,6 +260,7 @@ impl Toolchains {
             dirs,
             pins,
             pins_source: "embedded".into(),
+            pins_error: None,
             host: HostEnv::from_env(),
             raw,
             exec,
@@ -268,9 +271,19 @@ impl Toolchains {
         }
     }
 
-    /// The manager with the embedded, verified pin manifest.
+    /// The manager with the embedded, verified pin manifest. A manifest this build cannot verify (a release build
+    /// before W26's release key exists) never stops the daemon: probing and resolving work with no pins (no
+    /// compatibility rows), and installs fail with that verification error.
     pub fn load(dirs: &RussetDirs) -> Result<Self> {
-        Ok(Self::new(dirs.clone(), Arc::new(PinManifest::embedded()?)))
+        Ok(match PinManifest::embedded() {
+            Ok(pins) => Self::new(dirs.clone(), Arc::new(pins)),
+            Err(e) => {
+                let mut tc = Self::new(dirs.clone(), Arc::new(PinManifest::empty()));
+                tc.pins_source = format!("embedded (unverified: {})", e.message());
+                tc.pins_error = Some((e.code(), e.message().to_owned()));
+                tc
+            }
+        })
     }
 
     /// Probes `host` instead of this process's environment (tests).
@@ -600,6 +613,11 @@ impl Toolchains {
                 .with_hint(missing_hint(other)));
             }
         };
+        if let Some((code, msg)) = &self.pins_error {
+            return Err(Error::new(*code, msg.clone()).with_hint(
+                "This build trusts no pin-manifest key; use a debug build or wait for the release key (W26).",
+            ));
+        }
         let wanted = if version.is_empty() || version == "latest" { None } else { Some(version) };
         let pin = self.pins.component(name, wanted).ok_or_else(|| {
             Error::new(

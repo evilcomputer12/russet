@@ -137,6 +137,18 @@ impl PinManifest {
         Ok(m)
     }
 
+    /// A manifest with no rows and no components (nothing verified).
+    pub fn empty() -> Self {
+        Self {
+            schema: 1,
+            id: "none".into(),
+            min_russet: "0.1.0".into(),
+            generated_at: String::new(),
+            xcode: Vec::new(),
+            component: Vec::new(),
+        }
+    }
+
     /// The embedded manifest, verified with this build's trusted keys.
     pub fn embedded() -> Result<Self> {
         Self::load_verified(EMBEDDED_MANIFEST, EMBEDDED_SIGNATURE, &trusted_keys())
