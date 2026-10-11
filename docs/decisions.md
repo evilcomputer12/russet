@@ -9,8 +9,14 @@ Decisions agreed with the project owner. Newest first.
 - **Virtual iPhone (parallel track).** Boot real iOS in QEMU (TCG) on x86 by emulating
   Apple's *virtual* iPhone platform (VPHONE600AP from the Private Cloud Compute research
   firmware, as used by vphone-cli). We are not emulating a physical iPhone model.
-  - It ships publicly in Russet with user-supplied firmware; Apple files are never
-    redistributed.
+  - Developed in a separate **private** repository (`russet-vphone`). It may later ship
+    as a separately distributed, opt-in module after a legal review, because firmware
+    patching carries anti-circumvention risk. Users would supply their own firmware;
+    Apple files are never redistributed.
+  - Scope: proceed through go/no-go gates. A headless virtual iPhone (install, debug,
+    tests, automation, no home screen) is still worth shipping if the GPU work fails.
+  - GPU bridge: LGPL-3.0 Reims may be linked into private builds. Public builds must run
+    it as a separate process, because parts of QEMU are GPL-2.0-only.
   - It runs alongside the core build and does not block it.
 - **Rejected:** running Apple's iOS Simulator natively on Linux or Windows. The iOS 27
   simulator runtime is arm64-only and needs the macOS kernel, macOS frameworks and Metal.
