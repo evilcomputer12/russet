@@ -16,6 +16,10 @@
 >   LLDB's `D` (`russet debug --detach`) keeps the session `running` with `debugger: detached` (§4.6).
 >   Interactive `russet debug` without `--detach` stops the owned session when LLDB quits, because LLDB detaches
 >   on quit after a `process connect` to a stopped process.
+> - A stop (`run.stop`, or an owned session's owner leaving) while the session is `launching` ends it at once; the
+>   launch then kills the app it started, and `run.start`/`debug.prepare` fail with `core.cancelled`.
+> - A debugger that leaves without `D` or `k`: before the `detach` policy or a `keep` handover the broker removes
+>   the breakpoints and watchpoints the debugger set (`z0`–`z4`), so the app cannot trap on them later (§4.6).
 > - `run.output.query {sinceMs}` is Unix epoch milliseconds; the filter has `sources`, `minLevel`, `contains`,
 >   `subsystem` and `category` (no regular expressions yet). An os_trace entry is dropped as a duplicate only when
 >   it arrives within 50 ms after the same stdio line (§12).
