@@ -2,6 +2,24 @@
 
 Decisions agreed with the project owner. Newest first.
 
+## 2026-10-11: Accounts, CI and test devices
+
+- **Developer account changes (Wave 2).** Russet may register one bundle ID (for example
+  `com.evilcomputer12.russet.hello`) and create one development profile, reusing the
+  existing development certificate (valid until 2027-10-10). Nothing is revoked or
+  deleted.
+- **CI budget.** GitHub's free private-repo minutes only:
+  - Linux and Windows jobs run in GitHub Actions.
+  - macOS reference/golden jobs run on the owner's Mac (the oracle), not on paid macOS
+    runners.
+- **Device tests.** No always-on self-hosted runner. Device suites run on demand,
+  triggered by an agent in the working session; device access stays serialized.
+- **Test devices.** iPhone 12 (A14, iOS 27) only. Paths that need A15+/TXM behaviour are
+  validated against recorded traces and community reports until another device is
+  available.
+- **xtool credential files** were locked down to 0600 (2026-10-11). Run
+  `xtool auth logout` once Russet's own provisioning works.
+
 ## 2026-10-11: Simulator and virtual iPhone
 
 - **Device mirror** serves as the simulator replacement in the first build: the real iPhone
