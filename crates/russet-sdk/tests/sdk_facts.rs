@@ -244,7 +244,8 @@ async fn a_bundle_without_darwin_tools_cannot_link() {
 #[tokio::test]
 async fn the_build_facts_check_fails_when_a_build_cannot_work() {
     use russet_doctor::{Check, CheckCx, Status};
-    let cx = CheckCx { project: None, udid: None, online: false };
+    // `default()`: W3 adds fields to CheckCx (dirs, device backend, extensions, …).
+    let cx = CheckCx::default();
     let (_g, root) = tmp();
     let sdks = root.join("swift-sdks");
     let b = make_bundle(&sdks, "darwin.artifactbundle", "27.0", "27A266a", "27.0");
