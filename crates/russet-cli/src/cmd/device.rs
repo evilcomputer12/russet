@@ -175,7 +175,10 @@ pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
                         let list = cx.peer.call::<p::DeviceList>(p::DeviceListParams {}).await?;
                         match list.devices.as_slice() {
                             [one] => one.udid.clone(),
-                            [] => return Err(Error::new(codes::device::NOT_FOUND, "no iPhone is attached")),
+                            [] => {
+                                return Err(Error::new(codes::device::NOT_FOUND, "no iPhone is attached")
+                                    .with_hint("Check the cable and run `russet device list`."));
+                            }
                             _ => {
                                 return Err(Error::new(codes::core::INVALID_ARGUMENT, "several devices are attached")
                                     .with_hint("Pass --udid <UDID>."));
