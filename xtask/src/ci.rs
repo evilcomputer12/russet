@@ -384,7 +384,15 @@ fn run_step(root: &Path, s: &Step, args: &Args, missing: &mut BTreeSet<String>) 
 /// disk-guard at tier AMBER, then the due sweep of the current slot.
 fn preflight() -> Result<String> {
     let req = disk_guard::Request { need_gib: Some(NEED_GIB), tier: Some(Tier::Amber), ..Default::default() };
-    let report = disk_guard::check(&req)?;
+    // A filesystem that cannot be measured (an unusual mount, a Windows runner without PowerShell) is not a full
+    // one: warn and go on. `cargo xtask disk-guard` itself still fails.
+    let report = match disk_guard::check(&req) {
+        Ok(r) => r,
+        Err(e) => {
+            println!("warning: disk-guard could not measure free space ({e:#}); continuing");
+            return Ok("free space not measured".into());
+        }
+    };
     for w in &report.warnings {
         println!("warning: {w}");
     }

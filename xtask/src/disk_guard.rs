@@ -293,7 +293,7 @@ fn measure(path: &Path) -> Result<(u64, Option<String>)> {
     // DriveInfo.AvailableFreeSpace honours per-user quotas, like df's "Available".
     let script = "$p = Resolve-Path -LiteralPath $env:RUSSET_DG_PATH; \
                   $d = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($p.ProviderPath)); \
-                  Write-Output (\"{0} {1}\" -f $d.AvailableFreeSpace, $d.Name)";
+                  Write-Output ('{0} {1}' -f $d.AvailableFreeSpace, $d.Name)";
     let out = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("RUSSET_DG_PATH", path)
