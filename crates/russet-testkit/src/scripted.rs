@@ -33,6 +33,7 @@ use async_trait::async_trait;
 use futures::stream::{self, BoxStream, StreamExt};
 use russet_core::error::{Error, ErrorCode, Result, codes};
 use russet_device::io::{FacadeCall, ServiceConnector};
+use russet_device::model::Transport;
 use russet_device::{DeviceEvent, DeviceSummary, Udid};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
@@ -149,7 +150,8 @@ impl ScriptedConnector {
 /// The device summary the connector reports. W4 owns `DeviceSummary`'s fields (ARCHITECTURE §9.5); this is the
 /// only place the testkit builds one.
 fn summary(d: &Device) -> DeviceSummary {
-    DeviceSummary { udid: Udid(d.udid.clone()) }
+    let transport = if d.transport == "wifi" { Transport::Wifi } else { Transport::Usb };
+    DeviceSummary::attached(Udid(d.udid.clone()), transport)
 }
 
 impl Inner {
