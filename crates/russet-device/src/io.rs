@@ -92,6 +92,9 @@ pub mod facade {
     pub const TUNNEL_CLOSE: &str = "tunnel.close";
     /// `rsd.services`: `{udid}` → `{generation, services: {name: {port, features[]}}, properties}`.
     pub const RSD_SERVICES: &str = "rsd.services";
+    /// `tunnel.kill`: `{udid}` → `{killed}`; stops the tunnel's TCP stack but leaves the tunnel in place, as if its
+    /// stream had died, so the next RSD call exercises the rebuild path (tests and lab checks only).
+    pub const TUNNEL_KILL: &str = "tunnel.kill";
 
     /// One `mux.list` entry.
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

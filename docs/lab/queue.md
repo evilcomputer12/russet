@@ -40,7 +40,7 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
   ≥ 20 MiB/s both ways, byte-identical; `.app` and `.ipa` installs; a suspended launch returns a pid and SIGCONT
   resumes it; a console line arrives; `app.exited` ≤ 2 s after a kill; os_trace entries from the first
   instruction (launch suspended → subscribe → SIGCONT); `device.list` < 300 ms with the identity read.
-- **Result (2026-10-11, W4; iPhone 12 iPhone13,2, iOS 27.0 24A437):** all six tests passed (58 s).
+- **Result (2026-10-11, W4; iPhone 12 iPhone13,2, iOS 27.0 24A437):** all seven tests passed.
   - Session opens: 100/100, median 79 ms, p95 88 ms. Without a close grace the device refused back-to-back
     CoreDeviceProxy tunnels after about two dozen cycles (`early eof`) and accepted them again after a pause; a
     200 ms grace before stopping the jktcp adapter, plus an open backoff, fixed it (russet-device `tunnel.rs`).
@@ -54,6 +54,8 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
     entries (first 62–81 ms after SIGCONT) and, with `DYLD_PRINT_LIBRARIES=1`, 3154 console lines.
     `OS_ACTIVITY_DT_MODE=YES` (or `1`, `enable`) does **not** mirror os_log to the console on iOS 27.0.
   - Exit after SIGKILL: seen through the console's end in 18–42 ms.
+  - Tunnel rebuild: after `tunnel.kill` (the TCP stack stops while the tunnel stays in its slot, as when the CDTunnel
+    stream dies) the next RSD connect rebuilt the tunnel, generation 1 → 2, in 281 ms.
   - DDI status: mounted, `cryptex1`, version `27.1.5228.8`, `productBuild 27A5228h`, `source: unknown` (the spike's
     mirror DDI; Russet has no mount record for it): W4's acceptance item. `device.prepare` on this ready phone is a
     no-op in 182 ms (nothing mounted, no mount record written; DEV-13 asks for < 1 s).

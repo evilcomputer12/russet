@@ -166,6 +166,12 @@ impl Tunnel {
         self.active.load(Ordering::SeqCst)
     }
 
+    /// Stops the adapter at once and keeps the tunnel in place, as if the CDTunnel stream had died: the next connect
+    /// fails as dead and the connector rebuilds the tunnel (tests and lab checks of the rebuild path).
+    pub async fn kill(&mut self) {
+        let _ = self.handle.close().await;
+    }
+
     /// Stops the adapter task; every stream of this generation dies. The adapter keeps running for
     /// [`CLOSE_GRACE`] first, so the FIN exchanges of the streams just closed complete inside the tunnel: a tunnel
     /// cut mid-handshake stays allocated on the device for seconds, and back-to-back open/close cycles then run into

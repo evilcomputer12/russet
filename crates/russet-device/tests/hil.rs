@@ -219,3 +219,22 @@ async fn hil_suspended_launch_sigcont_console_first_logs_and_exit() {
     let e = tokio::time::timeout(Duration::from_secs(2), exit.wait()).await.expect("app.exited within 2 s");
     eprintln!("exit seen by {} after {:?}", e.detected_by, t.elapsed());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hil_a_dead_tunnel_is_rebuilt_on_the_next_call() {
+    let _serial = SERIAL.lock().await;
+    let Some(h) = hil().await else { return };
+    let udid = serde_json::json!({ "udid": h.handle.udid().as_str() });
+    let before = h.conn.call(FacadeCall::new(facade::RSD_SERVICES, udid.clone())).await.expect("tunnel");
+    let generation = before["generation"].as_u64().expect("generation");
+    // Simulate the device side going away: the TCP stack stops, the tunnel stays in its slot.
+    let killed = h.conn.call(FacadeCall::new(facade::TUNNEL_KILL, udid.clone())).await.expect("kill");
+    assert_eq!(killed["killed"], true);
+    let t = Instant::now();
+    let stream = h.handle.connect_rsd("com.apple.coredevice.appservice").await.expect("rebuilt on the next call");
+    drop(stream);
+    let status = h.conn.call(FacadeCall::new(facade::TUNNEL_STATUS, udid)).await.expect("status");
+    let after = status["generation"].as_u64().expect("generation");
+    eprintln!("tunnel rebuilt: generation {generation} -> {after} in {:?}", t.elapsed());
+    assert!(after > generation);
+}

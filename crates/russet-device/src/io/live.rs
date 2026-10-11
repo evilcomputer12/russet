@@ -469,6 +469,18 @@ impl ServiceConnector for LiveConnector {
                 self.drop_tunnel(&Udid(a.udid)).await;
                 Ok(serde_json::json!({}))
             }
+            facade::TUNNEL_KILL => {
+                let a: UdidArgs = args(&call)?;
+                let slot = self.tunnels.lock().ok().and_then(|m| m.get(&Udid(a.udid)).cloned());
+                let mut killed = false;
+                if let Some(slot) = slot
+                    && let Some(t) = slot.tunnel.lock().await.as_mut()
+                {
+                    t.kill().await;
+                    killed = true;
+                }
+                Ok(serde_json::json!({ "killed": killed }))
+            }
             facade::RSD_SERVICES => {
                 let a: UdidArgs = args(&call)?;
                 let udid = Udid(a.udid);
