@@ -5335,6 +5335,8 @@ name = "russet-ipa"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "sha2 0.11.0",
+ "tempfile",
  "thiserror 2.0.21",
  "zip 9.0.1",
 ]
