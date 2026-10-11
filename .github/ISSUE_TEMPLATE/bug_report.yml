@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+name: Bug report
+description: Something in Russet does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please **never paste** device identifiers (UDID, serial number, ECID), team IDs,
+        Apple IDs, device names, keys, tokens, provisioning profiles or any Apple file (SDK, DDI, `.ipsw`, Mach-O
+        binaries from Xcode). `russet doctor --report --redact` produces a report without them.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands and project shape (a minimal project is best).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Environment
+      description: The output of `russet doctor --report --redact`, plus your OS and Russet version (`russet --version`).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant, redacted output with `-v`, or the error's `russetCode` and hint.
+      render: text
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: I included no Apple files, no device identifiers and no secrets.
+          required: true

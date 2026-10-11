@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+name: Feature request
+description: Something Russet should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and where Russet gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The behaviour or command you have in mind. Workarounds you use now help too.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Device (install, launch, logs, mirror)
+        - Build (SwiftPM, Flutter, Xcode projects)
+        - Signing, accounts, publishing
+        - Run and debug
+        - IDE and extension
+        - Agents and MCP
+        - CLI, daemon, configuration
+        - Other
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: I included no Apple files, no device identifiers and no secrets.
+          required: true

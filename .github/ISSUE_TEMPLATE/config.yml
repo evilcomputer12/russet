@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/evilcomputer12/russet/blob/main/SECURITY.md
+    about: Never in a public issue. SECURITY.md says how to report privately.
