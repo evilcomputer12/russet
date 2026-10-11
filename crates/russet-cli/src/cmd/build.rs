@@ -105,7 +105,10 @@ pub(crate) fn project_dir(cx: &CliCtx) -> Result<String> {
 }
 
 pub(crate) fn absolute(p: Option<&Path>) -> Result<String> {
-    let cwd = std::env::current_dir().map_err(|e| Error::new(codes::core::IO, format!("no current directory: {e}")))?;
+    let cwd = std::env::current_dir().map_err(|e| {
+        Error::new(codes::core::IO, format!("no current directory: {e}"))
+            .with_hint("Run Russet from an existing directory, or pass --project <dir>.")
+    })?;
     let path: PathBuf = match p {
         Some(p) if p.is_absolute() => p.to_owned(),
         Some(p) => cwd.join(p),

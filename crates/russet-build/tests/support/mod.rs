@@ -3,9 +3,10 @@
 
 //! Test doubles for russet-build's integration tests:
 //! - [`LocalRunner`]: a plain tokio process runner (W2's `ProcessRunner` replaces it in the daemon), which also
-//!   hides `xtool` from `PATH`, so the real builds prove they never need it (PLAN §4.5 acceptance);
+//!   hides `xtool` from `PATH`, so the real builds prove they never need it (PLAN §4.5 acceptance), and honours
+//!   `CommandSpec::timeout`;
 //! - [`LlvmMachO`]: a `MachOTool` over `llvm-otool` and `llvm-install-name-tool` (LLVM ≥ 23), standing in for
-//!   W6's russet-macho bodies until they land;
+//!   W6's russet-macho bodies while they are F0 stubs ([`russet_macho_is_implemented`]);
 //! - [`ScriptedSwift`], [`FakeMachO`] and [`fake_facts`]: a SwiftPM and Mach-O world without Swift or an SDK, for CI.
 
 #![allow(dead_code, clippy::unwrap_used)]
@@ -140,11 +141,22 @@ impl CommandRunner for LocalRunner {
             Error::new(codes::toolchain::MISSING, format!("cannot run {}: {e}", spec.program.display())).caused_by(e)
         })?;
         let pid = child.id();
+        let kill_group = || {
+            if let Some(pid) = pid {
+                let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
+            }
+        };
         let (out, err) = (child.stdout.take(), child.stderr.take());
         let work = async {
             let (o, e, status) =
                 tokio::join!(pump(out, LogStream::Stdout, sink), pump(err, LogStream::Stderr, sink), child.wait());
             (o, e, status)
+        };
+        let deadline = async {
+            match spec.timeout {
+                Some(t) => tokio::time::sleep(t).await,
+                None => std::future::pending().await,
+            }
         };
         tokio::select! {
             (stdout, stderr, status) = work => {
@@ -156,10 +168,12 @@ impl CommandRunner for LocalRunner {
                 Ok(CommandOutput { code: status.code(), signal, stdout, stderr })
             }
             () = cancel.cancelled() => {
-                if let Some(pid) = pid {
-                    let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
-                }
+                kill_group();
                 Err(Error::new(codes::core::CANCELLED, "cancelled"))
+            }
+            () = deadline => {
+                kill_group();
+                Err(Error::new(codes::core::TIMEOUT, format!("{} timed out", spec.program.display())))
             }
         }
     }
@@ -176,9 +190,9 @@ pub struct LlvmMachO {
 }
 
 impl LlvmMachO {
-    /// LLVM ≥ 23 tools from PATH, if any.
-    pub fn find() -> Option<Self> {
-        let h = russet_sdk::host::HostToolchain::probe().ok()?;
+    /// LLVM ≥ 23 tools next to `swift` or on PATH, if any.
+    pub async fn find() -> Option<Self> {
+        let h = russet_sdk::host::HostToolchain::probe(&LocalRunner).await.ok()?;
         Some(Self { otool: h.llvm_otool?, install_name_tool: h.llvm_install_name_tool? })
     }
 
@@ -250,6 +264,19 @@ impl MachOTool for LlvmMachO {
             Err(Error::new(codes::core::IO, format!("llvm-install-name-tool failed on {path}")))
         }
     }
+}
+
+/// Whether russet-macho has its real bodies (W6) rather than F0's `todo!()`: parsing an empty buffer is an error
+/// with W6's code and a panic with the stubs. Probed once per process, with the panic message silenced.
+pub fn russet_macho_is_implemented() -> bool {
+    static IMPLEMENTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IMPLEMENTED.get_or_init(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let implemented = std::panic::catch_unwind(|| russet_macho::MachO::parse(&[]).is_err()).unwrap_or(false);
+        std::panic::set_hook(previous);
+        implemented
+    })
 }
 
 /// A Mach-O stand-in: the arm64 magic, then one `RPATH <path>` or `LOAD <name>` line per load command.
@@ -374,6 +401,8 @@ impl SdkProvider for FixedSdk {
 pub struct ScriptedSwift {
     pub describe: String,
     pub package_identity: String,
+    /// Dependencies of the root package: `(identity, name, path, describe JSON)`.
+    pub deps: Vec<(String, String, String, String)>,
     pub binary: Vec<u8>,
     pub fail_with: Option<String>,
     /// Extra lines `swift build` prints (for example an environment dump).
@@ -387,6 +416,7 @@ impl ScriptedSwift {
         Arc::new(Self {
             describe: describe.to_owned(),
             package_identity: identity.to_owned(),
+            deps: Vec::new(),
             binary,
             fail_with: None,
             extra_lines: Vec::new(),
@@ -417,12 +447,21 @@ impl CommandRunner for ScriptedSwift {
             Some("package") if args.contains(&"show-dependencies".to_owned()) => {
                 let out = arg_after(&args, "-o").unwrap();
                 let pkg = arg_after(&args, "--package-path").unwrap();
-                let json = serde_json::json!({"identity": self.package_identity, "name": "Pkg", "path": pkg, "dependencies": []});
+                let deps: Vec<serde_json::Value> = self
+                    .deps
+                    .iter()
+                    .map(|(id, name, path, _)| {
+                        serde_json::json!({"identity": id, "name": name, "path": path, "dependencies": []})
+                    })
+                    .collect();
+                let json = serde_json::json!({"identity": self.package_identity, "name": "Pkg", "path": pkg, "dependencies": deps});
                 std::fs::write(out, json.to_string()).unwrap();
                 ok(Vec::new())
             }
             Some("package") if args.contains(&"describe".to_owned()) => {
-                ok(format!("noise\n{}", self.describe).into_bytes())
+                let pkg = arg_after(&args, "--package-path").unwrap();
+                let describe = self.deps.iter().find(|d| d.2 == pkg).map_or(&self.describe, |d| &d.3);
+                ok(format!("noise\n{describe}").into_bytes())
             }
             Some("build") => {
                 sink.log(LogStream::Stdout, "Building for debugging...");

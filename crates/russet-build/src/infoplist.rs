@@ -11,8 +11,8 @@
 //!    (`INFOPLIST_EXPAND_BUILD_SETTINGS`);
 //! 4. partial plists from resource compilers (none until W16/W21 add actool);
 //! 5. enforced keys (`CFBundleExecutable`, `CFBundleIdentifier`, `MinimumOSVersion`, `CFBundleSupportedPlatforms`,
-//!    `arm64` in `UIRequiredDeviceCapabilities`, the DT* keys of the metadata policy), with a warning when a
-//!    project value is replaced.
+//!    `arm64` in `UIRequiredDeviceCapabilities`, an extension's versions (the app's), the DT* keys of the metadata
+//!    policy), with a warning when a project value is replaced.
 //!
 //! Keys are sorted so the output is stable; the file is written as a binary plist (iOS `INFOPLIST_OUTPUT_FORMAT`).
 
@@ -235,6 +235,12 @@ pub fn synthesize(input: &InfoPlistInput<'_>) -> Result<Synthesized> {
     enforce(&mut l, "CFBundleIdentifier", Value::from(input.bundle_id), ENFORCED);
     enforce(&mut l, "MinimumOSVersion", Value::from(input.deployment_target.to_string()), ENFORCED);
     enforce(&mut l, "CFBundleSupportedPlatforms", strings(["iPhoneOS"]), ENFORCED);
+    if !app {
+        // An extension's versions equal its app's (build §4.6 step 6, lint L010): the caller passes the app's
+        // effective `CFBundleShortVersionString` and `CFBundleVersion`.
+        enforce(&mut l, "CFBundleShortVersionString", Value::from(input.version), ENFORCED);
+        enforce(&mut l, "CFBundleVersion", Value::from(input.build_number), ENFORCED);
+    }
     if app {
         let caps = match l.plist.get("UIRequiredDeviceCapabilities").cloned() {
             Some(Value::Array(mut items)) => {
@@ -440,6 +446,33 @@ mod tests {
             Some("com.apple.widgetkit-extension")
         );
         assert!(!p.contains_key("UIApplicationSceneManifest") && !p.contains_key("LSRequiresIPhoneOS"));
+    }
+
+    #[test]
+    fn extension_versions_are_the_apps() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("Widget-Info.plist")).unwrap();
+        let mut user = Dictionary::new();
+        user.insert("CFBundleShortVersionString".into(), Value::from("9.9"));
+        user.insert("CFBundleVersion".into(), Value::from("99"));
+        user.insert("NSExtension".into(), Value::Dictionary(Dictionary::new()));
+        russet_plist::to_path(&path, &Value::Dictionary(user), russet_plist::Format::Xml).unwrap();
+        let (dt, settings, o) = (dt(), SettingsStack::new(), BTreeMap::new());
+        let mut i = input(&dt, &settings, &o);
+        i.kind = ProductKind::AppExtension { kind: "widgetkit".into() };
+        i.product = "HelloWidget";
+        i.version = "2.1";
+        i.build_number = "40";
+        i.user_plist = Some((&path, "Widget/Info.plist"));
+        let s = synthesize(&i).unwrap();
+        assert_eq!(s.plist.get("CFBundleShortVersionString").and_then(Value::as_string), Some("2.1"));
+        assert_eq!(s.plist.get("CFBundleVersion").and_then(Value::as_string), Some("40"));
+        assert_eq!(s.provenance.get("CFBundleVersion").map(String::as_str), Some("enforced"));
+        assert_eq!(s.overridden, vec!["CFBundleShortVersionString".to_owned(), "CFBundleVersion".to_owned()]);
+        // An app keeps its own Info.plist's versions (layer 3 wins over russet.toml).
+        i.kind = ProductKind::App;
+        let s = synthesize(&i).unwrap();
+        assert_eq!(s.plist.get("CFBundleShortVersionString").and_then(Value::as_string), Some("9.9"));
     }
 
     #[test]

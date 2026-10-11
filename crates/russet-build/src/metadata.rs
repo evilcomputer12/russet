@@ -80,9 +80,14 @@ pub fn dt_keys(policy: &MetadataPolicy, facts: &SdkFacts, settings: &SettingsSta
         let Some(template) = facts.additional_info.get(key).and_then(Value::as_string) else {
             continue;
         };
-        let value = settings
-            .expand(template)
-            .map_err(|e| Error::new(codes::sdk::INCOMPLETE, format!("cannot expand {key} = {template}: {e}")))?;
+        let value = settings.expand(template).map_err(|e| {
+            Error::new(codes::sdk::INCOMPLETE, format!("cannot expand {key} = {template}: {e}"))
+                .with_hint(
+                    "The SDK's platform Info.plist has a template Russet cannot expand: use a complete SDK, or set \
+                     `[build] metadata = \"minimal\"` (ARCHITECTURE §16.4).",
+                )
+                .with_details(serde_json::json!({"key": key, "template": template, "bundle": facts.bundle}))
+        })?;
         if value.is_empty() {
             if SDK.contains(key) {
                 let missing = if *key == "DTSDKBuild" {

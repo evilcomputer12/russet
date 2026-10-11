@@ -59,7 +59,7 @@ pub use macho::{MachOSummary, MachOTool, RussetMachO};
 pub use manifest::{Backend, PackageKind, Stack};
 
 use crate::bundle::{AssemblyInput, ProductBundle};
-use crate::events::{ArtifactKind, Emitter, StageState, TaskState};
+use crate::events::{ArtifactKind, Emitter, StageState, TaskState, warn};
 use crate::manifest::{LoadedManifest, MetadataName, ProjectManifest, When};
 use crate::stack::swiftpm::{self as spm, PackageGraph};
 
@@ -196,7 +196,8 @@ pub struct BuildPlan {
     pub package: PackageKind,
     pub metadata: MetadataPolicy,
     pub sdk: SdkFacts,
-    /// `[app] deployment-target` (`None`: the package's `.iOS` platform, decided at build time).
+    /// `[app] deployment-target`, else the `.iOS` platform a scan of `Package.swift` finds (`None` when neither
+    /// says; a build reads the platform from `swift package describe`).
     pub deployment_target: Option<Version>,
     /// Original → effective bundle IDs.
     pub bundle_ids: BTreeMap<String, String>,
@@ -425,16 +426,36 @@ fn profile(m: &ProjectManifest, requested: Option<&str>) -> Result<Profile> {
     })
 }
 
-fn metadata_policy(m: &ProjectManifest, name: MetadataName) -> MetadataPolicy {
-    match name {
+/// The metadata policy of a profile. `xcode-compat` needs `[build] metadata-consent = {by, at}` committed in
+/// `russet.toml` (ARCHITECTURE §16.4); a consent that only `russet.local.toml` gives does not count.
+fn metadata_policy(loaded: &LoadedManifest, name: MetadataName) -> Result<MetadataPolicy> {
+    Ok(match name {
         MetadataName::None => MetadataPolicy::None,
         MetadataName::Minimal => MetadataPolicy::Minimal,
         MetadataName::Sdk => MetadataPolicy::Sdk,
         MetadataName::XcodeCompat => {
-            let c = m.build.metadata_consent.clone().unwrap_or_default();
+            let committed =
+                loaded.committed_consent.clone().filter(|c| !c.by.trim().is_empty() && !c.at.trim().is_empty());
+            let Some(c) = committed else {
+                let message = if loaded.manifest.build.metadata_consent.is_some() {
+                    "metadata = \"xcode-compat\" needs its consent committed in russet.toml; russet.local.toml's does not count"
+                } else {
+                    "metadata = \"xcode-compat\" needs a recorded consent"
+                };
+                return Err(Error::new(codes::config::INVALID, message).with_hint(
+                    "Commit `[build] metadata-consent = { by = \"<name>\", at = \"<date>\" }` in russet.toml (ARCHITECTURE §16.4).",
+                ));
+            };
             MetadataPolicy::XcodeCompat { consent: Consent { by: c.by, at: c.at } }
         }
-    }
+    })
+}
+
+/// The app's `CFBundleShortVersionString` and `CFBundleVersion` as synthesized (`russet.toml`, or the project's own
+/// Info.plist when it sets them), falling back to the given values.
+fn effective_versions(info: &Dictionary, version: String, build: String) -> (String, String) {
+    let get = |key: &str| info.get(key).and_then(Value::as_string).map(str::to_owned);
+    (get("CFBundleShortVersionString").unwrap_or(version), get("CFBundleVersion").unwrap_or(build))
 }
 
 fn when(w: When, release: bool) -> bool {
@@ -532,6 +553,9 @@ fn lock_project(work: &Utf8Path) -> Result<File> {
         Err(std::fs::TryLockError::Error(e)) => Err(spm::io(&path, e)),
     }
 }
+
+const DEPS_HINT: &str = "Check that `swift package show-dependencies --format json` works in the project, then \
+                         rebuild with `russet build --clean`.";
 
 /// The build orchestrator.
 pub struct Builder {
@@ -636,7 +660,7 @@ impl Builder {
         let profile = profile(m, r.configuration.as_deref())?;
         let backend = r.backend.unwrap_or(profile.backend);
         let package = r.package.unwrap_or(profile.package);
-        let metadata = metadata_policy(m, profile.metadata);
+        let metadata = metadata_policy(&loaded, profile.metadata)?;
         let mut overrides = profile.overrides.clone();
         overrides.extend(r.overrides.clone());
         let app_bundle_id = require_bundle_id(m, &root)?;
@@ -644,6 +668,17 @@ impl Builder {
         let ids = bundle_id::apply(&policy, &app_bundle_id, &extension_ids(m))?;
         let facts = self.env.sdk.resolve(&SdkSelector::parse(&profile.sdk)).await?;
         Ok(Resolved { root, loaded, stack, profile, backend, package, metadata, overrides, facts, ids, app_bundle_id })
+    }
+
+    /// Whether a build of `r` needs the signing account's xtool identity prefix (ARCHITECTURE §16.5): the request
+    /// names no policy and the project's `[signing] bundle-id-policy` is `xtool-prefix` (as in PLAN §4.10's
+    /// `russet.local.toml`). The daemon then reads the prefix from its account service and passes
+    /// [`BundleIdPolicy::XtoolPrefix`]. `false` when the project cannot be read: the build itself reports why.
+    pub fn needs_xtool_prefix(&self, r: &BuildRequest) -> bool {
+        r.bundle_id_policy.is_none()
+            && detect::find_root(&r.project)
+                .and_then(|root| manifest::load(&root))
+                .is_ok_and(|l| bundle_id::is_xtool_prefix(&l.manifest.signing))
     }
 
     /// A dry run: resolves the project, profile, SDK and bundle IDs without building.
@@ -654,7 +689,12 @@ impl Builder {
         if let Err(e) = check_swift(&res.facts) {
             warnings.push(e.message().to_owned());
         }
-        let deployment_target = m.app.deployment_target.as_deref().and_then(Version::parse);
+        let deployment_target = m
+            .app
+            .deployment_target
+            .as_deref()
+            .and_then(Version::parse)
+            .or_else(|| detect::swiftpm_ios_platform(&res.package_dir().join("Package.swift")));
         let product = r.target.clone().or_else(|| m.build.swiftpm.product.clone());
         let mut stages = Stage::ALL.to_vec();
         if res.package == PackageKind::None {
@@ -796,7 +836,7 @@ impl Builder {
             manifest::LintMode::Auto => lints.iter().any(|l| !l.fixed && l.severity == LintSeverity::Error),
         };
         for l in lints.iter().filter(|l| !l.fixed) {
-            em.warn("build.warn.lint", format!("{} {}", l.code, l.message), None);
+            em.warn(warn::LINT, format!("{} {}", l.code, l.message), None);
         }
         if fail {
             em.stage(Stage::Lint, StageState::Failed);
@@ -955,9 +995,10 @@ impl Builder {
         let deps_file = work.join("dependencies.json");
         self.swift_package(res, &["show-dependencies", "--format", "json", "-o", deps_file.as_str()], em, cancel)
             .await?;
-        let deps: spm::DependencyNode =
-            serde_json::from_slice(&std::fs::read(&deps_file).map_err(|e| spm::io(&deps_file, e))?)
-                .map_err(|e| Error::new(codes::build::COMPILE_FAILED, format!("cannot read {deps_file}: {e}")))?;
+        let deps_json = std::fs::read(&deps_file).map_err(|e| spm::io(&deps_file, e))?;
+        let deps: spm::DependencyNode = serde_json::from_slice(&deps_json).map_err(|e| {
+            Error::new(codes::build::COMPILE_FAILED, format!("cannot read {deps_file}: {e}")).with_hint(DEPS_HINT)
+        })?;
         let mut dumps = BTreeMap::new();
         let mut stack = vec![&deps];
         while let Some(node) = stack.pop() {
@@ -967,10 +1008,13 @@ impl Builder {
             let stdout = if node.identity == deps.identity {
                 self.swift_package(res, &["describe", "--type", "json"], em, cancel).await?
             } else {
+                // Its own scratch under .russet/work: without one, SwiftPM writes `.build/` into the dependency's
+                // directory, which for a local path dependency is outside the project's `.russet`.
+                let scratch = work.join("describe").join(spm::path_component(&node.identity));
                 let spec = spm::package_command(
                     &res.facts.tools.swift,
                     Utf8Path::new(&node.path),
-                    None,
+                    Some(&scratch),
                     &["describe", "--type", "json"],
                 );
                 self.run_tool(&spec, &format!("swift package describe ({})", node.name), em, cancel).await?
@@ -995,7 +1039,7 @@ impl Builder {
             }
             Backend::Swiftbuild if plan.has_dynamic_products() => {
                 em.warn(
-                    "build.warn.backend",
+                    warn::BACKEND,
                     "the package graph has .dynamic products, which Swift Build cannot link on Linux; building with the native backend",
                     Some("Track B04 (W16); the native backend is deprecated by SwiftPM 6.4 but links them."),
                 );
@@ -1014,7 +1058,7 @@ impl Builder {
                     .with_hint("Remove the override from release profiles (ARCHITECTURE §16.4)."));
                 }
                 em.warn(
-                    "build.warn.metadata",
+                    warn::METADATA,
                     "RUSSET_LINK_SDK_VERSION = deployment: binaries record sdk = minos (diagnosis only)",
                     Some("iOS then applies the deployment target's linked-on-or-after behaviour; never ship this."),
                 );
@@ -1077,7 +1121,7 @@ impl Builder {
         let m = res.m();
         if !m.app.resources.is_empty() {
             em.warn(
-                "build.warn.resources",
+                warn::RESOURCES,
                 format!("[app] resources ({}) are not compiled yet", m.app.resources.join(", ")),
                 Some("Asset and string catalogs compile with russet-actool and russet-xcstrings (W16, W21)."),
             );
@@ -1095,11 +1139,7 @@ impl Builder {
                 Ok(Some(path))
             }
             Some(icon) => {
-                em.warn(
-                    "build.warn.resources",
-                    format!("the icon set `{icon}` needs an asset catalog compiler (W16)"),
-                    None,
-                );
+                em.warn(warn::RESOURCES, format!("the icon set `{icon}` needs an asset catalog compiler (W16)"), None);
                 Ok(None)
             }
             None => Ok(None),
@@ -1182,8 +1222,10 @@ impl Builder {
                 .with_hint("Entitlements are a property list whose root is a dictionary.")
         })?;
         let out = res.work_dir().join("entitlements").join(format!("{product}.plist"));
-        let bytes = russet_plist::to_xml(&Value::Dictionary(d))
-            .map_err(|e| Error::new(codes::config::INVALID, format!("{file}: {e}")))?;
+        let bytes = russet_plist::to_xml(&Value::Dictionary(d)).map_err(|e| {
+            Error::new(codes::config::INVALID, format!("{file}: {e}"))
+                .with_hint("Entitlements hold strings, booleans, numbers, arrays and dictionaries only.")
+        })?;
         spm::write_if_changed(&out, &bytes)?;
         Ok(Some(out))
     }
@@ -1206,7 +1248,7 @@ impl Builder {
         let dt = metadata::dt_keys(&res.metadata, &res.facts, &app_settings)?;
         if let MetadataPolicy::XcodeCompat { .. } = res.metadata {
             em.warn(
-                "build.warn.metadata",
+                warn::METADATA,
                 "metadata = xcode-compat: Xcode identity keys are stamped (recorded in build-report.json)",
                 None,
             );
@@ -1231,11 +1273,13 @@ impl Builder {
         })?;
         for key in &app_info.overridden {
             em.warn(
-                "build.warn.infoPlist",
+                warn::INFO_PLIST,
                 format!("Info.plist key {key} is set by Russet; the project's value was replaced"),
                 None,
             );
         }
+        // The app's effective versions (its own Info.plist may set them); extensions get the same (L010).
+        let (version, build) = effective_versions(&app_info.plist, version, build);
         let app = ProductBundle {
             plan: plan.app.clone(),
             info: app_info.plist,
@@ -1273,6 +1317,16 @@ impl Builder {
                 dt: &dt,
                 settings: &settings,
             })?;
+            for key in &info.overridden {
+                em.warn(
+                    warn::INFO_PLIST,
+                    format!(
+                        "Info.plist key {key} of the extension {} is set by Russet; the project's value was replaced",
+                        ext.product
+                    ),
+                    Some("An extension's versions are its app's, and Russet sets its identity keys (build §4.6)."),
+                );
+            }
             extensions.push(ProductBundle {
                 plan: ext_plan.clone(),
                 info: info.plist,
@@ -1349,7 +1403,7 @@ impl Builder {
                 self.run_tool(&spec, "dsymutil", em, cancel).await?;
                 dsyms.push(out);
             } else {
-                em.warn("build.warn.dsym", "no dsymutil in the SDK bundle; the build has no dSYM", None);
+                em.warn(warn::DSYM, "no dsymutil in the SDK bundle; the build has no dSYM", None);
             }
         }
         if when(res.profile.strip, release) {
@@ -1368,7 +1422,7 @@ impl Builder {
                     bundle::set_times(&assembled.app.path, self.env.epoch)?;
                 }
                 None => em.warn(
-                    "build.warn.strip",
+                    warn::STRIP,
                     "no llvm-strip from LLVM 23 or newer; the executable is not stripped",
                     Some("Install LLVM ≥ 23 (older rewriters can break iOS 27's LINKEDIT alignment rule)."),
                 ),
@@ -1485,7 +1539,7 @@ impl Builder {
                     .iter()
                     .filter(|m| m.path.starts_with(&format!("{prefix}/")))
                     .filter(|m| b.kind == BundleKind::AppExtension || !m.path.contains("/PlugIns/"))
-                    .map(report::ReportMachO::from)
+                    .map(|m| report::ReportMachO::in_bundle(m, &prefix))
                     .collect();
                 report::ReportBundle {
                     path: prefix,
@@ -1541,6 +1595,10 @@ impl Builder {
 
     /// The Info.plist a build would write for `product` (the app when omitted), without building
     /// (`project.infoPlist`). Returns the plist and each key's provenance.
+    ///
+    /// Without `[app] deployment-target`, `MinimumOSVersion` comes from a scan of `Package.swift`'s `.iOS(…)`
+    /// platform (builds read it from `swift package describe`), else the default 15.0. An extension gets the app's
+    /// effective versions, as in a build.
     pub async fn info_plist_with_provenance(
         &self,
         r: &BuildRequest,
@@ -1548,11 +1606,12 @@ impl Builder {
     ) -> Result<(Dictionary, BTreeMap<String, String>)> {
         let res = self.resolve(r).await?;
         let m = res.m();
+        let package_swift = res.package_dir().join("Package.swift");
         let app_product = r
             .target
             .clone()
             .or_else(|| m.build.swiftpm.product.clone())
-            .or_else(|| match detect::swiftpm_products(&res.package_dir().join("Package.swift")).as_slice() {
+            .or_else(|| match detect::swiftpm_products(&package_swift).as_slice() {
                 [one] => Some(one.clone()),
                 _ => None,
             })
@@ -1560,44 +1619,66 @@ impl Builder {
                 Error::new(codes::config::INVALID, "cannot tell the app's product without building")
                     .with_hint("Set `[build.swiftpm] product` in russet.toml.")
             })?;
-        let dt_version = deployment_target(m, None, &res.facts)?;
+        let dt_version = deployment_target(m, detect::swiftpm_ios_platform(&package_swift), &res.facts)?;
         let version = m.app.version.clone().unwrap_or_else(|| "1.0.0".to_owned());
         let build = self.build_number(&res, &CancellationToken::new()).await?;
         let wanted = product.unwrap_or(&app_product);
         let ext = m.app.extensions.iter().find(|e| e.product == wanted);
-        let (kind, bundle_id, user) = match ext {
-            Some(e) => (
-                infoplist::ProductKind::AppExtension { kind: e.kind.clone() },
-                res.ids.extension(&e.product).unwrap_or_default().to_owned(),
-                e.info_plist.clone(),
-            ),
-            None if wanted == app_product => {
-                (infoplist::ProductKind::App, res.ids.app.clone(), m.app.info_plist.clone())
-            }
-            None => {
-                return Err(Error::new(codes::core::NOT_FOUND, format!("the project has no target `{wanted}`"))
-                    .with_hint("`project.info` lists the targets."));
-            }
+        if ext.is_none() && wanted != app_product {
+            return Err(Error::new(codes::core::NOT_FOUND, format!("the project has no target `{wanted}`"))
+                .with_hint("`project.info` lists the targets."));
+        }
+        let synthesize = |kind: infoplist::ProductKind,
+                          product: &str,
+                          bundle_id: &str,
+                          user: Option<&String>,
+                          version: &str,
+                          build: &str|
+         -> Result<infoplist::Synthesized> {
+            let settings = self.build_settings(&res, product, bundle_id, dt_version, version, build);
+            let dt = metadata::dt_keys(&res.metadata, &res.facts, &settings)?;
+            let user = user.map(|p| (res.root.join(p), p.clone()));
+            let app = kind == infoplist::ProductKind::App;
+            infoplist::synthesize(&infoplist::InfoPlistInput {
+                kind,
+                product,
+                display_name: if app { m.app.display_name.as_deref() } else { None },
+                bundle_id,
+                version,
+                build_number: build,
+                deployment_target: dt_version,
+                devices: &m.app.devices,
+                orientations: &m.app.orientations,
+                launch_screen: m.app.launch_screen.as_ref(),
+                icon_file: m
+                    .app
+                    .icon
+                    .as_deref()
+                    .filter(|i| app && i.ends_with(".png"))
+                    .and_then(|i| Utf8Path::new(i).file_stem()),
+                user_plist: user.as_ref().map(|(p, l)| (p.as_path(), l.as_str())),
+                dt: &dt,
+                settings: &settings,
+            })
         };
-        let settings = self.build_settings(&res, wanted, &bundle_id, dt_version, &version, &build);
-        let dt = metadata::dt_keys(&res.metadata, &res.facts, &settings)?;
-        let user = user.map(|p| (res.root.join(&p), p));
-        let s = infoplist::synthesize(&infoplist::InfoPlistInput {
-            kind: kind.clone(),
-            product: wanted,
-            display_name: if kind == infoplist::ProductKind::App { m.app.display_name.as_deref() } else { None },
-            bundle_id: &bundle_id,
-            version: &version,
-            build_number: &build,
-            deployment_target: dt_version,
-            devices: &m.app.devices,
-            orientations: &m.app.orientations,
-            launch_screen: m.app.launch_screen.as_ref(),
-            icon_file: m.app.icon.as_deref().filter(|i| i.ends_with(".png")).and_then(|i| Utf8Path::new(i).file_stem()),
-            user_plist: user.as_ref().map(|(p, l)| (p.as_path(), l.as_str())),
-            dt: &dt,
-            settings: &settings,
-        })?;
+        let app = synthesize(
+            infoplist::ProductKind::App,
+            &app_product,
+            &res.ids.app,
+            m.app.info_plist.as_ref(),
+            &version,
+            &build,
+        )?;
+        let Some(e) = ext else { return Ok((app.plist, app.provenance)) };
+        let (version, build) = effective_versions(&app.plist, version, build);
+        let s = synthesize(
+            infoplist::ProductKind::AppExtension { kind: e.kind.clone() },
+            &e.product,
+            res.ids.extension(&e.product).unwrap_or_default(),
+            e.info_plist.as_ref(),
+            &version,
+            &build,
+        )?;
         Ok((s.plist, s.provenance))
     }
 
@@ -1607,9 +1688,17 @@ impl Builder {
     }
 
     /// Removes `.russet/work` and `.russet/build` (`Build`) or all of `.russet` (`All`).
+    ///
+    /// A running build holds `.russet/work/build.lock`, so cleaning then fails with `build.inProgress` instead of
+    /// deleting the build's scratch and outputs. The lock is held until everything is removed (the lock file goes
+    /// with `.russet/work`; Linux allows removing a locked file), so no build can start halfway through.
     pub async fn clean(&self, dir: &Utf8Path, scope: CleanScope) -> Result<CleanReport> {
         let root = detect::find_root(dir)?;
         let russet = root.join(".russet");
+        if !russet.exists() {
+            return Ok(CleanReport::default());
+        }
+        let lock = lock_project(&russet.join("work"))?;
         let targets = match scope {
             CleanScope::Build => vec![russet.join("work"), russet.join("build")],
             CleanScope::All => vec![russet],
@@ -1617,13 +1706,11 @@ impl Builder {
         let mut freed = 0;
         for t in targets {
             if t.exists() {
-                if t.join("build.lock").exists() {
-                    let _lock = lock_project(&t)?;
-                }
                 freed += report::dir_size(&t);
                 std::fs::remove_dir_all(&t).map_err(|e| spm::io(&t, e))?;
             }
         }
+        drop(lock);
         Ok(CleanReport { freed_bytes: freed })
     }
 

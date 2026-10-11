@@ -152,11 +152,18 @@ async fn a_build_assembles_the_app_with_scene_manifest_dt_keys_and_hygiene() {
     assert_eq!(report["toolchain"]["sdk"]["id"], "xcode-27.0-27A266a");
     assert_eq!(report["metadata"]["policy"], "sdk");
     assert_eq!(report["metadata"]["stamped"]["DTSDKBuild"], "24A430");
+    assert_eq!(report["bundles"][0]["path"], "RussetProbe.app");
+    assert_eq!(report["bundles"][0]["machO"][0]["path"], "RussetProbe", "relative to the bundle (build §9.6)");
     assert_eq!(report["bundles"][0]["machO"][0]["sdk"], "27.0");
     assert_eq!(report["bundles"][0]["machO"][0]["minos"], "17.0");
     assert_eq!(report["bundles"][0]["machO"][0]["builtByRusset"], true);
     assert_eq!(report["artifacts"]["app"], ".russet/build/debug-iphoneos/RussetProbe.app");
     assert_eq!(report["signingPlan"][0]["getTaskAllow"], true);
+    assert_eq!(report["lints"][0]["id"], "L006");
+    assert_eq!(
+        report["lints"][0]["path"], "RussetProbe.app/RussetProbe",
+        "relative to the bundle's parent (build §9.6)"
+    );
 
     // The event log mirrors the job's events.
     let log = w.project.join(".russet/logs").join(format!("{}.jsonl", out.build_id));
@@ -366,10 +373,18 @@ async fn extensions_are_embedded_and_signed_first() {
     let toml = w.project.join("russet.toml");
     let mut text = std::fs::read_to_string(&toml).unwrap();
     text.push_str(
-        "\n[[app.extensions]]\nproduct = \"ProbeWidget\"\nkind = \"widgetkit\"\nbundle-id-suffix = \"widget\"\n",
+        "\n[[app.extensions]]\nproduct = \"ProbeWidget\"\nkind = \"widgetkit\"\nbundle-id-suffix = \"widget\"\n\
+         info-plist = \"Widget-Info.plist\"\n",
     );
     std::fs::write(&toml, text).unwrap();
-    let out = w.builder.build(BuildRequest::new(&w.project), &NullSink, CancellationToken::new()).await.unwrap();
+    // The extension's own Info.plist tries other versions; the app's win (build §4.6, L010).
+    let mut own = plist::Dictionary::new();
+    own.insert("CFBundleShortVersionString".into(), Value::from("9.9"));
+    own.insert("CFBundleVersion".into(), Value::from("99"));
+    russet_plist::to_path(w.project.join("Widget-Info.plist"), &Value::Dictionary(own), russet_plist::Format::Xml)
+        .unwrap();
+    let sink = RecordingSink::default();
+    let out = w.builder.build(BuildRequest::new(&w.project), &sink, CancellationToken::new()).await.unwrap();
     assert_eq!(out.extensions.len(), 1);
     let appex = &out.extensions[0];
     assert_eq!(appex.path, out.app.path.join("PlugIns/ProbeWidget.appex"));
@@ -377,6 +392,17 @@ async fn extensions_are_embedded_and_signed_first() {
     let info = info_plist(&appex.path);
     assert_eq!(info.get("CFBundlePackageType").and_then(Value::as_string), Some("XPC!"));
     assert_eq!(info.get("CFBundleShortVersionString").and_then(Value::as_string), Some("1.0.0"));
+    assert_eq!(info.get("CFBundleVersion").and_then(Value::as_string), Some("1"));
+    assert_eq!((appex.version.as_str(), appex.build_number.as_str()), ("1.0.0", "1"));
+    assert!(
+        sink.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, l)| l.contains("CFBundleVersion of the extension ProbeWidget")
+                && l.contains("build.warn.infoPlist")),
+        "the replaced extension version is announced"
+    );
     let items: Vec<&Utf8Path> = out.signing_plan.items.iter().map(|i| i.path.as_path()).collect();
     assert_eq!(items, [appex.path.as_path(), out.app.path.as_path()]);
     let builder = std::fs::read_to_string(w.project.join(".russet/work/builder/Package.swift")).unwrap();
@@ -421,4 +447,100 @@ async fn environment_dumps_never_reach_the_logs() {
     assert!(sink.lines.lock().unwrap().iter().all(|(_, l)| !l.contains(CANARY)));
     assert!(!std::fs::read_to_string(&out.report_path).unwrap().contains(CANARY));
     drop(dir);
+}
+
+/// `build.clean` never deletes a running build's scratch or outputs: a held project lock is `build.inProgress` for
+/// both scopes, and nothing is removed.
+#[tokio::test]
+async fn clean_refuses_while_a_build_holds_the_lock() {
+    let w = world();
+    w.builder.build(BuildRequest::new(&w.project), &NullSink, CancellationToken::new()).await.unwrap();
+    let app = w.project.join(".russet/build/debug-iphoneos/RussetProbe.app");
+    let held = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(w.project.join(".russet/work/build.lock"))
+        .unwrap();
+    held.try_lock().unwrap();
+    for scope in [CleanScope::Build, CleanScope::All] {
+        let err = w.builder.clean(&w.project, scope).await.unwrap_err();
+        assert_eq!(err.code(), codes::build::IN_PROGRESS, "{scope:?}");
+        assert!(app.is_dir() && w.project.join(".russet/work/swiftpm").is_dir(), "{scope:?} removed files");
+    }
+    held.unlock().unwrap();
+    drop(held);
+    let freed = w.builder.clean(&w.project, CleanScope::All).await.unwrap();
+    assert!(freed.freed_bytes > 0);
+    assert!(!w.project.join(".russet").exists());
+    assert_eq!(w.builder.clean(&w.project, CleanScope::All).await.unwrap().freed_bytes, 0, "nothing left to clean");
+}
+
+/// ARCHITECTURE §16.4: `xcode-compat` needs its consent committed in russet.toml; the gitignored
+/// russet.local.toml cannot give it.
+#[tokio::test]
+async fn xcode_compat_needs_a_committed_consent() {
+    let w = world();
+    let toml = w.project.join("russet.toml");
+    let base = std::fs::read_to_string(&toml).unwrap();
+    let consent = "metadata-consent = { by = \"owner\", at = \"2026-10-11\" }\n";
+    std::fs::write(&toml, format!("{base}\n[build]\nmetadata = \"xcode-compat\"\n")).unwrap();
+    std::fs::write(w.project.join("russet.local.toml"), format!("[build]\n{consent}")).unwrap();
+    let err = w.builder.build(BuildRequest::new(&w.project), &NullSink, CancellationToken::new()).await.unwrap_err();
+    assert_eq!(err.code(), codes::config::INVALID);
+    assert!(err.message().contains("russet.local.toml"), "{}", err.message());
+    assert!(err.hint().is_some_and(|h| h.contains("russet.toml")));
+
+    std::fs::remove_file(w.project.join("russet.local.toml")).unwrap();
+    std::fs::write(&toml, format!("{base}\n[build]\nmetadata = \"xcode-compat\"\n{consent}")).unwrap();
+    let out = w.builder.build(BuildRequest::new(&w.project), &NullSink, CancellationToken::new()).await.unwrap();
+    let info = info_plist(&out.app.path);
+    assert_eq!(info.get("DTXcode").and_then(Value::as_string), Some("2700"));
+    assert!(info.get("RussetToolchain").and_then(Value::as_dictionary).is_some(), "the disclosure marker");
+    let report: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out.report_path).unwrap()).unwrap();
+    assert_eq!(report["metadata"]["policy"], "xcode-compat");
+}
+
+/// Every package is described in its own scratch under `.russet/work`, so SwiftPM never writes `.build/` into a
+/// local dependency's directory (build B03: the scratch stays inside the project).
+#[tokio::test]
+async fn dependencies_are_described_in_their_own_scratch() {
+    const KIT: &str = r#"{"name": "Kit", "products": [{"name": "Kit", "targets": ["Kit"], "type": {"library": ["automatic"]}}],
+        "targets": [{"name": "Kit", "module_type": "SwiftTarget"}]}"#;
+    let (dir, root) = tmp();
+    let project = support::copy_probe(&root);
+    let kit = root.join("Kit");
+    std::fs::create_dir_all(&kit).unwrap();
+    let mut swift = ScriptedSwift::new(DESCRIBE, "russetprobe", fake_binary(&[], &[]));
+    Arc::get_mut(&mut swift).unwrap().deps = vec![("kit".into(), "Kit".into(), kit.to_string(), KIT.into())];
+    let env =
+        BuildEnv::new(Arc::new(FixedSdk(fake_facts(&root))), root.join("data"), root.join("cache"), swift.clone())
+            .with_macho(Arc::new(FakeMachO::default()));
+    Builder::new(env).unwrap().build(BuildRequest::new(&project), &NullSink, CancellationToken::new()).await.unwrap();
+    let calls = swift.calls.lock().unwrap().clone();
+    let describes: Vec<&Vec<String>> = calls.iter().filter(|c| c.contains(&"describe".to_owned())).collect();
+    assert_eq!(describes.len(), 2, "{describes:?}");
+    let scratch = |c: &Vec<String>| c.iter().position(|a| a == "--scratch-path").map(|i| c[i + 1].clone());
+    let for_kit = describes.iter().find(|c| c.contains(&kit.to_string())).unwrap();
+    assert_eq!(scratch(for_kit), Some(project.join(".russet/work/describe/kit").to_string()));
+    let for_root = describes.iter().find(|c| !c.contains(&kit.to_string())).unwrap();
+    assert_eq!(scratch(for_root), Some(project.join(".russet/work/swiftpm").to_string()));
+    assert!(calls.iter().all(|c| scratch(c).is_some_and(|s| s.starts_with(project.join(".russet/work").as_str()))));
+    drop(dir);
+}
+
+/// Without `[app] deployment-target`, the Info.plist preview and the plan take `MinimumOSVersion` from
+/// Package.swift's `.iOS(.v17)`, as a build does through `swift package describe`.
+#[tokio::test]
+async fn previews_take_the_deployment_target_from_package_swift() {
+    let w = world();
+    let toml = w.project.join("russet.toml");
+    let text = std::fs::read_to_string(&toml).unwrap().replace("deployment-target = \"17.0\"\n", "");
+    std::fs::write(&toml, text).unwrap();
+    let (plist, _) = w.builder.info_plist_with_provenance(&BuildRequest::new(&w.project), None).await.unwrap();
+    assert_eq!(plist.get("MinimumOSVersion").and_then(Value::as_string), Some("17.0"));
+    let plan = w.builder.plan(&BuildRequest::new(&w.project)).await.unwrap();
+    assert_eq!(plan.deployment_target.map(|v| v.to_string()), Some("17.0".to_owned()));
+    let out = w.builder.build(BuildRequest::new(&w.project), &NullSink, CancellationToken::new()).await.unwrap();
+    assert_eq!(info_plist(&out.app.path).get("MinimumOSVersion").and_then(Value::as_string), Some("17.0"));
 }

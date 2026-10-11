@@ -90,7 +90,9 @@ impl Toolset {
 }
 
 pub(crate) fn io_error(path: &Utf8Path, e: std::io::Error) -> Error {
-    Error::new(codes::core::IO, format!("{path}: {e}")).caused_by(e)
+    Error::new(codes::core::IO, format!("{path}: {e}"))
+        .with_hint("Check that Russet's data directory exists and is writable (`russet doctor`).")
+        .caused_by(e)
 }
 
 #[cfg(test)]

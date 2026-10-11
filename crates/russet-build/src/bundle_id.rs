@@ -64,16 +64,19 @@ pub fn policy_for(requested: Option<&BundleIdPolicy>, signing: &SigningSection) 
             "auto" | "exact" => Ok(BundleIdPolicy::Exact),
             "team-suffix" => match signing.team.as_deref().filter(|t| !t.is_empty()) {
                 Some(team) => Ok(BundleIdPolicy::TeamSuffix { team_id: team.to_owned() }),
-                None => Err(Error::new(codes::build::BUNDLE_ID_INVALID, "bundle-id-policy `team-suffix` needs `[signing] team`")
-                    .with_hint("Set `[signing] team` in russet.local.toml, or pass the policy with the build request.")),
+                None => Err(Error::new(
+                    codes::build::BUNDLE_ID_INVALID,
+                    "bundle-id-policy `team-suffix` needs `[signing] team`",
+                )
+                .with_hint("Set `[signing] team` in russet.local.toml, or pass the policy with the build request.")),
             },
             "xtool-prefix" => Err(Error::new(
                 codes::build::BUNDLE_ID_INVALID,
                 "bundle-id-policy `xtool-prefix` needs the identity prefix of the imported xtool account",
             )
             .with_hint(
-                "Import the account (`russet account import --from-xtool --yes`); `russet run` and `russet debug` pass the \
-                 prefix to the build, and `build.start` accepts it as `bundleIdPolicy {kind: xtool-prefix, prefix}`.",
+                "Import the account (`russet account import --from-xtool --yes`): the daemon then passes the default \
+                 account's prefix to the build. A client may also send `bundleIdPolicy {kind: xtool-prefix, prefix}`.",
             )),
             other => Err(invalid(format!("unknown bundle-id-policy `{other}`"))),
         },
@@ -90,6 +93,11 @@ pub fn policy_for(requested: Option<&BundleIdPolicy>, signing: &SigningSection) 
         }
         Some(other) => Err(invalid(format!("bundle-id-policy cannot be {}", other.type_str()))),
     }
+}
+
+/// Whether `[signing] bundle-id-policy` is `xtool-prefix`, whose prefix only the signing account knows.
+pub fn is_xtool_prefix(signing: &SigningSection) -> bool {
+    matches!(&signing.bundle_id_policy, Some(toml::Value::String(s)) if s == "xtool-prefix")
 }
 
 /// Checks the bundle-ID syntax.
@@ -199,6 +207,8 @@ mod tests {
         assert_eq!(policy_for(None, &s("auto")).unwrap(), BundleIdPolicy::Exact);
         assert_eq!(policy_for(None, &s("team-suffix")).unwrap(), BundleIdPolicy::TeamSuffix { team_id: "T1".into() });
         assert_eq!(policy_for(None, &s("xtool-prefix")).unwrap_err().code(), codes::build::BUNDLE_ID_INVALID);
+        assert!(is_xtool_prefix(&s("xtool-prefix")));
+        assert!(!is_xtool_prefix(&s("team-suffix")) && !is_xtool_prefix(&SigningSection::default()));
         assert_eq!(policy_for(None, &s("weird")).unwrap_err().code(), codes::config::INVALID);
         let requested = BundleIdPolicy::XtoolPrefix { prefix: "AB".into() };
         assert_eq!(policy_for(Some(&requested), &s("xtool-prefix")).unwrap(), requested);

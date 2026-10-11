@@ -31,7 +31,7 @@ use russet_core::error::{Error, codes};
 use russet_sdk::Version;
 use uuid::Uuid;
 
-use crate::events::{BuildEvent, Emitter, Severity};
+use crate::events::{BuildEvent, Emitter, Severity, warn};
 use crate::macho::{MachOSummary, MachOTool, is_host_rpath};
 use crate::stack::swiftpm::{ProductPlan, io};
 use crate::{BundleInfo, BundleKind, LintFinding, LintSeverity, SignItem, SignKind, SigningPlan, metadata};
@@ -155,8 +155,12 @@ fn normalize_nested(info_path: &Utf8Path, dt: &Dictionary) -> Result<bool> {
         return Ok(false);
     }
     let bytes = std::fs::read(info_path).map_err(|e| io(info_path, e))?;
-    let (value, format) = russet_plist::from_bytes(&bytes)
-        .map_err(|e| Error::new(codes::build::COMPILE_FAILED, format!("{info_path}: {e}")))?;
+    let (value, format) = russet_plist::from_bytes(&bytes).map_err(|e| {
+        Error::new(codes::build::COMPILE_FAILED, format!("{info_path}: {e}")).with_hint(
+            "A bundle the package build produced has an unreadable Info.plist; check the package's resources, then \
+             rebuild with `russet build --clean`.",
+        )
+    })?;
     let Value::Dictionary(mut d) = value else { return Ok(false) };
     if !metadata::normalize(&mut d, dt) {
         return Ok(false);
@@ -202,7 +206,7 @@ fn place_product(
     for bundle in &p.plan.resource_bundles {
         let src = products.join(bundle);
         if !src.is_dir() {
-            emitter.warn("build.warn.resources", format!("the resource bundle {bundle} was not built"), None);
+            emitter.warn(warn::RESOURCES, format!("the resource bundle {bundle} was not built"), None);
             continue;
         }
         let dst = dir.join(bundle);
@@ -223,7 +227,7 @@ fn place_product(
             copy_file(&src, &dst)?;
             built.push(dst);
             emitter.warn(
-                "build.warn.lint",
+                warn::LINT,
                 format!("lib{lib}.dylib is embedded as a loose dylib; wrapping it in a framework lands with B04 (W16)"),
                 Some("The App Store rejects loose non-Swift dylibs (lint L008); development installs work."),
             );
@@ -288,7 +292,8 @@ fn assemble_into(
         normalize_nested(&dir.join("Info.plist"), input.dt)?;
     }
 
-    let lints = rpath_hygiene(input, &built, staging)?;
+    let app_name = final_app.file_name().unwrap_or_default();
+    let lints = rpath_hygiene(input, &built, staging, app_name)?;
     back_deploy(input, &built, staging, emitter)?;
 
     // Report every Mach-O file of the bundle.
@@ -358,8 +363,14 @@ fn assemble_into(
     Ok(Assembled { app, extensions, signing_plan, lints, machos, uuids })
 }
 
-/// Deletes host `LC_RPATH`s from every Mach-O Russet built (lint L006, auto-fixed).
-fn rpath_hygiene(input: &AssemblyInput<'_>, built: &[Utf8PathBuf], staging: &Utf8Path) -> Result<Vec<LintFinding>> {
+/// Deletes host `LC_RPATH`s from every Mach-O Russet built (lint L006, auto-fixed). Finding paths are relative to
+/// the bundle's parent directory (`RussetProbe.app/RussetProbe`, build §9.6).
+fn rpath_hygiene(
+    input: &AssemblyInput<'_>,
+    built: &[Utf8PathBuf],
+    staging: &Utf8Path,
+    app_name: &str,
+) -> Result<Vec<LintFinding>> {
     let mut lints = Vec::new();
     for file in built {
         let bytes = std::fs::read(file).map_err(|e| io(file, e))?;
@@ -369,7 +380,7 @@ fn rpath_hygiene(input: &AssemblyInput<'_>, built: &[Utf8PathBuf], staging: &Utf
             lints.push(LintFinding {
                 code: "L006".into(),
                 severity: LintSeverity::Warning,
-                path: file.strip_prefix(staging).ok().map(Utf8Path::to_owned),
+                path: file.strip_prefix(staging).ok().map(|rel| Utf8Path::new(app_name).join(rel)),
                 message: format!("removed the host rpath {rpath}"),
                 fixed: true,
             });

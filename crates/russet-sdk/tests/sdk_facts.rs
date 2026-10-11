@@ -239,6 +239,38 @@ async fn a_bundle_without_darwin_tools_cannot_link() {
     assert_eq!(p.resolve(&SdkSelector::Auto).await.unwrap_err().code(), codes::toolchain::LINKER_UNSUPPORTED);
 }
 
+/// `sdk.buildFacts` passes on a complete bundle and fails when a default build cannot work: no platform
+/// `version.plist` (DTPlatformBuild under `metadata = "sdk"`) or no darwin-tools `ld64.lld`.
+#[tokio::test]
+async fn the_build_facts_check_fails_when_a_build_cannot_work() {
+    use russet_doctor::{Check, CheckCx, Status};
+    let cx = CheckCx { project: None, udid: None, online: false };
+    let (_g, root) = tmp();
+    let sdks = root.join("swift-sdks");
+    let b = make_bundle(&sdks, "darwin.artifactbundle", "27.0", "27A266a", "27.0");
+    let check = russet_sdk::BuildFactsCheck::with_search_dirs(vec![sdks.clone()]);
+    assert_eq!(check.id(), "sdk.buildFacts");
+    let ok = check.run(&cx).await;
+    assert_eq!(ok.status, Status::Pass, "{ok:?}");
+    assert!(ok.summary.contains("xcode-27.0-27A266a"));
+
+    std::fs::remove_file(b.join("Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/version.plist")).unwrap();
+    let no_version = check.run(&cx).await;
+    assert_eq!(no_version.status, Status::Fail, "{no_version:?}");
+    assert!(no_version.summary.contains("version.plist"));
+    assert!(no_version.hint.is_some());
+
+    let b2 = make_bundle(&root.join("other"), "darwin.artifactbundle", "27.0", "27A266a", "27.0");
+    std::fs::remove_file(b2.join("toolset/bin/ld64.lld")).unwrap();
+    let no_linker = russet_sdk::BuildFactsCheck::with_search_dirs(vec![root.join("other")]).run(&cx).await;
+    assert_eq!(no_linker.status, Status::Fail, "{no_linker:?}");
+    assert!(no_linker.summary.contains("ld64.lld"));
+
+    let none = russet_sdk::BuildFactsCheck::with_search_dirs(vec![root.join("nowhere")]).run(&cx).await;
+    assert_eq!(none.status, Status::Fail);
+    assert!(none.hint.is_some());
+}
+
 /// Local only: a real Darwin SDK bundle (`RUSSET_TEST_SDK_BUNDLE`), read in place.
 #[test]
 fn a_real_bundle_reads_completely() {

@@ -243,21 +243,27 @@ fn string<'a>(d: &'a Dictionary, key: &str) -> Option<&'a str> {
     d.get(key).and_then(Value::as_string)
 }
 
+/// The hint of an SDK file that exists but cannot be read.
+const DAMAGED_HINT: &str =
+    "The SDK bundle is damaged: recreate it (`xtool setup` for xtool's bundle, or `russet sdk import` again).";
+
 fn read_dict(bundle: &Utf8Path, path: &Utf8Path) -> Result<Dictionary> {
     if path.extension() == Some("json") {
         let text = std::fs::read_to_string(path).map_err(|_| incomplete_path(bundle, path))?;
-        let json: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| Error::new(codes::sdk::INCOMPLETE, format!("{path} is not valid JSON: {e}")))?;
+        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            Error::new(codes::sdk::INCOMPLETE, format!("{path} is not valid JSON: {e}")).with_hint(DAMAGED_HINT)
+        })?;
         return match json_to_plist(json) {
             Value::Dictionary(d) => Ok(d),
-            _ => Err(Error::new(codes::sdk::INCOMPLETE, format!("{path} is not a dictionary"))),
+            _ => Err(Error::new(codes::sdk::INCOMPLETE, format!("{path} is not a dictionary")).with_hint(DAMAGED_HINT)),
         };
     }
     if !path.is_file() {
         return Err(incomplete_path(bundle, path));
     }
-    russet_plist::dictionary_from_path(path)
-        .map_err(|e| Error::new(codes::sdk::INCOMPLETE, format!("{path} cannot be read: {e}")).caused_by(e))
+    russet_plist::dictionary_from_path(path).map_err(|e| {
+        Error::new(codes::sdk::INCOMPLETE, format!("{path} cannot be read: {e}")).with_hint(DAMAGED_HINT).caused_by(e)
+    })
 }
 
 fn json_to_plist(v: serde_json::Value) -> Value {

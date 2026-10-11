@@ -101,10 +101,13 @@ pub struct ReportMachO {
     pub built_by_russet: bool,
 }
 
-impl From<&MachOEntry> for ReportMachO {
-    fn from(m: &MachOEntry) -> Self {
+impl ReportMachO {
+    /// `m` as listed under the bundle at `bundle` (both relative to the app's parent directory): the path is
+    /// relative to that bundle, as in build §9.6 (`"path": "Hello"` under `Hello.app`).
+    pub fn in_bundle(m: &MachOEntry, bundle: &str) -> Self {
+        let path = m.path.strip_prefix(bundle).and_then(|p| p.strip_prefix('/')).unwrap_or(&m.path);
         Self {
-            path: m.path.clone(),
+            path: path.to_owned(),
             arch: m.summary.archs.join(","),
             minos: m.summary.minos.map(|v| v.to_string()),
             sdk: m.summary.sdk.map(|v| v.to_string()),
@@ -177,4 +180,26 @@ pub fn dir_size(dir: &Utf8Path) -> u64 {
         }
     }
     total
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::macho::MachOSummary;
+
+    #[test]
+    fn mach_o_paths_are_relative_to_their_bundle() {
+        let entry =
+            |path: &str| MachOEntry { path: path.into(), summary: MachOSummary::default(), built_by_russet: true };
+        assert_eq!(ReportMachO::in_bundle(&entry("Hello.app/Hello"), "Hello.app").path, "Hello");
+        assert_eq!(
+            ReportMachO::in_bundle(&entry("Hello.app/Frameworks/libswiftX.dylib"), "Hello.app").path,
+            "Frameworks/libswiftX.dylib"
+        );
+        assert_eq!(
+            ReportMachO::in_bundle(&entry("Hello.app/PlugIns/W.appex/W"), "Hello.app/PlugIns/W.appex").path,
+            "W"
+        );
+        assert_eq!(ReportMachO::in_bundle(&entry("Other.app/X"), "Hello.app").path, "Other.app/X");
+    }
 }

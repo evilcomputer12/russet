@@ -38,8 +38,10 @@ impl InspectReport {
 fn read_info(bytes: &[u8], what: &str) -> Result<Dictionary> {
     match russet_plist::from_bytes(bytes) {
         Ok((Value::Dictionary(d), _)) => Ok(d),
-        Ok(_) => Err(Error::new(codes::core::INVALID_ARGUMENT, format!("{what} is not a dictionary"))),
-        Err(e) => Err(Error::new(codes::core::INVALID_ARGUMENT, format!("{what}: {e}"))),
+        Ok(_) => Err(Error::new(codes::core::INVALID_ARGUMENT, format!("{what} is not a dictionary"))
+            .with_hint("An app's Info.plist is a property list whose root is a dictionary; rebuild the app.")),
+        Err(e) => Err(Error::new(codes::core::INVALID_ARGUMENT, format!("{what}: {e}"))
+            .with_hint("The app's Info.plist is not a readable property list; rebuild the app.")),
     }
 }
 
@@ -59,8 +61,10 @@ pub fn inspect(path: &Utf8Path, macho: &dyn MachOTool) -> Result<InspectReport> 
         (path.file_name().unwrap_or_default().to_owned(), info, files)
     } else if path.extension() == Some("ipa") {
         let listing = russet_ipa::read_listing(path).map_err(ipa_error)?;
-        let app = russet_ipa::app_dir(&listing)
-            .ok_or_else(|| Error::new(codes::core::INVALID_ARGUMENT, format!("{path} has no single Payload/*.app")))?;
+        let app = russet_ipa::app_dir(&listing).ok_or_else(|| {
+            Error::new(codes::core::INVALID_ARGUMENT, format!("{path} has no single Payload/*.app"))
+                .with_hint("An IPA holds exactly one app at Payload/<App>.app; repackage it with `russet package ipa`.")
+        })?;
         let info =
             read_info(&russet_ipa::read_entry(path, &format!("{app}Info.plist")).map_err(ipa_error)?, "Info.plist")?;
         let mut files = Vec::new();
@@ -73,7 +77,8 @@ pub fn inspect(path: &Utf8Path, macho: &dyn MachOTool) -> Result<InspectReport> 
         return Err(Error::new(
             codes::core::INVALID_ARGUMENT,
             format!("{path} is neither an .app directory nor an .ipa"),
-        ));
+        )
+        .with_hint("Pass the path of an .app directory or an .ipa file."));
     };
 
     let executable = info.get("CFBundleExecutable").and_then(Value::as_string).unwrap_or_default().to_owned();
@@ -137,5 +142,7 @@ fn collect(root: &Utf8Path, dir: &Utf8Path, out: &mut Vec<(String, Vec<u8>)>) ->
 }
 
 fn ipa_error(e: russet_ipa::IpaError) -> Error {
-    Error::new(codes::core::INVALID_ARGUMENT, format!("IPA: {e}")).caused_by(e)
+    Error::new(codes::core::INVALID_ARGUMENT, format!("IPA: {e}"))
+        .with_hint("The file is not a readable IPA (a ZIP archive with Payload/<App>.app); repackage it.")
+        .caused_by(e)
 }

@@ -4,10 +4,13 @@
 //! [`XtoolBundleProvider`]: xtool's Swift SDK bundles (`~/.swiftpm/swift-sdks/*.artifactbundle`), read in place
 //! and never copied (ARCHITECTURE §15, §16.1). Russet's views and toolsets for them live in `data/sdk/<id>/`.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use russet_core::Result;
 use russet_core::error::{Error, codes};
+use russet_core::proc::CommandRunner;
 use russet_doctor::{Category, Check, CheckCx, CheckResult, Requires, Status};
 
 use crate::facts::BundleFacts;
@@ -194,33 +197,63 @@ impl XtoolBundleProvider {
 }
 
 /// The daemon's SDK resolution order (ARCHITECTURE §16.1): Russet-imported bundles (W16b), then xtool's bundles
-/// read in place. The host toolchain is probed on each resolve (W3's resolver replaces the probe), so creating
-/// the provider costs nothing.
-#[derive(Debug, Clone)]
+/// read in place. The host toolchain is probed through `runner` on each resolve (W3's resolver replaces the
+/// probe), so creating the provider costs nothing.
+#[derive(Clone)]
 pub struct DefaultSdkProvider {
     data_dir: Utf8PathBuf,
     tool: Option<Utf8PathBuf>,
+    runner: Arc<dyn CommandRunner>,
+}
+
+impl std::fmt::Debug for DefaultSdkProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DefaultSdkProvider")
+            .field("data_dir", &self.data_dir)
+            .field("tool", &self.tool)
+            .finish_non_exhaustive()
+    }
 }
 
 impl DefaultSdkProvider {
-    /// Views and toolsets go under `data_dir/sdk/<id>/`; `russet_tool` is linked into the views when given.
-    pub fn new(data_dir: impl Into<Utf8PathBuf>, russet_tool: Option<Utf8PathBuf>) -> Self {
-        Self { data_dir: data_dir.into(), tool: russet_tool }
+    /// Views and toolsets go under `data_dir/sdk/<id>/`; `russet_tool` is linked into the views when given; the
+    /// toolchain probes run through `runner` (the daemon's `ProcessRunner`).
+    pub fn new(
+        data_dir: impl Into<Utf8PathBuf>,
+        russet_tool: Option<Utf8PathBuf>,
+        runner: Arc<dyn CommandRunner>,
+    ) -> Self {
+        Self { data_dir: data_dir.into(), tool: russet_tool, runner }
     }
 }
 
 #[async_trait]
 impl SdkProvider for DefaultSdkProvider {
     async fn resolve(&self, sel: &SdkSelector) -> Result<SdkFacts> {
-        let host = tokio::task::spawn_blocking(HostToolchain::probe)
-            .await
-            .map_err(|e| Error::new(codes::core::INTERNAL, format!("toolchain probe panicked: {e}")))??;
+        let host = HostToolchain::probe(self.runner.as_ref()).await?;
         XtoolBundleProvider::new(&self.data_dir, host).with_tool(self.tool.clone()).resolve(sel).await
     }
 }
 
-/// `sdk.buildFacts`: an iOS SDK bundle that has every file the build plane needs (ARCHITECTURE §16.3).
-pub(crate) struct BuildFactsCheck;
+/// `sdk.buildFacts`: an iOS SDK bundle that has every file the build plane needs (ARCHITECTURE §16.3). A bundle
+/// without the platform `version.plist` (DTPlatformBuild, so every `metadata = "sdk"` build fails) or without
+/// darwin-tools' `ld64.lld` (nothing links) fails the check.
+#[derive(Debug, Clone, Default)]
+pub struct BuildFactsCheck {
+    search: Option<Vec<Utf8PathBuf>>,
+}
+
+impl BuildFactsCheck {
+    /// Looks in SwiftPM's `swift-sdks` directories ([`default_search_dirs`]).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Looks in `dirs` instead (tests).
+    pub fn with_search_dirs(dirs: Vec<Utf8PathBuf>) -> Self {
+        Self { search: Some(dirs) }
+    }
+}
 
 #[async_trait]
 impl Check for BuildFactsCheck {
@@ -241,16 +274,28 @@ impl Check for BuildFactsCheck {
     }
 
     async fn run(&self, _cx: &CheckCx) -> CheckResult {
-        let bundles = candidate_bundles(&default_search_dirs());
+        let bundles = candidate_bundles(&self.search.clone().unwrap_or_else(default_search_dirs));
         let picked = tokio::task::spawn_blocking(move || select(&bundles, &SdkSelector::Auto)).await;
         match picked {
             Ok(Ok(f)) => {
                 let tools = f.darwin_tools.as_deref().map_or_else(String::new, |t| format!(", darwin-tools {t}"));
-                let summary = format!("{} ({}, needs Swift {}{tools})", f.id(), f.sdk_canonical_name, f.swift_required);
-                let (status, hint) = if f.platform_build.is_none() || f.linker_dir.is_none() {
-                    (Status::Warn, Some("The bundle lacks the platform version.plist or darwin-tools' ld64.lld; builds stamp fewer DT keys or cannot link.".to_owned()))
-                } else {
+                let mut summary =
+                    format!("{} ({}, needs Swift {}{tools})", f.id(), f.sdk_canonical_name, f.swift_required);
+                let mut missing = Vec::new();
+                if f.platform_build.is_none() {
+                    missing.push("the iPhoneOS platform version.plist (builds with the default `metadata = \"sdk\"` fail with sdk.incomplete)");
+                }
+                if f.linker_dir.is_none() {
+                    missing.push("darwin-tools' ld64.lld (nothing links: toolchain.linkerUnsupported)");
+                }
+                let (status, hint) = if missing.is_empty() {
                     (Status::Pass, None)
+                } else {
+                    summary = format!("{summary} lacks {}", missing.join(" and "));
+                    (
+                        Status::Fail,
+                        Some("Recreate the bundle with `xtool setup` (darwin-tools 1.1.0), or import an Xcode with `russet sdk import`; `[build] metadata = \"minimal\"` builds without the version.plist.".to_owned()),
+                    )
                 };
                 CheckResult { status, summary, detail: Some(f.bundle.to_string()), hint }
             }

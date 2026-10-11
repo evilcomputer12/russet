@@ -6,14 +6,17 @@
 //! The handlers are thin: they turn wire params into `russet_build` requests and domain results into the DTOs
 //! of `russet_protocol::build`. `build.start` runs the build inside the request, which stays open until it
 //! returns `BuildOutput` (ARCHITECTURE §7.6); wrapping it in a `job.*` job (events, `background: true`, the
-//! project lock key) is the JobManager's part (W2, freeze F1). `build.settings` is W16's (Wave 2).
+//! project lock key) needs W2's JobManager (freeze F1; F0's has no API yet). A project whose
+//! `[signing] bundle-id-policy` is `xtool-prefix` gets the default account's prefix ([`with_account_policy`]).
+//! `build.settings` is W16's (Wave 2).
 
+use std::future::Future;
 use std::sync::Arc;
 
 use russet_build::{BuildEnv, BuildRequest, Builder, CleanScope, NullSink, Utf8Path, Utf8PathBuf};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
-use russet_core::proc::ProcessRunner;
+use russet_core::proc::{CommandRunner, ProcessRunner};
 use russet_ipc::{RequestCtx, Router};
 use russet_protocol::build as p;
 use russet_protocol::project::{ProjectStack, TargetKind};
@@ -43,18 +46,50 @@ pub(crate) fn wire_path(s: &str, what: &str) -> Result<Utf8PathBuf> {
 }
 
 fn utf8(p: &std::path::Path) -> Result<Utf8PathBuf> {
-    Utf8PathBuf::from_path_buf(p.to_owned())
-        .map_err(|p| Error::new(codes::core::INVALID_ARGUMENT, format!("{} is not UTF-8", p.display())))
+    Utf8PathBuf::from_path_buf(p.to_owned()).map_err(|p| {
+        Error::new(codes::core::INVALID_ARGUMENT, format!("{} is not UTF-8", p.display()))
+            .with_hint("Russet's directories need UTF-8 paths; set RUSSET_HOME to one.")
+    })
 }
 
-/// The daemon's builder: Russet's data and cache directories, the default SDK order, the daemon's process runner.
+/// The daemon's builder: Russet's data and cache directories, the default SDK order, the daemon's process runner
+/// (for the builds and for the SDK provider's toolchain probes).
 pub(crate) fn builder(cx: &DaemonCtx) -> Result<Builder> {
     let data = utf8(&cx.dirs.data)?;
     let cache = utf8(&cx.dirs.cache)?;
-    let sdk = Arc::new(DefaultSdkProvider::new(data.clone(), None));
     // `default()`, not the unit literal: W2's F1 runner may carry state (the russet-spawner thread, [D 73]).
     #[allow(clippy::default_constructed_unit_structs)]
-    Builder::new(BuildEnv::new(sdk, data, cache, Arc::new(ProcessRunner::default())))
+    let runner: Arc<dyn CommandRunner> = Arc::new(ProcessRunner::default());
+    let sdk = Arc::new(DefaultSdkProvider::new(data.clone(), None, Arc::clone(&runner)));
+    Builder::new(BuildEnv::new(sdk, data, cache, runner))
+}
+
+/// Completes a request's bundle-ID policy from the signing account: when the request names none and the project's
+/// `[signing] bundle-id-policy` is `xtool-prefix` (PLAN §4.10's `russet.local.toml`), `XTL-<prefix>.<id>` needs the
+/// identity prefix of the imported xtool account (ARCHITECTURE §16.5), which only the account service knows.
+/// `prefix` is asked only then. Without a prefix the request is unchanged and the build answers
+/// `build.bundleIdInvalid` with the import hint.
+pub async fn with_account_policy<F, Fut>(b: &Builder, mut r: BuildRequest, prefix: F) -> Result<BuildRequest>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<Option<String>>>,
+{
+    if b.needs_xtool_prefix(&r)
+        && let Some(prefix) = prefix().await?
+    {
+        r.bundle_id_policy = Some(russet_build::BundleIdPolicy::XtoolPrefix { prefix });
+    }
+    Ok(r)
+}
+
+/// The default account's xtool identity prefix (W6's `Account::xtool_prefix()`: the first segment of the xtool
+/// identity id, uppercased).
+///
+/// F0's `Account` has no fields to derive it from and `AccountService`'s bodies are `todo!()`, so until W6 merges
+/// this answers `None`. With W6 (and W2's service slots) the body becomes
+/// `Ok(cx.accounts.get()?.accounts().read().await.default_account().and_then(|a| a.xtool_prefix()))`.
+pub(crate) async fn account_xtool_prefix(_cx: &DaemonCtx) -> Result<Option<String>> {
+    Ok(None)
 }
 
 /// `build.start` / `build.plan` params as a domain request.
@@ -229,14 +264,16 @@ pub fn inspect_dto(r: &russet_build::inspect::InspectReport) -> p::BuildInspectR
 }
 
 async fn build_start(cx: DaemonCtx, rq: RequestCtx, p: p::BuildStartParams) -> Result<p::BuildOutput> {
-    let request = request_from(&p)?;
-    let out = builder(&cx)?.build(request, &NullSink, rq.cancel.clone()).await?;
+    let b = builder(&cx)?;
+    let request = with_account_policy(&b, request_from(&p)?, || account_xtool_prefix(&cx)).await?;
+    let out = b.build(request, &NullSink, rq.cancel.clone()).await?;
     Ok(output_dto(&out))
 }
 
 async fn build_plan(cx: DaemonCtx, _rq: RequestCtx, p: p::BuildPlanParams) -> Result<p::BuildPlanResult> {
-    let plan = builder(&cx)?.plan(&request_from(&p)?).await?;
-    Ok(plan_dto(&plan))
+    let b = builder(&cx)?;
+    let request = with_account_policy(&b, request_from(&p)?, || account_xtool_prefix(&cx)).await?;
+    Ok(plan_dto(&b.plan(&request).await?))
 }
 
 async fn build_clean(cx: DaemonCtx, _rq: RequestCtx, p: p::BuildCleanParams) -> Result<p::BuildCleanResult> {
@@ -293,6 +330,78 @@ mod tests {
             request_from(&relative).map(|_| ()).expect_err("relative paths are refused").code(),
             codes::core::INVALID_ARGUMENT
         );
+    }
+
+    /// A temporary project directory, removed on drop (russetd has no tempfile dev-dependency).
+    struct TempProject(Utf8PathBuf);
+
+    impl TempProject {
+        fn new(files: &[(&str, &str)]) -> Self {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("russetd-build-{}-{n}", std::process::id()));
+            let dir = Utf8PathBuf::from_path_buf(dir).unwrap_or_else(|p| panic!("{}", p.display()));
+            std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
+            for (name, text) in files {
+                std::fs::write(dir.join(name), text).unwrap_or_else(|e| panic!("{e}"));
+            }
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempProject {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn test_builder(root: &Utf8Path) -> Builder {
+        #[allow(clippy::default_constructed_unit_structs)]
+        let runner: Arc<dyn CommandRunner> = Arc::new(ProcessRunner::default());
+        let sdk = Arc::new(DefaultSdkProvider::new(root.join("data"), None, Arc::clone(&runner)));
+        Builder::new(BuildEnv::new(sdk, root.join("data"), root.join("cache"), runner))
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// PLAN §4.10: `bundle-id-policy = "xtool-prefix"` in russet.local.toml and no policy in the request gives
+    /// `XTL-<prefix>`, with the prefix from the account; other projects never ask the account service.
+    #[tokio::test]
+    async fn xtool_prefix_projects_get_the_account_prefix() {
+        let toml = "[app]\nbundle-id = \"com.example.hello\"\n";
+        let local = "[signing]\nbundle-id-policy = \"xtool-prefix\"\n";
+        let project = TempProject::new(&[("russet.toml", toml), ("russet.local.toml", local)]);
+        let b = test_builder(&project.0);
+        let r = with_account_policy(&b, BuildRequest::new(&project.0), || async { Ok(Some("F00DCAFE".to_owned())) })
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(r.bundle_id_policy, Some(russet_build::BundleIdPolicy::XtoolPrefix { prefix: "F00DCAFE".into() }));
+        // No account prefix: the request stays as it was (the build then answers build.bundleIdInvalid).
+        let r = with_account_policy(&b, BuildRequest::new(&project.0), || async { Ok(None) })
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(r.bundle_id_policy, None);
+        // Account errors surface.
+        let e = with_account_policy(&b, BuildRequest::new(&project.0), || async {
+            Err(Error::new(codes::secrets::LOCKED, "locked"))
+        })
+        .await
+        .map(|_| ())
+        .expect_err("the account error surfaces");
+        assert_eq!(e.code(), codes::secrets::LOCKED);
+        // A request with a policy, or a project without xtool-prefix, never asks.
+        let asked = std::sync::atomic::AtomicBool::new(false);
+        let ask = || async {
+            asked.store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(Some("F00DCAFE".to_owned()))
+        };
+        let mut explicit = BuildRequest::new(&project.0);
+        explicit.bundle_id_policy = Some(russet_build::BundleIdPolicy::Exact);
+        let r = with_account_policy(&b, explicit, ask).await.unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(r.bundle_id_policy, Some(russet_build::BundleIdPolicy::Exact));
+        let plain = TempProject::new(&[("russet.toml", toml)]);
+        let r = with_account_policy(&b, BuildRequest::new(&plain.0), ask).await.unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(r.bundle_id_policy, None);
+        assert!(!asked.load(std::sync::atomic::Ordering::Relaxed), "the account service was asked");
     }
 
     #[test]

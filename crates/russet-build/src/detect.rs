@@ -109,11 +109,54 @@ pub fn swiftpm_products(package_swift: &Utf8Path) -> Vec<String> {
     out
 }
 
+/// The `.iOS(…)` platform declared in `Package.swift` (`.iOS(.v17)`, `.iOS(.v17_2)`, `.iOS("17.0")`), read without
+/// running SwiftPM: the same best-effort scan as [`swiftpm_products`], for previews (`project.infoPlist`,
+/// `build.plan`); builds take the platform from `swift package describe`. `None` when there is none, or more than
+/// one, or it is in a form the scan does not read.
+pub fn swiftpm_ios_platform(package_swift: &Utf8Path) -> Option<russet_sdk::Version> {
+    let text = std::fs::read_to_string(package_swift).ok()?;
+    let code: String = text.lines().map(|l| l.split("//").next().unwrap_or_default()).collect::<Vec<_>>().join("\n");
+    let mut found = None;
+    for (idx, _) in code.match_indices(".iOS(") {
+        let arg = code[idx + 5..].split(')').next()?.trim();
+        let version = if let Some(v) = arg.strip_prefix(".v") {
+            russet_sdk::Version::parse(&v.replace('_', "."))
+        } else {
+            arg.strip_prefix('"').and_then(|a| a.strip_suffix('"')).and_then(russet_sdk::Version::parse)
+        }?;
+        if found.is_some_and(|f| f != version) {
+            return None;
+        }
+        found = Some(version);
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn the_ios_platform_is_scanned_from_package_swift() {
+        let (_d, root) = dir();
+        let file = root.join("Package.swift");
+        let scan = |text: &str| {
+            std::fs::write(&file, text).unwrap();
+            swiftpm_ios_platform(&file)
+        };
+        assert_eq!(scan("platforms: [\n    .iOS(.v17)\n],"), Some(russet_sdk::Version::new(17, 0, 0)));
+        assert_eq!(scan("platforms: [.iOS(.v17_2), .macOS(.v14)]"), Some(russet_sdk::Version::new(17, 2, 0)));
+        assert_eq!(scan("platforms: [.iOS(\"16.4\")]"), Some(russet_sdk::Version::new(16, 4, 0)));
+        assert_eq!(
+            scan("// platforms: [.iOS(.v15)]\nplatforms: [.iOS(.v18)]"),
+            Some(russet_sdk::Version::new(18, 0, 0))
+        );
+        assert_eq!(scan("platforms: [.macOS(.v14)]"), None);
+        assert_eq!(scan("let v = SupportedPlatform.IOSVersion.v17\nplatforms: [.iOS(v)]"), None);
+        assert_eq!(scan("#if X\nplatforms: [.iOS(.v16)]\n#else\nplatforms: [.iOS(.v17)]\n#endif"), None);
+    }
 
     fn dir() -> (tempfile::TempDir, Utf8PathBuf) {
         let d = tempfile::tempdir().unwrap();

@@ -38,6 +38,8 @@ use crate::manifest::Backend;
 /// The deployment target when neither `russet.toml` nor `Package.swift` names one (build §4.2).
 pub const DEFAULT_DEPLOYMENT_TARGET: Version = Version::new(15, 0, 0);
 
+const GRAPH_HINT: &str = "SwiftPM's package description is inconsistent; rebuild with `russet build --clean`, and report it with `russet bugreport` if it persists.";
+
 /// What `swift package describe --type json` says about one package (the fields Russet reads).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct PackageDump {
@@ -176,6 +178,7 @@ impl PackageGraph {
     pub fn new(deps: &DependencyNode, mut dumps: BTreeMap<String, PackageDump>) -> Result<Self> {
         let root = dumps.get(&deps.identity).cloned().ok_or_else(|| {
             Error::new(codes::core::INTERNAL, format!("no description of the root package {}", deps.identity))
+                .with_hint(GRAPH_HINT)
         })?;
         let mut product_owner = BTreeMap::new();
         for (id, dump) in &dumps {
@@ -252,9 +255,11 @@ impl PackageGraph {
             }
             let pkg = self.packages.get(&pkg_id).ok_or_else(|| {
                 Error::new(codes::core::INTERNAL, format!("package {pkg_id} is missing from the graph"))
+                    .with_hint(GRAPH_HINT)
             })?;
             let target = pkg.targets.iter().find(|t| t.name == target_name).ok_or_else(|| {
                 Error::new(codes::core::INTERNAL, format!("target {target_name} is missing from package {}", pkg.name))
+                    .with_hint(GRAPH_HINT)
             })?;
             if target.module_type == "BinaryTarget" {
                 binary_frameworks.insert(target_name.clone());
@@ -358,7 +363,21 @@ pub fn write_if_changed(path: &Utf8Path, contents: &[u8]) -> Result<()> {
 }
 
 pub(crate) fn io(path: &Utf8Path, e: std::io::Error) -> Error {
-    Error::new(codes::core::IO, format!("{path}: {e}")).caused_by(e)
+    if e.kind() == std::io::ErrorKind::StorageFull {
+        return Error::new(codes::core::DISK_FULL, format!("{path}: {e}"))
+            .with_hint("Free some disk space (`russet clean --all` removes this project's build files), then retry.")
+            .caused_by(e);
+    }
+    Error::new(codes::core::IO, format!("{path}: {e}"))
+        .with_hint("Check that the path exists and that your user can read and write it.")
+        .caused_by(e)
+}
+
+/// `name` as one path component: characters other than ASCII letters, digits, `.`, `-` and `_` become `_`.
+pub fn path_component(name: &str) -> String {
+    let s: String =
+        name.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' }).collect();
+    if s.is_empty() || s.chars().all(|c| c == '.') { format!("_{s}") } else { s }
 }
 
 /// Writes the builder package (manifest and one empty `stub.c` per target) and returns its directory.
@@ -422,14 +441,23 @@ const ENV_ALLOWLIST: &[&str] = &[
 /// The explicit environment of a SwiftPM process: the allowlist, `PATH` with `prepend` first, `extra`; never
 /// `SDKROOT` (ARCHITECTURE §16.4; build §4.2).
 pub fn tool_env(prepend: &[&Utf8Path], extra: &[(&str, &str)]) -> BTreeMap<OsString, OsString> {
+    tool_env_from(|key| std::env::var_os(key), prepend, extra)
+}
+
+/// [`tool_env`] with the caller's variables read from `caller` instead of this process's environment.
+pub fn tool_env_from(
+    caller: impl Fn(&str) -> Option<OsString>,
+    prepend: &[&Utf8Path],
+    extra: &[(&str, &str)],
+) -> BTreeMap<OsString, OsString> {
     let mut env = BTreeMap::new();
     for key in ENV_ALLOWLIST {
-        if let Some(v) = std::env::var_os(key) {
+        if let Some(v) = caller(key) {
             env.insert(OsString::from(key), v);
         }
     }
     let mut paths: Vec<std::path::PathBuf> = prepend.iter().map(|p| p.as_std_path().to_owned()).collect();
-    if let Some(existing) = std::env::var_os("PATH") {
+    if let Some(existing) = caller("PATH") {
         paths.extend(std::env::split_paths(&existing));
     }
     if let Ok(joined) = std::env::join_paths(paths) {
@@ -519,7 +547,8 @@ impl Invocation<'_> {
     }
 }
 
-/// A `swift package <args>` command for the package at `package` (`scratch` only for the root package).
+/// A `swift package <args>` command for the package at `package`. Give every package a `scratch` under
+/// `.russet/work`: without one SwiftPM creates `.build/` in the package's own directory.
 pub fn package_command(swift: &Utf8Path, package: &Utf8Path, scratch: Option<&Utf8Path>, args: &[&str]) -> CommandSpec {
     let mut a: Vec<OsString> = vec!["package".into(), "--package-path".into(), package.as_str().into()];
     if let Some(s) = scratch {
@@ -830,14 +859,42 @@ mod tests {
 
     #[test]
     fn the_environment_is_explicit_and_never_has_sdkroot() {
-        let env = tool_env(&[Utf8Path::new("/linker/bin")], &[("XCODE_EXTRA_PLATFORM_FOLDERS", "/v")]);
+        // The caller's environment has SDKROOT and a secret; neither reaches SwiftPM, even when passed as extra.
+        let caller_path = std::env::join_paths(["/usr/bin", "/bin"]).unwrap_or_default();
+        let caller: BTreeMap<&str, OsString> = BTreeMap::from([
+            ("SDKROOT", OsString::from("/bogus/iPhoneOS.sdk")),
+            ("GITHUB_TOKEN", OsString::from("russet-canary-7f3a9c")),
+            ("HOME", OsString::from("/home/u")),
+            ("PATH", caller_path),
+        ]);
+        let env = tool_env_from(
+            |k| caller.get(k).cloned(),
+            &[Utf8Path::new("/linker/bin")],
+            &[("XCODE_EXTRA_PLATFORM_FOLDERS", "/v"), ("SDKROOT", "/also/bogus")],
+        );
         assert!(!env.contains_key(&OsString::from("SDKROOT")));
-        let path = env.get(&OsString::from("PATH")).and_then(|p| p.to_str()).unwrap_or_default().to_owned();
-        assert!(path.starts_with("/linker/bin"));
+        assert!(!env.contains_key(&OsString::from("GITHUB_TOKEN")));
+        assert_eq!(env.get(&OsString::from("HOME")).and_then(|v| v.to_str()), Some("/home/u"));
+        assert_eq!(
+            env.get(&OsString::from("PATH")),
+            std::env::join_paths(["/linker/bin", "/usr/bin", "/bin"]).ok().as_ref()
+        );
         assert_eq!(env.get(&OsString::from("XCODE_EXTRA_PLATFORM_FOLDERS")).and_then(|v| v.to_str()), Some("/v"));
         assert!(env.keys().all(|k| k == "PATH"
             || k == "XCODE_EXTRA_PLATFORM_FOLDERS"
             || ENV_ALLOWLIST.contains(&k.to_str().unwrap_or_default())));
+        // The process-environment form never has SDKROOT either, whatever the test runner's environment holds.
+        let env = tool_env(&[Utf8Path::new("/linker/bin")], &[("XCODE_EXTRA_PLATFORM_FOLDERS", "/v")]);
+        assert!(!env.contains_key(&OsString::from("SDKROOT")));
+    }
+
+    #[test]
+    fn identities_become_path_components() {
+        assert_eq!(path_component("swift-argument-parser"), "swift-argument-parser");
+        assert_eq!(path_component("scope.name"), "scope.name");
+        assert_eq!(path_component("a/b c"), "a_b_c");
+        assert_eq!(path_component(".."), "_..");
+        assert_eq!(path_component(""), "_");
     }
 
     #[test]

@@ -11,5 +11,8 @@ SDK facts, platform view, toolsets, SDK and DDI import.
   the selector, materializes the platform view (`data/sdk/<id>/view`, symlinks; rebuilt atomically when its links
   change) and writes `toolset-swb.json` / `toolset-native.json` with the link-time SDK fix (ARCHITECTURE §16.4).
 - `host::HostToolchain` is the Swift toolchain and the LLVM ≥ 23 rewriters (W3's resolver supplies them in the
-  daemon; `probe()` finds `swift` on `PATH` otherwise). `checks()` registers `sdk.buildFacts`.
+  daemon; `probe()` finds `swift` on `PATH` otherwise). Its `--version` probes run through the caller's
+  `CommandRunner` with a 30 s timeout. `DefaultSdkProvider` (the daemon's order) takes that runner.
+- `checks()` registers `sdk.buildFacts` (`BuildFactsCheck`): it fails when the chosen bundle lacks the platform
+  `version.plist` or darwin-tools' `ld64.lld`, since default builds then fail.
 - Pre-created module files: `src/import/mod.rs` (W16b) and `src/import/windows/mod.rs` (W27b).

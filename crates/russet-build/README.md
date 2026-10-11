@@ -18,7 +18,13 @@ build-report.json}` and the event log `<project>/.russet/logs/<jobId>.jsonl`.
 | `stack::swiftpm` | `swift package describe`/`show-dependencies` planning, the generated builder package, the `swift build --build-system swiftbuild` invocation with an explicit environment, output parsing |
 | `infoplist`, `metadata` | Info.plist synthesis with provenance, the scene manifest, the DT* policy of ARCHITECTURE §16.4, nested-bundle normalization |
 | `bundle` | `.app` assembly, Swift back-deployment, rpath hygiene through russet-macho, fixed timestamps, the signing plan |
-| `report`, `inspect`, `events` | `build-report.json` (schema 1), `build.inspect`, the `JobEvent` kinds and the JSONL log |
+| `report`, `inspect`, `events` | `build-report.json` (schema 1), `build.inspect`, the `JobEvent` kinds (converted through the §9.2 wire form, so they carry W2's F1 fields), the warning codes and the JSONL log |
+
+`Builder::needs_xtool_prefix` tells the daemon when a request needs the signing account's xtool prefix
+(`[signing] bundle-id-policy = "xtool-prefix"` and no policy in the request); `Builder::clean` takes the project
+lock, so it answers `build.inProgress` while a build runs.
 
 Tests: `tests/build_pipeline.rs` runs the whole pipeline with a scripted `swift` (CI); `tests/build_probe_host.rs`
-builds RussetProbe for real when `RUSSET_TEST_SDK_BUNDLE` names a Darwin SDK bundle.
+builds RussetProbe for real when `RUSSET_TEST_SDK_BUNDLE` names a Darwin SDK bundle (debug, release, and a local
+package with a `.dynamic` product), with the production `RussetMachO` once W6's russet-macho bodies exist and LLVM's
+rewriters until then.

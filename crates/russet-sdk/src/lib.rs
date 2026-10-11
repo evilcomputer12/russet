@@ -39,7 +39,7 @@ pub mod toolset;
 pub mod view;
 mod xtool;
 
-pub use xtool::{DefaultSdkProvider, XtoolBundleProvider};
+pub use xtool::{BuildFactsCheck, DefaultSdkProvider, XtoolBundleProvider};
 
 /// An Apple-style version (`27.0`, `6.4`, `17.0`, `27.0.99`); not semver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
@@ -92,7 +92,10 @@ impl FromStr for Version {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        Self::parse(s).ok_or_else(|| Error::new(codes::core::INVALID_ARGUMENT, format!("`{s}` is not a version")))
+        Self::parse(s).ok_or_else(|| {
+            Error::new(codes::core::INVALID_ARGUMENT, format!("`{s}` is not a version"))
+                .with_hint("Versions are numbers separated by dots, such as 27.0 or 17.2.1.")
+        })
     }
 }
 
@@ -231,7 +234,7 @@ impl SdkProvider for ImportedBundleProvider {
 
 /// SDK doctor checks, for russetd's doctor seam: `sdk.buildFacts` (an SDK the build plane can use).
 pub fn checks() -> Vec<Arc<dyn russet_doctor::Check>> {
-    vec![Arc::new(xtool::BuildFactsCheck)]
+    vec![Arc::new(xtool::BuildFactsCheck::new())]
 }
 
 #[cfg(test)]

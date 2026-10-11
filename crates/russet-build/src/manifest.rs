@@ -385,6 +385,9 @@ pub struct LoadedManifest {
     pub manifest: ProjectManifest,
     /// The files that exist, lowest precedence first.
     pub files: Vec<Utf8PathBuf>,
+    /// `[build] metadata-consent` as committed in `russet.toml` alone: `xcode-compat` needs a committed consent
+    /// (ARCHITECTURE §16.4), so a consent only in the gitignored `russet.local.toml` does not count.
+    pub committed_consent: Option<MetadataConsent>,
 }
 
 /// Loads `root/russet.toml` and `root/russet.local.toml` (either may be missing; both missing gives the defaults
@@ -392,14 +395,22 @@ pub struct LoadedManifest {
 pub fn load(root: &Utf8Path) -> Result<LoadedManifest> {
     let mut merged = toml::Table::new();
     let mut files = Vec::new();
+    let mut committed_consent = None;
     for name in [PROJECT_FILE, LOCAL_FILE] {
         let path = root.join(name);
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(Error::new(codes::core::IO, format!("cannot read {path}: {e}")).caused_by(e)),
+            Err(e) => {
+                return Err(Error::new(codes::core::IO, format!("cannot read {path}: {e}"))
+                    .with_hint("Check that the file is readable by your user.")
+                    .caused_by(e));
+            }
         };
         let checked: ProjectManifest = toml::from_str(&text).map_err(|e| config_error(&path, &text, &e))?;
+        if name == PROJECT_FILE {
+            committed_consent = checked.build.metadata_consent.clone();
+        }
         if let Some(schema) = checked.schema
             && schema != 1
         {
@@ -415,7 +426,7 @@ pub fn load(root: &Utf8Path) -> Result<LoadedManifest> {
         Error::new(codes::config::INVALID, format!("{}: {}", root.join(LOCAL_FILE), e.message()))
             .with_hint("russet.local.toml is layered over russet.toml; check the overridden keys.")
     })?;
-    Ok(LoadedManifest { manifest, files })
+    Ok(LoadedManifest { manifest, files, committed_consent })
 }
 
 /// Layers `over` onto `base`: tables merge key by key, anything else replaces.
@@ -518,6 +529,18 @@ mod tests {
         let (_d, root) = dir(&[(LOCAL_FILE, "[app]\nbogus = 1\n")]);
         let e = load(&root).unwrap_err();
         assert!(e.message().contains("russet.local.toml:2:1"), "{}", e.message());
+    }
+
+    #[test]
+    fn only_the_committed_file_records_the_metadata_consent() {
+        let consent = "[build]\nmetadata-consent = { by = \"owner\", at = \"2026-10-11\" }\n";
+        let (_d, root) = dir(&[(PROJECT_FILE, "[build]\nmetadata = \"xcode-compat\"\n"), (LOCAL_FILE, consent)]);
+        let m = load(&root).unwrap();
+        assert!(m.manifest.build.metadata_consent.is_some(), "the layered view has it");
+        assert_eq!(m.committed_consent, None, "but russet.local.toml's consent is not committed");
+        let (_d, root) = dir(&[(PROJECT_FILE, consent)]);
+        let m = load(&root).unwrap();
+        assert_eq!(m.committed_consent.map(|c| c.by), Some("owner".to_owned()));
     }
 
     #[test]

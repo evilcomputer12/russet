@@ -4,14 +4,15 @@
 //! `project` handlers (§8.3). Owner: W5 (Wave 1), W16 (project.init).
 //!
 //! `project.detect` and `project.info` read the project without running SwiftPM; `project.infoPlist` resolves the
-//! SDK and returns the Info.plist a build would write, with each key's provenance. `project.init` is W16's.
+//! SDK and returns the Info.plist a build would write, with each key's provenance (and, like `build.start`, the
+//! account's xtool prefix when the project asks for `xtool-prefix`). `project.init` is W16's.
 
 use russet_build::BuildRequest;
 use russet_core::Result;
 use russet_ipc::{RequestCtx, Router};
 use russet_protocol::project::{self as p, TargetKind};
 
-use super::build::{builder, stack_dto, wire_path};
+use super::build::{account_xtool_prefix, builder, stack_dto, wire_path, with_account_policy};
 use super::not_implemented;
 use crate::DaemonCtx;
 
@@ -73,7 +74,9 @@ async fn project_info_plist(
 ) -> Result<p::ProjectInfoPlistResult> {
     let mut r = BuildRequest::new(wire_path(&p.project, "project")?);
     r.configuration = p.configuration.clone();
-    let (plist, provenance) = builder(&cx)?.info_plist_with_provenance(&r, p.target.as_deref()).await?;
+    let b = builder(&cx)?;
+    let r = with_account_policy(&b, r, || account_xtool_prefix(&cx)).await?;
+    let (plist, provenance) = b.info_plist_with_provenance(&r, p.target.as_deref()).await?;
     Ok(p::ProjectInfoPlistResult { plist: russet_build::infoplist::dict_to_json(&plist), provenance })
 }
 
