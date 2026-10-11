@@ -25,12 +25,14 @@ pub struct ScratchDir {
 }
 
 impl ScratchDir {
-    /// A fresh directory under the system temp dir, named after `tag`.
+    /// A fresh directory under the system temp dir, named after `tag`. The name stays short, so sockets under it
+    /// fit `sun_path` (about 100 bytes) with a session id and a file name added.
     pub fn new(tag: &str) -> io::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_nanos();
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("russet-{tag}-{}-{nanos}-{n}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("russet-{tag}-{}-{n}-{:06}", std::process::id(), nanos % 1_000_000));
         std::fs::create_dir_all(&path)?;
         Ok(Self { path })
     }
