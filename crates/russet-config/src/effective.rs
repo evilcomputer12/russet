@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::global::GlobalConfig;
 use crate::keys;
 use crate::load::{Loaded, SourceInfo, SourceScope};
-use crate::policy::{AgentsGrant, McpPolicy, agents_grant};
+use crate::policy::{AgentsGrant, McpPolicy, agents_grant, narrow_agents};
 use crate::project::ProjectConfig;
 
 /// `RUSSET_*` environment variables that override configuration keys (precedence 2), as `(variable, key)`.
@@ -49,11 +49,35 @@ pub struct LoadedProject {
     pub root: PathBuf,
     pub committed: Option<Loaded<ProjectConfig>>,
     pub local: Option<Loaded<ProjectConfig>>,
-    /// `russet.local.toml` layered over `russet.toml` (except `[agents]`, which only narrows).
+    /// `russet.local.toml` layered over `russet.toml`, except `[agents]`, which holds both files narrowed
+    /// together ([`narrow_agents`]: the lower `tier-max`, the union of `deny-tools`).
     pub merged: ProjectConfig,
 }
 
 impl LoadedProject {
+    /// Layers `local` over `committed` (ARCHITECTURE §14.1). `[agents]` only narrows: the merged section is the
+    /// files' narrowed combination, never the local file's values over the committed ones.
+    pub fn new(
+        root: PathBuf,
+        committed: Option<Loaded<ProjectConfig>>,
+        local: Option<Loaded<ProjectConfig>>,
+    ) -> russet_core::Result<Self> {
+        let mut raw = committed.as_ref().map(|c| c.raw.clone()).unwrap_or_default();
+        if let Some(l) = &local {
+            crate::load::merge_tables(&mut raw, &l.raw);
+        }
+        let mut merged: ProjectConfig = toml::Value::Table(raw).try_into().map_err(|e: toml::de::Error| {
+            let path = root.join(crate::load::LOCAL_FILE);
+            russet_core::Error::new(
+                russet_core::error::codes::config::INVALID,
+                format!("{}: russet.local.toml does not combine with russet.toml: {}", path.display(), e.message()),
+            )
+            .with_hint("Make the overriding values in russet.local.toml the same type as in russet.toml.")
+        })?;
+        merged.agents = narrow_agents(committed.iter().chain(local.iter()).map(|l| &l.value.agents));
+        Ok(Self { root, committed, local, merged })
+    }
+
     /// The project files, highest precedence first.
     pub fn layers(&self) -> impl Iterator<Item = &Loaded<ProjectConfig>> {
         self.local.iter().chain(self.committed.iter())
@@ -132,15 +156,18 @@ impl Effective {
 
     /// The effective value of `dotted_key` and the sources that define it, highest precedence first (the value
     /// comes from the first). A key no file sets reports the built-in default. `None` when the key is unknown.
+    ///
+    /// `[agents]` narrows instead of overriding, so for its keys the files that hold the effective value come
+    /// first: with `tier-max = 1` committed and `3` local, the value is 1 and the committed file is named first.
     pub fn get(&self, dotted_key: &str) -> russet_core::Result<Option<(Value, Vec<SourceInfo>)>> {
         let segments = keys::parse(dotted_key)?;
         let Some(v) = keys::get_json(&self.value, &segments) else { return Ok(None) };
-        let mut sources: Vec<SourceInfo> = self
-            .layers
-            .iter()
-            .filter(|(_, layer)| keys::get_json(layer, &segments).is_some())
-            .map(|(s, _)| s.clone())
-            .collect();
+        let mut found: Vec<(&SourceInfo, &Value)> =
+            self.layers.iter().filter_map(|(s, layer)| keys::get_json(layer, &segments).map(|lv| (s, lv))).collect();
+        if segments.first().is_some_and(|s| s == "agents") {
+            found.sort_by_key(|(_, layer_value)| *layer_value != v);
+        }
+        let mut sources: Vec<SourceInfo> = found.into_iter().map(|(s, _)| s.clone()).collect();
         if sources.is_empty() {
             sources.push(SourceInfo::default_values());
         }
@@ -227,10 +254,7 @@ mod tests {
         let committed =
             loaded::<ProjectConfig>(SourceScope::Project, "/p/russet.toml", "[run]\ndevice = \"a\"\nconsole = false\n");
         let local = loaded::<ProjectConfig>(SourceScope::Local, "/p/russet.local.toml", "[run]\ndevice = \"b\"\n");
-        let mut merged = committed.raw.clone();
-        crate::load::merge_tables(&mut merged, &local.raw);
-        let merged: ProjectConfig = merged.try_into().expect("merged");
-        let project = LoadedProject { root: "/p".into(), committed: Some(committed), local: Some(local), merged };
+        let project = LoadedProject::new("/p".into(), Some(committed), Some(local)).expect("layers");
 
         let none = EnvOverrides::default();
         let eff = Effective::build(Some(&global), Some(&project), None, &none);
@@ -259,11 +283,35 @@ mod tests {
         let committed = loaded::<ProjectConfig>(SourceScope::Project, "/p/russet.toml", "[agents]\ntier-max = 3\n");
         let local =
             loaded::<ProjectConfig>(SourceScope::Local, "/p/russet.local.toml", "[agents]\ndeny-tools = [\"build\"]\n");
-        let merged = committed.value.clone();
-        let project = LoadedProject { root: "/p".into(), committed: Some(committed), local: Some(local), merged };
+        let project = LoadedProject::new("/p".into(), Some(committed), Some(local)).expect("layers");
         let eff = Effective::build(None, Some(&project), Some(&policy), &EnvOverrides::default());
         let grant = eff.agents("claude-code");
         assert_eq!(grant.tier_max, 1);
         assert!(grant.deny_tools.contains("build"));
+    }
+
+    #[test]
+    fn the_effective_agents_section_is_narrowed_not_overridden() {
+        let committed = loaded::<ProjectConfig>(
+            SourceScope::Project,
+            "/p/russet.toml",
+            "[agents]\ntier-max = 1\ndeny-tools = [\"sign\"]\n",
+        );
+        let local = loaded::<ProjectConfig>(
+            SourceScope::Local,
+            "/p/russet.local.toml",
+            "[agents]\ntier-max = 3\ndeny-tools = [\"build\"]\n",
+        );
+        let project = LoadedProject::new("/p".into(), Some(committed), Some(local)).expect("layers");
+        assert_eq!(project.merged.agents.tier_max, Some(1));
+        assert_eq!(project.merged.agents.deny_tools, ["sign", "build"]);
+        let eff = Effective::build(None, Some(&project), None, &EnvOverrides::default());
+        assert_eq!(eff.project.agents.tier_max, Some(1), "the typed view never shows the local file's wider tier");
+        let (v, src) = eff.get("agents.tier-max").expect("key").expect("set");
+        assert_eq!(v, Value::from(1));
+        assert_eq!(src.iter().map(|s| s.scope).collect::<Vec<_>>(), [SourceScope::Project, SourceScope::Local]);
+        let (v, _) = eff.get("agents.deny-tools").expect("key").expect("set");
+        assert_eq!(v, serde_json::json!(["sign", "build"]));
+        assert_eq!(eff.value()["agents"]["tier-max"], Value::from(1));
     }
 }

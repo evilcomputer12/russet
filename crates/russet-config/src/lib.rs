@@ -177,21 +177,7 @@ impl ProjectCache {
     }
 
     fn project(&self, root: &Path) -> Result<LoadedProject> {
-        let committed = self.committed.get()?;
-        let local = self.local.get()?;
-        let mut raw = committed.as_ref().map(|c| c.raw.clone()).unwrap_or_default();
-        if let Some(l) = &local {
-            load::merge_tables(&mut raw, &l.raw);
-        }
-        let merged: ProjectConfig = toml::Value::Table(raw).try_into().map_err(|e: toml::de::Error| {
-            let path = root.join(load::LOCAL_FILE);
-            Error::new(
-                codes::config::INVALID,
-                format!("{}: russet.local.toml does not combine with russet.toml: {}", path.display(), e.message()),
-            )
-            .with_hint("Make the overriding values in russet.local.toml the same type as in russet.toml.")
-        })?;
-        Ok(LoadedProject { root: root.to_path_buf(), committed, local, merged })
+        LoadedProject::new(root.to_path_buf(), self.committed.get()?, self.local.get()?)
     }
 }
 

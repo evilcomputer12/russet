@@ -13,7 +13,8 @@ Typed config, layering, comment-preserving editor, schemas, watcher.
   `config.invalid`).
 - The precedence of §14.1 (`effective`): `RUSSET_*` variables, `russet.local.toml`, `russet.toml`, `config.toml`,
   built-in defaults; CLI flags travel in RPC params. A project's `[agents]` only narrows `mcp-policy.toml`, and
-  `russet.local.toml` cannot widen `russet.toml` either.
+  `russet.local.toml` cannot widen `russet.toml` either: the grant and the effective view both hold the lower
+  `tier-max` and the union of `deny-tools` (`policy::narrow_agents`).
 - `ConfigEditor` edits one file with toml_edit, keeping comments and order, coerces values to the schema's type
   (`"2"` → `2`), validates the whole file before saving, and saves atomically.
 - `ConfigService` (`DaemonCtx.config`) caches files by modification time, never refuses to start on an invalid

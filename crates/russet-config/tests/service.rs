@@ -108,6 +108,27 @@ fn a_local_file_cannot_widen_the_committed_agents_section() {
     assert_eq!(grant.tier_max, 1);
     let grant = svc.agents("claude-code", None).expect("no project");
     assert_eq!(grant.tier_max, 2);
+
+    // The typed effective view and `config.get` agree with the grant: the local file narrows, never widens.
+    let eff = svc.effective(Some(project.path())).expect("effective");
+    assert_eq!(eff.project.agents.tier_max, Some(1));
+    let l = svc.lookup(ReadScope::Effective, Some(project.path()), Some("agents.tier-max")).expect("get");
+    assert_eq!(l.value, Some(json!(1)));
+    assert_eq!(l.sources.iter().map(|s| s.scope).collect::<Vec<_>>(), [SourceScope::Project, SourceScope::Local]);
+    let l = svc.lookup(ReadScope::Local, Some(project.path()), Some("agents.tier-max")).expect("the file as written");
+    assert_eq!(l.value, Some(json!(3)));
+    // A lower local tier and more denied tools do narrow.
+    std::fs::write(project.path().join("russet.local.toml"), "[agents]\ntier-max = 0\ndeny-tools = [\"sign\"]\n")
+        .expect("local");
+    std::fs::write(project.path().join("russet.toml"), "[agents]\ntier-max = 1\ndeny-tools = [\"build\"]\n")
+        .expect("committed");
+    let l = svc.lookup(ReadScope::Effective, Some(project.path()), Some("agents.tier-max")).expect("get");
+    assert_eq!((l.value, l.sources[0].scope), (Some(json!(0)), SourceScope::Local));
+    let l = svc.lookup(ReadScope::Effective, Some(project.path()), Some("agents.deny-tools")).expect("get");
+    assert_eq!(l.value, Some(json!(["build", "sign"])));
+    let grant = svc.agents("claude-code", Some(project.path())).expect("grant");
+    assert_eq!(grant.tier_max, 0);
+    assert!(grant.deny_tools.contains("build") && grant.deny_tools.contains("sign"));
     std::fs::write(home.path().join("config").join("mcp-policy.toml"), "default-tier-max = 9\n").expect("bad");
     assert_eq!(svc.agents("x", None).map_err(|e| e.code()).err(), Some(codes::config::INVALID));
 }

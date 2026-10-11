@@ -167,6 +167,24 @@ pub struct AgentsGrant {
     pub reveal_udid: bool,
 }
 
+/// The project's `[agents]` as one section: the lowest `tier-max` of the files that set one and the union of
+/// their `deny-tools` (first-seen order). `russet.local.toml` narrows `russet.toml` here instead of overriding it,
+/// so the effective view never shows a wider grant than [`agents_grant`] gives.
+pub fn narrow_agents<'a>(sections: impl IntoIterator<Item = &'a AgentsSection>) -> AgentsSection {
+    let mut out = AgentsSection::default();
+    for s in sections {
+        if let Some(t) = s.tier_max {
+            out.tier_max = Some(out.tier_max.map_or(t, |cur| cur.min(t)));
+        }
+        for tool in &s.deny_tools {
+            if !out.deny_tools.contains(tool) {
+                out.deny_tools.push(tool.clone());
+            }
+        }
+    }
+    out
+}
+
 /// The narrowing rule (ARCHITECTURE §7.5, §14.1): `tier-max` is the minimum of the policy's value and every
 /// project file's value (`russet.toml` and `russet.local.toml` separately, so the local file cannot widen the
 /// committed one either), and `deny-tools` is the union. A project file never raises anything.
@@ -175,14 +193,9 @@ pub fn agents_grant<'a>(
     client: &str,
     project_sections: impl IntoIterator<Item = &'a AgentsSection>,
 ) -> AgentsGrant {
-    let mut tier_max = policy.client_tier_max(client);
-    let mut deny_tools = BTreeSet::new();
-    for s in project_sections {
-        if let Some(t) = s.tier_max {
-            tier_max = tier_max.min(t);
-        }
-        deny_tools.extend(s.deny_tools.iter().cloned());
-    }
+    let project = narrow_agents(project_sections);
+    let tier_max = project.tier_max.map_or(policy.client_tier_max(client), |t| t.min(policy.client_tier_max(client)));
+    let deny_tools: BTreeSet<String> = project.deny_tools.into_iter().collect();
     let reveal_udid = policy.clients.get(client).is_some_and(|c| c.reveal_udid);
     AgentsGrant { tier_max, deny_tools, reveal_udid }
 }
@@ -287,6 +300,19 @@ mod tests {
         // A client without an entry gets the default tier.
         assert_eq!(agents_grant(&policy, "other", [&widen]).tier_max, 1);
         assert!(!agents_grant(&policy, "other", []).reveal_udid);
+    }
+
+    #[test]
+    fn project_files_narrow_each_other() {
+        let committed = AgentsSection { tier_max: Some(1), deny_tools: vec!["build".into(), "sign".into()] };
+        let local = AgentsSection { tier_max: Some(3), deny_tools: vec!["sign".into(), "ship_upload".into()] };
+        let both = narrow_agents([&committed, &local]);
+        assert_eq!(both.tier_max, Some(1), "the local file cannot raise the committed tier");
+        assert_eq!(both.deny_tools, ["build", "sign", "ship_upload"]);
+        assert_eq!(narrow_agents([&local, &committed]).tier_max, Some(1), "order does not matter");
+        let unset = AgentsSection::default();
+        assert_eq!(narrow_agents([&unset, &local]).tier_max, Some(3));
+        assert_eq!(narrow_agents([&unset]), AgentsSection::default());
     }
 
     #[test]
