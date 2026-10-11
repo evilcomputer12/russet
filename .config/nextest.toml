@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# cargo-nextest profiles (QA §3.9.2). W8 owns CI wiring; W9 adds the lab profile.
+
+[profile.default]
+# Each test runs in its own process: per-test statics (for example the live-connector counter) stay isolated.
+slow-timeout = { period = "60s", terminate-after = 3 }
+fail-fast = false
+
+[profile.ci]
+retries = 0
+failure-output = "immediate-final"
