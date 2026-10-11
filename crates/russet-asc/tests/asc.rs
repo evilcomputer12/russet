@@ -362,13 +362,39 @@ async fn retries_rate_limits_and_server_errors() {
 
 #[tokio::test]
 async fn next_links_never_leave_the_origin_and_raw_get_is_allowlisted() {
-    let (s, _) = server().await;
+    let (s, fake) = server().await;
     let c = client(&s, per_request());
     let e = c.get_all::<serde_json::Value>("/v1/elsewhere").await.unwrap_err();
     assert!(e.message().contains("another host"));
 
     assert_eq!(c.raw_get("/v1/users").await.unwrap_err().code(), codes::perm::DENIED);
     assert_eq!(c.raw_get("/v1/apps/../users").await.unwrap_err().code(), codes::perm::DENIED);
+    // Spellings the URL parser normalizes to /v1/users (url 2.5): refused before anything is sent.
+    let before = fake.hits.load(Ordering::SeqCst);
+    for sneaky in [
+        "/v1/apps/%2e%2e/users",
+        "/v1/apps/.%2e/users",
+        "/v1/apps/%2E%2E/users",
+        "/v1/apps\\%2e%2e\\users",
+        "/v1/apps\\..\\users",
+        "/v1/ciProducts/%2e%2e/%2e%2e/v1/users",
+        "/v1/apps/%2f%2e%2e%2fusers",
+        "/v1/apps/%5c..%5cusers",
+        "/v1/apps/./../users",
+        "/v1/apps//../users",
+        "/v1/apps/x/..",
+        "/v1/apps#/../users",
+        "/v1/apps/./x",
+        "/v1/apps/a b",
+    ] {
+        let e = c.raw_get(sneaky).await.unwrap_err();
+        assert_eq!(e.code(), codes::perm::DENIED, "{sneaky}");
+        assert!(c.raw_get_url(sneaky).is_err(), "{sneaky}");
+    }
+    assert_eq!(fake.hits.load(Ordering::SeqCst), before, "no refused path reached the server");
+    let url = c.raw_get_url("/v1/apps?filter[bundleId]=com.example.hello").unwrap();
+    assert_eq!((url.path(), url.query()), ("/v1/apps", Some("filter[bundleId]=com.example.hello")));
+    assert!(c.raw_get_url("/v1/ciProducts/X1/workflows").is_ok());
     let (status, body) = c.raw_get("/v1/apps?filter[bundleId]=com.example.hello").await.unwrap();
     assert_eq!(status, 200);
     assert_eq!(body["data"], json!([]));
@@ -380,10 +406,48 @@ async fn next_links_never_leave_the_origin_and_raw_get_is_allowlisted() {
 async fn the_doctor_check_skips_offline_and_reports_reachability() {
     use russet_doctor::{Check as _, CheckCx, Status};
     let (s, _) = server().await;
-    let check = AscReachable { base: format!("{}/", s.uri()) };
+    let check = AscReachable::new(url::Url::parse(&format!("{}/", s.uri())).unwrap());
     assert_eq!(check.run(&CheckCx::default()).await.status, Status::Skip);
     let online = CheckCx { online: true, ..Default::default() };
     assert_eq!(check.run(&online).await.status, Status::Pass);
-    let dead = AscReachable { base: "http://127.0.0.1:9/".into() };
+    let dead = AscReachable::new(url::Url::parse("http://127.0.0.1:9/").unwrap());
     assert_eq!(dead.run(&online).await.status, Status::Warn);
+    let broken = AscReachable { base: Err("endpoints.json is not valid JSON".into()) };
+    assert_eq!(broken.run(&online).await.status, Status::Fail);
+}
+
+/// The check reads the root the daemon uses: `asc` of `RUSSET_ENDPOINTS_FILE` (T3), else the public API.
+#[test]
+fn the_doctor_check_follows_the_endpoints_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("endpoints.json");
+    assert_eq!(asc_base_from(None).unwrap().as_str(), DEFAULT_BASE_URL);
+    std::fs::write(&file, r#"{"asc": "http://127.0.0.1:8080/", "gsa": "http://127.0.0.1:9/"}"#).unwrap();
+    assert_eq!(asc_base_from(Some(&file)).unwrap().as_str(), "http://127.0.0.1:8080/");
+    std::fs::write(&file, r#"{"github": "http://127.0.0.1:9/"}"#).unwrap();
+    assert_eq!(asc_base_from(Some(&file)).unwrap().as_str(), DEFAULT_BASE_URL);
+    std::fs::write(&file, "not json").unwrap();
+    assert!(asc_base_from(Some(&file)).is_err());
+    assert!(asc_base_from(Some(&dir.path().join("missing.json"))).is_err());
+    assert!(is_loopback(&url::Url::parse("http://localhost:1/").unwrap()));
+    assert!(!is_loopback(&url::Url::parse(DEFAULT_BASE_URL).unwrap()));
+}
+
+/// Every client of one key shares its limiter: the bucket and the reported quota span clients (and so calls).
+#[tokio::test]
+async fn clients_of_one_key_share_the_rate_limit() {
+    let (s, _) = server().await;
+    let limiter = Arc::new(RateLimiter::new(REQUESTS_PER_HOUR, 10));
+    let make = || {
+        let base = url::Url::parse(&format!("{}/", s.uri())).unwrap();
+        let auth = JwtAuth::new(base, Arc::new(TokenFactory::new(asc_key())), per_request());
+        AscClient::with_limiter(Arc::new(auth), fast(), limiter.clone()).unwrap()
+    };
+    let (a, b) = (make(), make());
+    a.devices().list(&DeviceFilter::default()).await.unwrap();
+    b.devices().list(&DeviceFilter::default()).await.unwrap();
+    assert!(limiter.available() < 8.5, "two requests used two tokens of one bucket: {}", limiter.available());
+    assert_eq!(b.quota(), Quota { limit: Some(3600), remaining: Some(3550) });
+    assert_eq!(a.quota(), b.quota(), "the quota one client saw is the key's");
+    assert!(Arc::ptr_eq(a.limiter(), b.limiter()));
 }

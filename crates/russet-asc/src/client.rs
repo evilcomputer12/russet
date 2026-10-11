@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! The transport (SIGN §5.3): pluggable [`Auth`], a client-side rate limiter that follows `X-Rate-Limit`,
-//! retries for GETs (5xx and transport errors; 429 with exponential backoff), App Store Connect error mapping
-//! and JSON:API pagination that keeps `limit` next to `cursor`. Wave 1 is GET-only: the client has no method
-//! that sends anything else.
+//! The transport (SIGN §5.3): pluggable [`Auth`], the per-key [`RateLimiter`] (a token bucket that also follows
+//! `X-Rate-Limit`), retries for GETs (5xx and transport errors; 429 with exponential backoff), App Store Connect
+//! error mapping and JSON:API pagination that keeps `limit` next to `cursor`. Wave 1 is GET-only: the client has
+//! no method that sends anything else. With `RUSSET_OFFLINE=1` only loopback hosts are reached (T3).
 
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use russet_core::Result;
@@ -16,6 +16,7 @@ use secrecy::ExposeSecret as _;
 use serde::de::DeserializeOwned;
 use url::Url;
 
+use crate::limiter::RateLimiter;
 use crate::model::{Document, Resource};
 use crate::token::{ScopeEntry, TokenFactory};
 
@@ -168,7 +169,7 @@ pub struct AscClient {
     http: reqwest::Client,
     auth: Arc<dyn Auth>,
     policy: RetryPolicy,
-    quota: Mutex<(Quota, Option<Instant>)>,
+    limiter: Arc<RateLimiter>,
 }
 
 impl std::fmt::Debug for AscClient {
@@ -195,6 +196,11 @@ impl AscClient {
     }
 
     pub fn with_policy(auth: Arc<dyn Auth>, policy: RetryPolicy) -> Result<Self> {
+        Self::with_limiter(auth, policy, Arc::new(RateLimiter::per_key()))
+    }
+
+    /// A client that shares `limiter` with every other client of the same key, so the hourly quota spans them.
+    pub fn with_limiter(auth: Arc<dyn Auth>, policy: RetryPolicy, limiter: Arc<RateLimiter>) -> Result<Self> {
         // One rustls provider for the process: ring (ARCHITECTURE §16.6). Binaries install it at start; this
         // covers library callers and tests, and is a no-op when it is already installed.
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -205,16 +211,21 @@ impl AscClient {
             .map_err(|e| {
                 Error::new(codes::core::INTERNAL, format!("cannot build the HTTP client: {e}")).caused_by(e)
             })?;
-        Ok(Self { http, auth, policy, quota: Mutex::new((Quota::default(), None)) })
+        Ok(Self { http, auth, policy, limiter })
     }
 
     pub fn flavor(&self) -> ApiFlavor {
         self.auth.flavor()
     }
 
-    /// The last quota App Store Connect reported.
+    /// The last quota App Store Connect reported (shared with the other clients of the key).
     pub fn quota(&self) -> Quota {
-        self.quota.lock().map(|q| q.0).unwrap_or_default()
+        self.limiter.quota()
+    }
+
+    /// The key's rate limiter.
+    pub fn limiter(&self) -> &Arc<RateLimiter> {
+        &self.limiter
     }
 
     /// GETs `path_and_query` (`/v1/…`) and decodes the JSON body.
@@ -251,7 +262,8 @@ impl AscClient {
                 return Err(Error::new(
                     codes::account::APPLE_SERVICE_UNAVAILABLE,
                     "App Store Connect paging did not end",
-                ));
+                )
+                .with_hint("Retry later; report it with `russet bugreport` if it persists."));
             }
             let doc: Document<Vec<Resource<A>>> = self.get_json(&pq).await?;
             out.extend(doc.data);
@@ -272,21 +284,53 @@ impl AscClient {
     }
 
     /// An allowlisted GET returning the status and JSON body (`asc.get`, W12). Errors are returned as the
-    /// status and body, not mapped.
+    /// status and body, not mapped. The allowlist is checked on the URL as it will be sent ([`Self::raw_get_url`]).
     pub async fn raw_get(&self, path_and_query: &str) -> Result<(u16, serde_json::Value)> {
-        let path = strip_query(path_and_query);
-        let allowed = path_and_query.starts_with("/v1/")
-            && !path.contains("..")
-            && RAW_GET_ALLOWLIST.iter().any(|p| {
-                path == *p || path.starts_with(&format!("{p}/")) || (*p == "/v1/ci" && path.starts_with("/v1/ci"))
-            });
-        if !allowed {
-            return Err(Error::new(codes::perm::DENIED, format!("{path} is not on the read allowlist"))
-                .with_hint("Allowed: /v1/apps, /v1/builds, /v1/betaGroups, /v1/bundleIds, /v1/profiles, /v1/devices, /v1/certificates, /v1/ci*."));
-        }
-        let (status, body) = self.send_get(path_and_query, false).await?;
+        let url = self.raw_get_url(path_and_query)?;
+        let (status, body) = self.send_url(url, path_and_query, false).await?;
         let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
         Ok((status, json))
+    }
+
+    /// The URL [`Self::raw_get`] sends for `path_and_query`: a `/v1/…` path on the API's own origin that names an
+    /// allowlisted resource after the URL parser has normalized it, and that normalization left unchanged. Encoded
+    /// dots, slashes and backslashes (`%2e`, `%2f`, `%5c`), backslashes, `..`, empty segments and fragments are
+    /// refused before parsing, so no spelling of a path can reach a resource outside the allowlist.
+    pub fn raw_get_url(&self, path_and_query: &str) -> Result<Url> {
+        let path_part = strip_query(path_and_query);
+        let denied = |why: &str| {
+            Error::new(codes::perm::DENIED, format!("{path_part} is not on the read allowlist ({why})")).with_hint(
+                "Allowed: /v1/apps, /v1/builds, /v1/betaGroups, /v1/bundleIds, /v1/profiles, /v1/devices, /v1/certificates, /v1/ci*, spelled plainly.",
+            )
+        };
+        let lower = path_and_query.to_ascii_lowercase();
+        if !path_and_query.starts_with("/v1/") {
+            return Err(denied("not a /v1/ path"));
+        }
+        if path_and_query.contains('\\')
+            || path_and_query.contains('#')
+            || ["%2e", "%2f", "%5c"].iter().any(|enc| lower.contains(enc))
+            || path_part.contains("..")
+            || path_part.contains("//")
+        {
+            return Err(denied("encoded or relative path segments"));
+        }
+        let base = self.auth.base_url();
+        let url = base.join(path_and_query.trim_start_matches('/')).map_err(|_| denied("not a valid path"))?;
+        if url.origin() != base.origin() {
+            return Err(denied("another origin"));
+        }
+        let path = url.path().strip_prefix(base.path().trim_end_matches('/')).unwrap_or_default();
+        if path != path_part {
+            return Err(denied("the path normalizes to another resource"));
+        }
+        let allowed = RAW_GET_ALLOWLIST.iter().any(|p| {
+            path == *p || path.starts_with(&format!("{p}/")) || (*p == "/v1/ci" && path.starts_with("/v1/ci"))
+        });
+        if !allowed {
+            return Err(denied("not an allowlisted resource"));
+        }
+        Ok(url)
     }
 
     /// Converts an absolute `links.next` URL to a path and query on our base origin.
@@ -298,7 +342,8 @@ impl AscClient {
             return Err(Error::new(
                 codes::account::APPLE_SERVICE_UNAVAILABLE,
                 "App Store Connect pointed a next link at another host; refusing to send the token there",
-            ));
+            )
+            .with_hint("Check RUSSET_ENDPOINTS_FILE and any proxy in between; report it with `russet bugreport`."));
         }
         let mut pq = url.path().to_owned();
         if let Some(q) = url.query() {
@@ -309,16 +354,11 @@ impl AscClient {
     }
 
     async fn pace(&self) {
-        let delay = {
-            let Ok(q) = self.quota.lock() else { return };
-            match q.0.remaining {
-                Some(r) if r < self.policy.low_quota_threshold => Some(self.policy.low_quota_delay),
-                _ => None,
-            }
-        };
-        if let Some(d) = delay {
-            tokio::time::sleep(d).await;
+        let low = self.limiter.quota().remaining.is_some_and(|r| r < self.policy.low_quota_threshold);
+        if low {
+            tokio::time::sleep(self.policy.low_quota_delay).await;
         }
+        self.limiter.acquire().await;
     }
 
     /// Sends a GET with retries. `map_errors`: turn non-2xx answers into Russet errors.
@@ -326,6 +366,13 @@ impl AscClient {
         let url = self.auth.base_url().join(path_and_query.trim_start_matches('/')).map_err(|e| {
             Error::new(codes::core::INVALID_ARGUMENT, format!("invalid App Store Connect path {path_and_query}: {e}"))
         })?;
+        self.send_url(url, path_and_query, map_errors).await
+    }
+
+    /// Sends a GET of `url` with retries; `label` names it in errors (never the query, which can name devices).
+    async fn send_url(&self, url: Url, label: &str, map_errors: bool) -> Result<(u16, Vec<u8>)> {
+        refuse_offline(&url)?;
+        let path_and_query = label;
         let mut attempt = 0u32;
         let mut rate_attempt = 0u32;
         loop {
@@ -352,10 +399,8 @@ impl AscClient {
                 }
             };
             let status = resp.status().as_u16();
-            if let Some(q) = resp.headers().get("x-rate-limit").and_then(|v| v.to_str().ok()).map(parse_rate_limit)
-                && let Ok(mut guard) = self.quota.lock()
-            {
-                *guard = (q, Some(Instant::now()));
+            if let Some(q) = resp.headers().get("x-rate-limit").and_then(|v| v.to_str().ok()).map(parse_rate_limit) {
+                self.limiter.observe(q);
             }
             let retry_after = resp
                 .headers()
@@ -394,6 +439,32 @@ impl AscClient {
         let jitter = capped.mul_f64(f64::from(nanos % 250) / 1000.0);
         capped + jitter
     }
+}
+
+/// Whether `RUSSET_OFFLINE=1` is set (T3: offline runs reach loopback hosts only).
+pub fn offline() -> bool {
+    std::env::var_os("RUSSET_OFFLINE").is_some_and(|v| v == "1")
+}
+
+/// Whether `u` names this machine (`localhost`, 127.0.0.0/8 or `::1`).
+pub fn is_loopback(u: &Url) -> bool {
+    match u.host() {
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
+fn refuse_offline(url: &Url) -> Result<()> {
+    if !offline() || is_loopback(url) {
+        return Ok(());
+    }
+    Err(Error::new(
+        codes::core::INVALID_ARGUMENT,
+        format!("RUSSET_OFFLINE=1 refuses the non-loopback host {}", url.host_str().unwrap_or("?")),
+    )
+    .with_hint("Point App Store Connect at a local fake with RUSSET_ENDPOINTS_FILE, or unset RUSSET_OFFLINE."))
 }
 
 fn strip_query(pq: &str) -> &str {

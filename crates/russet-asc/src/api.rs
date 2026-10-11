@@ -272,6 +272,7 @@ fn segment(id: &str) -> Result<&str> {
     if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         Ok(id)
     } else {
-        Err(Error::new(codes::core::INVALID_ARGUMENT, format!("invalid App Store Connect id `{id}`")))
+        Err(Error::new(codes::core::INVALID_ARGUMENT, format!("invalid App Store Connect id `{id}`"))
+            .with_hint("Use a resource id as `russet account certs|devices|bundle-ids|profiles list` shows it."))
     }
 }

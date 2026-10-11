@@ -170,7 +170,9 @@ mod tests {
 
     #[test]
     fn base64url_round_trips() {
-        for data in [&b""[..], b"f", b"fo", b"foo", b"foob", b"fooba", b"foobar", &[0xfb, 0xff, 0xfe]] {
+        // RFC 4648's vectors: every prefix of "foobar", plus bytes that need the URL-safe alphabet.
+        let rfc: &[u8] = b"foobar";
+        for data in (0..=rfc.len()).map(|n| &rfc[..n]).chain([&[0xfb, 0xff, 0xfe][..]]) {
             assert_eq!(b64url_decode(&b64url(data)).unwrap(), data);
         }
         assert_eq!(b64url(&[0xfb, 0xff]), "-_8");
