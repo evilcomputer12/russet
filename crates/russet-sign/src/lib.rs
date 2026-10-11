@@ -50,7 +50,7 @@ pub use identity::{CertificateInfo, CertificateKind, InMemoryIdentity, certifica
 pub use inspect::{CodeDirectoryInfo, SignatureInfo};
 pub use ipa::OpenedInput;
 pub use profile::{ProfileKind, ProvisioningProfile};
-pub use util::{glob_match, hex, mask_team, normalize_serial};
+pub use util::{glob_match, hex, is_team_like, mask_team, normalize_serial, redact_app_id, redact_error, redact_teams};
 pub use verify::{VerifiedBundle, VerifyOptions, VerifyReport};
 
 /// A signing identity; implemented by russet-account's `LoadedIdentity`, which breaks the sign ↔ account cycle,
@@ -65,27 +65,34 @@ pub trait CodeSigningIdentity: Send + Sync {
 }
 
 /// Per-bundle inputs, keyed in [`SignRequest::per_bundle`] by the bundle's path relative to the app (`""` is the
-/// app, `PlugIns/Widget.appex` an extension).
+/// app, `PlugIns/Widget.appex` an extension). The two fields are ARCHITECTURE §5.3's (F0); the per-bundle
+/// bundle-ID rewrite and `get-task-allow` live in [`SignOptions`], so callers can keep building this struct
+/// with these two fields.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BundleSigningInput {
     /// The `.mobileprovision` to embed; required for app-like bundles (apps, extensions, App Clips).
     pub profile: Option<PathBuf>,
     /// The requested entitlements (an `.entitlements` plist); `None` signs only the keys the merge requires.
     pub entitlements: Option<PathBuf>,
-    /// Rewrites `CFBundleIdentifier` before signing (re-signing an app onto another App ID).
-    pub bundle_id_override: Option<String>,
-    /// Requests `get-task-allow` (the build plane's `SignItem::get_task_allow`); `None` takes the profile's value.
-    pub get_task_allow: Option<bool>,
+}
+
+impl BundleSigningInput {
+    /// A bundle signed with `profile` and no requested entitlements.
+    pub fn with_profile(profile: PathBuf) -> Self {
+        Self { profile: Some(profile), entitlements: None }
+    }
 }
 
 /// Where the signed bundle goes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum SignOutput {
-    /// Sign the bundle in place.
+    /// Sign the bundle in place (the default; SIGN §8.1 prefers a copy, see the Wave-1 notes in SIGN §23).
     #[default]
     InPlace,
-    /// Copy the bundle here first (an existing previous output is replaced) and sign the copy; the input stays
-    /// unsigned (ARCHITECTURE §14.8: `.russet/build/<profile>-iphoneos/signed/App.app`).
+    /// Copy the bundle to this path (an `.app` path) and sign the copy; the input stays unsigned (ARCHITECTURE
+    /// §14.8: `.russet/build/<profile>-iphoneos/signed/App.app`). An existing destination is replaced only when it
+    /// is an earlier signed output of the same app: an `.app` with `_CodeSignature/CodeResources` and the same
+    /// `CFBundleIdentifier`. A destination inside the input, or containing it, is refused.
     CopyTo(PathBuf),
 }
 
@@ -98,6 +105,12 @@ pub struct SignOptions {
     pub fixes: PreSignFixes,
     /// Lints to run after signing; their errors fail the signing (`sign.lintFailed`). `None` skips them.
     pub lint: Option<LintProfile>,
+    /// Requests `get-task-allow` for every app-like bundle (the build plane's `SignItem::get_task_allow` of a
+    /// debug build); `None` takes each profile's value. A key in a bundle's entitlements file wins.
+    pub get_task_allow: Option<bool>,
+    /// Rewrites `CFBundleIdentifier` before signing, by bundle path (`""` = the app): re-signing an app onto
+    /// another App ID.
+    pub bundle_ids: BTreeMap<String, String>,
 }
 
 impl Default for SignOptions {
@@ -108,6 +121,8 @@ impl Default for SignOptions {
             merge_policy: MergePolicy::Least,
             fixes: PreSignFixes::default(),
             lint: Some(LintProfile::DeviceInstall),
+            get_task_allow: None,
+            bundle_ids: BTreeMap::new(),
         }
     }
 }

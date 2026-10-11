@@ -139,5 +139,6 @@ fn make_symlink(target: &Path, link: &Path) -> Result<()> {
 
 #[cfg(not(unix))]
 fn make_symlink(_target: &Path, link: &Path) -> Result<()> {
-    Err(Error::new(codes::core::UNSUPPORTED_PLATFORM, format!("cannot create the symlink {}", link.display())))
+    Err(Error::new(codes::core::UNSUPPORTED_PLATFORM, format!("cannot create the symlink {}", link.display()))
+        .with_hint("Unpack this .ipa on Linux or macOS; symbolic links inside bundles are not supported here."))
 }

@@ -135,6 +135,102 @@ pub fn mask_team(team: &str) -> String {
     team.chars().enumerate().map(|(i, c)| if i < keep { '*' } else { c }).collect()
 }
 
+/// Whether `s` has the shape of a team ID or App ID prefix: exactly ten ASCII uppercase letters or digits.
+pub fn is_team_like(s: &str) -> bool {
+    s.len() == 10 && s.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+}
+
+/// Masks the App ID prefix of an entitlement value or App ID: `ABCDE12345.com.example.app` becomes
+/// `*******345.com.example.app`, `ABCDE12345.*` becomes `*******345.*`, and a bare team ID is masked whole.
+/// Anything else is returned unchanged.
+pub fn redact_app_id(value: &str) -> String {
+    let (head, rest) = match value.split_once('.') {
+        Some((h, r)) => (h, Some(r)),
+        None => (value, None),
+    };
+    if !is_team_like(head) {
+        return value.to_owned();
+    }
+    match rest {
+        Some(r) => format!("{}.{r}", mask_team(head)),
+        None => mask_team(head),
+    }
+}
+
+/// Replaces every occurrence of a known team ID in `text` by its mask (`*******XYZ`).
+pub fn redact_teams(text: &str, teams: &[String]) -> String {
+    let mut out = text.to_owned();
+    for t in teams.iter().filter(|t| t.len() >= 4) {
+        if out.contains(t.as_str()) {
+            out = out.replace(t.as_str(), &mask_team(t));
+        }
+    }
+    out
+}
+
+fn redact_json(v: serde_json::Value, teams: &[String]) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        Value::String(s) => Value::String(redact_teams(&s, teams)),
+        Value::Array(a) => Value::Array(a.into_iter().map(|x| redact_json(x, teams)).collect()),
+        Value::Object(m) => {
+            Value::Object(m.into_iter().map(|(k, x)| (redact_teams(&k, teams), redact_json(x, teams))).collect())
+        }
+        other => other,
+    }
+}
+
+/// An error cause that crossed a redaction: its text, then the next cause.
+#[derive(Debug)]
+struct RedactedCause {
+    text: String,
+    next: Option<Box<RedactedCause>>,
+}
+
+impl std::fmt::Display for RedactedCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
+impl std::error::Error for RedactedCause {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.next.as_deref().map(|n| n as &(dyn std::error::Error + 'static))
+    }
+}
+
+/// `e` with every known team ID masked in its message, hint, details and cause chain (the daemon's wire boundary:
+/// errors are assembled from paths, profiles and third-party messages that can name the team). An error that
+/// names none of `teams` is returned unchanged.
+pub fn redact_error(e: Error, teams: &[String]) -> Error {
+    let data = e.to_data();
+    let names_a_team = |s: &str| teams.iter().any(|t| t.len() >= 4 && s.contains(t.as_str()));
+    let details_text = data.details.as_ref().map(serde_json::Value::to_string).unwrap_or_default();
+    if !names_a_team(e.message())
+        && !data.hint.as_deref().is_some_and(names_a_team)
+        && !names_a_team(&details_text)
+        && !data.chain.iter().any(|c| names_a_team(c))
+    {
+        return e;
+    }
+    let mut out = Error::new(e.code(), redact_teams(e.message(), teams)).retryable(data.retryable);
+    if let Some(h) = data.hint {
+        out = out.with_hint(redact_teams(&h, teams));
+    }
+    if let Some(d) = data.details {
+        out = out.with_details(redact_json(d, teams));
+    }
+    let chain = data
+        .chain
+        .iter()
+        .rev()
+        .fold(None, |next, text| Some(Box::new(RedactedCause { text: redact_teams(text, teams), next })));
+    if let Some(first) = chain {
+        out = out.caused_by(*first);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +256,33 @@ mod tests {
         assert_eq!(normalize_serial(&[0x00]), "0");
         assert_eq!(mask_team("ABCDE12345"), "*******345");
         assert_eq!(mask_team("AB"), "AB");
+    }
+
+    #[test]
+    fn app_ids_and_errors_are_redacted() {
+        assert_eq!(redact_app_id("ABCDE12345.com.example.app"), "*******345.com.example.app");
+        assert_eq!(redact_app_id("ABCDE12345.*"), "*******345.*");
+        assert_eq!(redact_app_id("ABCDE12345"), "*******345");
+        for keep in ["com.example.app", "group.com.example", "XTL-69A6DE7D.com.x", "abcde12345.x", "development"] {
+            assert_eq!(redact_app_id(keep), keep);
+        }
+        let teams = vec!["ABCDE12345".to_owned()];
+        assert_eq!(redact_teams("data/identities/ABCDE12345/1A.json", &teams), "data/identities/*******345/1A.json");
+
+        let cause = std::io::Error::other("open /x/ABCDE12345/y failed");
+        let e = Error::new(codes::core::IO, "cannot read /x/ABCDE12345/y")
+            .with_hint("team ABCDE12345")
+            .with_details(serde_json::json!({"path": "/x/ABCDE12345/y", "n": 1, "ABCDE12345": ["ABCDE12345.*"]}))
+            .retryable(true)
+            .caused_by(cause);
+        let r = redact_error(e, &teams);
+        let wire = format!("{} {}", r.message(), serde_json::to_string(&r.to_data()).unwrap_or_default());
+        assert!(!wire.contains("ABCDE12345"), "{wire}");
+        assert!(wire.contains("*******345"));
+        assert_eq!(r.code(), codes::core::IO);
+        assert!(r.to_data().retryable);
+        assert_eq!(r.to_data().chain.len(), 1, "the cause chain is kept, redacted");
+        let plain = Error::new(codes::core::IO, "nothing to hide");
+        assert_eq!(redact_error(plain, &teams).message(), "nothing to hide");
     }
 }

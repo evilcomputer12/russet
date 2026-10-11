@@ -109,13 +109,24 @@ impl InMemoryIdentity {
         Self::from_key(cert_der, key, team_id)
     }
 
-    /// Builds an identity from PKCS#12 (`.p12`) data.
+    /// Builds an identity from PKCS#12 (`.p12`) data: the first private key with its certificate. p12-keystore
+    /// reads PBES2 (AES with an HMAC-SHA-256 MAC, what OpenSSL 3 and recent Keychain Access write) and the legacy
+    /// PBES1 forms (3DES, RC2, SHA-1 MAC). apple-codesign's own reader is not used: it handles only the legacy
+    /// forms and asserts on a SHA-256 MAC in debug builds.
     pub fn from_p12(p12: &[u8], password: &str, team_id: Option<String>) -> Result<Self> {
-        let (cert, key) = apple_codesign::cryptography::parse_pfx_data(p12, password).map_err(|e| {
-            Error::new(codes::sign::NO_IDENTITY, format!("cannot read the .p12: {e}"))
+        let unreadable = |why: String| {
+            Error::new(codes::sign::NO_IDENTITY, format!("cannot read the .p12: {why}"))
                 .with_hint("Check the password; the file must hold one certificate and its private key.")
-        })?;
-        Self::from_key(cert.constructed_data().to_vec(), key, team_id)
+        };
+        let store = p12_keystore::KeyStore::from_pkcs12(p12, password, p12_keystore::Pkcs12ImportPolicy::Strict)
+            .map_err(|e| unreadable(e.to_string()))?;
+        let (_, chain) = store
+            .private_key_chain()
+            .ok_or_else(|| unreadable("it holds no private key with its certificate".into()))?;
+        let cert = chain.certs().first().ok_or_else(|| unreadable("the private key has no certificate".into()))?;
+        let key_der = Zeroizing::new(chain.key().as_der().to_vec());
+        let key = InMemoryPrivateKey::from_pkcs8_der(&*key_der).map_err(key_error)?;
+        Self::from_key(cert.as_der().to_vec(), key, team_id)
     }
 
     fn from_key(cert_der: Vec<u8>, key: InMemoryPrivateKey, team_id: Option<String>) -> Result<Self> {
@@ -165,7 +176,8 @@ pub(crate) fn decode_pem(text: &str) -> Option<(String, Zeroizing<Vec<u8>>)> {
     let body_start = label_end + 5;
     let end_marker = format!("-----END {label}-----");
     let body_end = rest.find(&end_marker)?;
-    let b64: String = rest[body_start..body_end].chars().filter(|c| !c.is_whitespace()).collect();
+    let b64: Zeroizing<String> =
+        Zeroizing::new(rest[body_start..body_end].chars().filter(|c| !c.is_whitespace()).collect());
     let der = base64_decode(&b64)?;
     Some((label, Zeroizing::new(der)))
 }

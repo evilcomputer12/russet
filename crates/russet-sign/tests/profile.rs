@@ -82,3 +82,38 @@ fn rejects_what_is_not_a_profile() {
     let e = ProvisioningProfile::parse(&pb.build()).unwrap_err();
     assert_eq!(e.code(), codes::sign::PROFILE_INVALID);
 }
+
+/// `.p12` identities: PBES2/AES (what OpenSSL 3 and recent Keychain Access write) and the legacy 3DES form both
+/// load, and match their certificate; a wrong password is a clear error.
+#[test]
+fn reads_p12_identities_in_both_encryptions() {
+    use russet_sign::{CodeSigningIdentity as _, InMemoryIdentity};
+    let id = development_identity("ABCDE12345");
+    let entry = || {
+        let key = p12_keystore::PrivateKey::from_der(&id.key_pkcs8).unwrap();
+        let cert = p12_keystore::Certificate::from_der(&id.cert_der).unwrap();
+        p12_keystore::KeyStoreEntry::PrivateKeyChain(p12_keystore::PrivateKeyChain::new(
+            b"russet-test".as_slice(),
+            key,
+            [cert],
+        ))
+    };
+    let mut store = p12_keystore::KeyStore::new();
+    store.add_entry("russet", entry());
+    let modern = store.writer("secret pw").write().unwrap();
+    let legacy = store
+        .writer("secret pw")
+        .encryption_algorithm(p12_keystore::EncryptionAlgorithm::PbeWithShaAnd3KeyTripleDesCbc)
+        .mac_algorithm(p12_keystore::MacAlgorithm::HmacSha1)
+        .write()
+        .unwrap();
+    for p12 in [&modern, &legacy] {
+        let loaded = InMemoryIdentity::from_p12(p12, "secret pw", None).unwrap();
+        assert_eq!(loaded.certificate_der(), &id.cert_der[..]);
+        assert_eq!(loaded.team_id(), "ABCDE12345");
+        let e = InMemoryIdentity::from_p12(p12, "wrong", None).unwrap_err();
+        assert_eq!(e.code(), codes::sign::NO_IDENTITY);
+        assert!(e.hint().unwrap().contains("password"));
+    }
+    assert_eq!(InMemoryIdentity::from_p12(b"not a p12", "x", None).unwrap_err().code(), codes::sign::NO_IDENTITY);
+}

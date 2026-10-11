@@ -5522,6 +5522,7 @@ dependencies = [
  "apple-codesign",
  "chrono",
  "cryptographic-message-syntax",
+ "p12-keystore",
  "plist",
  "russet-core",
  "russet-doctor",

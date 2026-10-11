@@ -535,3 +535,42 @@ fn notes_and_error_codes() {
     );
     assert!(russet_sign::capability_for_entitlement("keychain-access-groups").is_none());
 }
+
+/// Entitlement errors reach the wire and logs: their message, details and Debug form carry the App ID prefix
+/// masked, never the team ID (AGENTS.md §8).
+#[test]
+fn errors_never_name_the_team() {
+    let profile = ProvisioningProfile::parse(
+        &ProfileBuilder::development(T, "com.example.*")
+            .entitlement("keychain-access-groups", arr(&[&format!("{T}.com.example.shared")]))
+            .build(),
+    )
+    .unwrap();
+    let resolve = |bundle: &str, req: &[(&str, Value)]| {
+        let mut d = Dictionary::new();
+        for (k, v) in req {
+            d.insert((*k).into(), v.clone());
+        }
+        EntitlementsResolver {
+            profile: &profile,
+            bundle_id: bundle,
+            distribution: Distribution::Development,
+            policy: MergePolicy::Least,
+        }
+        .resolve(&d)
+        .unwrap_err()
+    };
+    let errors = [
+        resolve("com.example.app", &[("keychain-access-groups", arr(&[&format!("{T}.com.other.group")]))]),
+        resolve("com.example.app", &[("application-identifier", s(&format!("{T}.com.example.other")))]),
+        resolve("org.elsewhere.app", &[]),
+    ];
+    assert!(matches!(errors[2], EntitlementsError::AppIdMismatch { .. }));
+    for e in errors {
+        let debug = format!("{e:?}");
+        let err: russet_core::Error = e.into();
+        let wire = format!("{} | {} | {debug}", err.message(), serde_json::to_string(&err.to_data()).unwrap());
+        assert!(!wire.contains(T), "{wire}");
+        assert!(wire.contains("*******345"), "{wire}");
+    }
+}

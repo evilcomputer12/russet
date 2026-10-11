@@ -140,8 +140,6 @@ impl AccountService {
                     BundleSigningInput {
                         profile: picks.get(rel).cloned(),
                         entitlements: r.entitlements.get(rel).cloned(),
-                        bundle_id_override: None,
-                        get_task_allow: r.get_task_allow,
                     },
                 )
             })
@@ -153,6 +151,8 @@ impl AccountService {
             merge_policy: r.merge_policy,
             fixes: r.fixes,
             lint: r.lint,
+            get_task_allow: r.get_task_allow,
+            bundle_ids: BTreeMap::new(),
         };
         let path = r.path.clone();
         tokio::task::spawn_blocking(move || {

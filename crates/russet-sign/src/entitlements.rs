@@ -11,7 +11,7 @@ use plist::{Dictionary, Value};
 use russet_core::error::{Error, codes};
 
 use crate::profile::ProvisioningProfile;
-use crate::util::glob_match;
+use crate::util::{glob_match, redact_app_id};
 
 /// The distribution a bundle is signed for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -71,7 +71,8 @@ impl MergePolicy {
     }
 }
 
-/// Why a merge failed (SIGN §8.4). Converts to `sign.*` errors.
+/// Why a merge failed (SIGN §8.4). Converts to `sign.*` errors. Values and App IDs are rendered with the App ID
+/// prefix masked (`*******345.*`), so neither the message nor the details carry a team ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntitlementsError {
     UnresolvedVariable { key: String, var: String },
@@ -180,7 +181,7 @@ impl EntitlementsResolver<'_> {
         let app_id = format!("{x}.{b}");
         let profile_app_id = self.profile.application_identifier.as_str();
         if !glob_match(profile_app_id, &app_id) {
-            return Err(EntitlementsError::AppIdMismatch { profile: profile_app_id.into(), bundle: b.into() });
+            return Err(EntitlementsError::AppIdMismatch { profile: redact_app_id(profile_app_id), bundle: b.into() });
         }
         if let Some(req) = r.get("application-identifier")
             && req.as_string() != Some(app_id.as_str())
@@ -291,11 +292,12 @@ fn not_allowed(key: &str, requested: &Value, allowed: &Value) -> EntitlementsErr
     EntitlementsError::ValueNotAllowed { key: key.into(), requested: render(requested), allowed: render(allowed) }
 }
 
-/// A compact, single-line rendering of a plist value for messages.
+/// A compact, single-line rendering of a plist value for messages, with App ID prefixes and team IDs masked
+/// (`*******345.com.example.app`): errors reach the wire and logs (AGENTS.md §8).
 fn render(v: &Value) -> String {
     match v {
         Value::Boolean(b) => b.to_string(),
-        Value::String(s) => format!("\"{s}\""),
+        Value::String(s) => format!("\"{}\"", redact_app_id(s)),
         Value::Integer(i) => i.to_string(),
         Value::Real(r) => r.to_string(),
         Value::Array(a) => format!("[{}]", a.iter().map(render).collect::<Vec<_>>().join(", ")),

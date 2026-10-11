@@ -109,9 +109,11 @@ pub(crate) fn lint(app: &AppBundle, profile: LintProfile, ipa_root: Option<&Path
                 if let Some(min) = min_os
                     && bv.minos > min
                 {
+                    // An upload is rejected; a device install works on devices at or above minos (SIGN §8.6
+                    // lists the rule for app-store; device-install reports it as a warning).
                     out.push(LintFinding::new(
                         "L-MACHO-003",
-                        Severity::Error,
+                        if store { Severity::Error } else { Severity::Warning },
                         Some(rel.clone()),
                         format!("minos {} is above the bundle's MinimumOSVersion {min}", bv.minos),
                     ));
@@ -173,15 +175,21 @@ pub(crate) fn lint(app: &AppBundle, profile: LintProfile, ipa_root: Option<&Path
                             "the extension's version and build number must equal the app's (ITMS-90473)",
                         ));
                     }
-                    if let Some(caps) = b.info.get("UIRequiredDeviceCapabilities")
-                        && !requires_arm64(caps)
-                    {
-                        out.push(LintFinding::new(
+                    match b.info.get("UIRequiredDeviceCapabilities") {
+                        Some(caps) if !requires_arm64(caps) => out.push(LintFinding::new(
                             "L-BND-003",
                             Severity::Error,
                             at(&b.rel_path),
                             "UIRequiredDeviceCapabilities must include arm64 (ITMS-90502)",
-                        ));
+                        )),
+                        Some(_) => {}
+                        // Xcode's extension templates omit the key and upload; a warning, not an error (SIGN §23).
+                        None => out.push(LintFinding::new(
+                            "L-BND-003",
+                            Severity::Warning,
+                            at(&b.rel_path),
+                            "the extension has no UIRequiredDeviceCapabilities; add arm64 to it if App Store Connect reports ITMS-90502",
+                        )),
                     }
                 }
             }

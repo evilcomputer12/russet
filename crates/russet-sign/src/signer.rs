@@ -16,26 +16,35 @@ use x509_certificate::CapturedX509Certificate;
 use crate::bundle::AppBundle;
 use crate::entitlements::{Distribution, EntitlementsResolver};
 use crate::profile::{ProfileKind, ProvisioningProfile};
-use crate::util::{bundle_invalid, codesign_failed, io_error, plist_xml, read_plist_dict};
+use crate::util::{bundle_invalid, codesign_failed, io_error, plist_xml, read_plist_dict, redact_app_id};
 use crate::{LintFinding, SignOutput, SignReport, SignRequest, SignedBundle, fixes, lint, verify};
 
 pub(crate) fn sign(r: SignRequest<'_>) -> Result<SignReport> {
-    let opts = &r.options;
-    let root = match &opts.output {
-        SignOutput::InPlace => r.bundle.to_path_buf(),
+    match &r.options.output {
+        SignOutput::InPlace => sign_at(&r, r.bundle),
         SignOutput::CopyTo(dest) => {
-            copy_bundle(r.bundle, dest)?;
-            dest.clone()
-        }
-    };
-    let fixes_applied = fixes::apply(&root, opts.fixes)?;
-    for (rel, input) in &r.per_bundle {
-        if let Some(id) = &input.bundle_id_override {
-            rewrite_bundle_id(&root.join(rel), id)?;
+            let rewritten = r.options.bundle_ids.get("");
+            copy_bundle(r.bundle, dest, rewritten)?;
+            let out = sign_at(&r, dest);
+            // A copy that never got a signature would block the next run (only earlier signed outputs are
+            // replaced): remove what this call created.
+            if out.is_err() && !is_earlier_output(dest, r.bundle, rewritten) {
+                let _ = std::fs::remove_dir_all(dest);
+            }
+            out
         }
     }
+}
+
+fn sign_at(r: &SignRequest<'_>, root: &Path) -> Result<SignReport> {
+    let opts = &r.options;
+    let root = root.to_path_buf();
+    let fixes_applied = fixes::apply(&root, opts.fixes)?;
+    for (rel, id) in &opts.bundle_ids {
+        rewrite_bundle_id(&root.join(rel), id)?;
+    }
     let app = AppBundle::open(&root)?;
-    for rel in r.per_bundle.keys() {
+    for rel in r.per_bundle.keys().chain(opts.bundle_ids.keys()) {
         if app.find(rel).is_none() {
             return Err(bundle_invalid(&root, format!("it has no nested bundle {rel}")));
         }
@@ -80,7 +89,7 @@ pub(crate) fn sign(r: SignRequest<'_>) -> Result<SignReport> {
             Some(p) => read_plist_dict(p)?,
             None => Dictionary::new(),
         };
-        if let Some(gta) = input.and_then(|i| i.get_task_allow)
+        if let Some(gta) = opts.get_task_allow
             && !requested.contains_key("get-task-allow")
         {
             requested.insert("get-task-allow".into(), Value::Boolean(gta));
@@ -190,7 +199,7 @@ fn check_profile(
     }
     if !profile.covers(bundle_id, team) {
         return Err(mismatch(
-            format!("its App ID {} does not cover {bundle_id}", profile.application_identifier),
+            format!("its App ID {} does not cover {bundle_id}", redact_app_id(&profile.application_identifier)),
             "Use a profile for this bundle ID (`russet provision`), or check [app] bundle-id and the bundle-id policy.",
         ));
     }
@@ -228,28 +237,93 @@ fn rewrite_bundle_id(bundle: &Path, id: &str) -> Result<()> {
     res.map_err(|e| Error::new(codes::core::IO, format!("cannot write {}: {e}", path.display())).caused_by(e))
 }
 
-/// Copies a bundle tree, keeping symlinks and permissions. An existing destination is replaced only when it is
-/// itself a bundle (a previous output); anything else is refused.
-pub(crate) fn copy_bundle(src: &Path, dest: &Path) -> Result<()> {
+/// Copies the bundle `src` to `dest` ([`SignOutput::CopyTo`]), keeping symlinks and permissions.
+///
+/// Refused before anything is created or removed: a destination inside the input or containing it (compared on
+/// resolved paths, also when the destination does not exist yet), a symbolic link, and an existing destination
+/// that is not an earlier signed output of the same app (an `.app` with `_CodeSignature/CodeResources` whose
+/// `CFBundleIdentifier` is the input's or `bundle_id`). Only such an earlier output is replaced.
+pub(crate) fn copy_bundle(src: &Path, dest: &Path, bundle_id: Option<&String>) -> Result<()> {
     let src_c = src.canonicalize().map_err(|e| io_error("cannot resolve", src, e))?;
-    if let Ok(dest_c) = dest.canonicalize() {
-        if dest_c == src_c || src_c.starts_with(&dest_c) {
-            return Err(Error::new(
-                codes::core::INVALID_ARGUMENT,
-                format!("the output {} overlaps the input {}", dest.display(), src.display()),
-            )
-            .with_hint("Choose an output path outside the bundle being signed."));
-        }
-        if !dest_c.join("Info.plist").is_file() {
-            return Err(Error::new(
-                codes::core::INVALID_ARGUMENT,
-                format!("refusing to replace {}: it is not a previously signed bundle", dest.display()),
-            )
-            .with_hint("Remove it yourself, or choose another output path."));
-        }
-        std::fs::remove_dir_all(dest).map_err(|e| io_error("cannot remove", dest, e))?;
+    let dest_r = resolve_new_path(dest)?;
+    if dest_r == src_c || dest_r.starts_with(&src_c) || src_c.starts_with(&dest_r) {
+        return Err(Error::new(
+            codes::core::INVALID_ARGUMENT,
+            format!("the output {} overlaps the input {}", dest.display(), src.display()),
+        )
+        .with_hint("Choose an output path outside the bundle being signed, for example `signed/App.app` next to it."));
     }
-    copy_tree(src, dest)
+    match std::fs::symlink_metadata(dest) {
+        Ok(meta) => {
+            let why = if meta.file_type().is_symlink() {
+                Some("it is a symbolic link")
+            } else if !meta.is_dir() {
+                Some("it is not a directory")
+            } else if !is_earlier_output(dest, src, bundle_id) {
+                Some("it is not an earlier signed copy of this app")
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                return Err(Error::new(
+                    codes::core::INVALID_ARGUMENT,
+                    format!("refusing to replace {}: {why}", dest.display()),
+                )
+                .with_hint("--out names the signed .app itself (for example `out/App.app`); remove the existing path yourself or choose another."));
+            }
+            std::fs::remove_dir_all(dest).map_err(|e| io_error("cannot remove", dest, e))?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(io_error("cannot stat", dest, e)),
+    }
+    // Nothing is at `dest` now but what this copy writes: a failed copy is removed, not left to block a retry.
+    copy_tree(src, dest).inspect_err(|_| {
+        let _ = std::fs::remove_dir_all(dest);
+    })
+}
+
+/// `p` made absolute and resolved: the longest prefix that exists is canonicalized (symlinks resolved), and the
+/// rest, which does not exist yet and so holds no symlink, is applied lexically (`.` dropped, `..` popped).
+fn resolve_new_path(p: &Path) -> Result<std::path::PathBuf> {
+    use std::path::Component;
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| Error::new(codes::core::IO, format!("cannot read the working directory: {e}")))?
+            .join(p)
+    };
+    let comps: Vec<Component<'_>> = abs.components().collect();
+    for n in (1..=comps.len()).rev() {
+        let prefix: std::path::PathBuf = comps[..n].iter().collect();
+        if let Ok(mut base) = prefix.canonicalize() {
+            for c in &comps[n..] {
+                match c {
+                    Component::ParentDir => {
+                        base.pop();
+                    }
+                    Component::Normal(x) => base.push(x),
+                    _ => {}
+                }
+            }
+            return Ok(base);
+        }
+    }
+    Ok(abs)
+}
+
+/// Whether `dest` is an earlier signed copy of the app `src`: an `.app` sealed by a signature
+/// (`_CodeSignature/CodeResources`) whose `CFBundleIdentifier` is the input's or the rewritten one.
+fn is_earlier_output(dest: &Path, src: &Path, bundle_id: Option<&String>) -> bool {
+    let id_of = |p: &Path| {
+        read_plist_dict(&p.join("Info.plist"))
+            .ok()
+            .and_then(|d| d.get("CFBundleIdentifier").and_then(Value::as_string).map(str::to_owned))
+    };
+    let Some(found) = id_of(dest) else { return false };
+    dest.extension().is_some_and(|e| e == "app")
+        && dest.join("_CodeSignature").join("CodeResources").is_file()
+        && (id_of(src).as_ref() == Some(&found) || bundle_id == Some(&found))
 }
 
 fn copy_tree(src: &Path, dest: &Path) -> Result<()> {

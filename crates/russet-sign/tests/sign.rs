@@ -65,17 +65,9 @@ fn inputs(s: &Setup) -> BTreeMap<String, BundleSigningInput> {
     let mut m = BTreeMap::new();
     m.insert(
         String::new(),
-        BundleSigningInput {
-            profile: Some(s.app_profile.clone()),
-            entitlements: Some(s.entitlements.clone()),
-            get_task_allow: Some(true),
-            ..Default::default()
-        },
+        BundleSigningInput { profile: Some(s.app_profile.clone()), entitlements: Some(s.entitlements.clone()) },
     );
-    m.insert(
-        "PlugIns/Widget.appex".into(),
-        BundleSigningInput { profile: Some(s.widget_profile.clone()), ..Default::default() },
-    );
+    m.insert("PlugIns/Widget.appex".into(), BundleSigningInput::with_profile(s.widget_profile.clone()));
     m
 }
 
@@ -89,7 +81,11 @@ fn sign_to(
         bundle: &s.app,
         identity: &identity,
         per_bundle,
-        options: SignOptions { output: SignOutput::CopyTo(out.to_path_buf()), ..Default::default() },
+        options: SignOptions {
+            output: SignOutput::CopyTo(out.to_path_buf()),
+            get_task_allow: Some(true),
+            ..Default::default()
+        },
     })
 }
 
@@ -180,13 +176,11 @@ fn signs_verifies_and_inspects_an_app() {
 
     // Re-signing the signed output in place works and still verifies.
     let identity = s.id.load();
-    let mut per = inputs(&s);
-    per.get_mut("").unwrap().get_task_allow = Some(false);
     let again = russet_sign::sign(SignRequest {
         bundle: &out,
         identity: &identity,
-        per_bundle: per,
-        options: SignOptions::default(),
+        per_bundle: inputs(&s),
+        options: SignOptions { get_task_allow: Some(false), ..Default::default() },
     })
     .unwrap();
     assert_ne!(again.bundles[1].cdhash, app_b.cdhash);
@@ -253,6 +247,7 @@ fn refuses_missing_or_mismatched_profiles() {
     let mut per = inputs(&s);
     per.remove("PlugIns/Widget.appex");
     assert_eq!(sign_to(&s, per, &out).unwrap_err().code(), codes::sign::PROFILE_MISMATCH);
+    assert!(!out.exists(), "a failed run removes the unsigned copy it made, so the next run is not refused");
 
     let other = s.root.join("other.mobileprovision");
     std::fs::write(&other, ProfileBuilder::development(TEAM, "com.other.app").certificate(&s.id.cert_der).build())
@@ -278,7 +273,6 @@ fn refuses_missing_or_mismatched_profiles() {
     std::fs::write(&store, ProfileBuilder::app_store(TEAM, APP_ID).certificate(&s.id.cert_der).build()).unwrap();
     let mut per = inputs(&s);
     per.get_mut("").unwrap().profile = Some(store);
-    per.get_mut("").unwrap().get_task_allow = None;
     assert_eq!(sign_to(&s, per, &out).unwrap_err().code(), codes::sign::PROFILE_MISMATCH, "development distribution");
 
     let push = s.root.join("push.entitlements");
@@ -300,6 +294,82 @@ fn refuses_missing_or_mismatched_profiles() {
     assert!(s.root.join("notabundle/file").exists());
     sign_to(&s, inputs(&s), &out).unwrap();
     sign_to(&s, inputs(&s), &out).unwrap();
+}
+
+/// `--out` never deletes what Russet did not sign, and never writes inside the input (it would copy the bundle
+/// into itself until the path is too long).
+#[test]
+fn signed_copies_never_replace_or_nest_foreign_paths() {
+    let s = setup();
+    let untouched = |p: &Path| assert!(p.exists(), "{} was removed", p.display());
+
+    // A source folder that happens to hold an Info.plist (the user read --out as "output directory").
+    let source = s.root.join("Dev/MyApp/MyApp");
+    std::fs::create_dir_all(&source).unwrap();
+    write_plist(&source.join("Info.plist"), &[("CFBundleIdentifier", Value::String(APP_ID.into()))]);
+    std::fs::write(source.join("main.swift"), b"print(1)").unwrap();
+    let e = sign_to(&s, inputs(&s), &source).unwrap_err();
+    assert_eq!(e.code(), codes::core::INVALID_ARGUMENT);
+    assert!(e.hint().unwrap().contains("--out names the signed .app"));
+    untouched(&source.join("main.swift"));
+
+    // An .app with a signature, but another app's.
+    let other = s.root.join("other/Other.app");
+    sign_to(&s, inputs(&s), &other).unwrap();
+    let info = other.join("Info.plist");
+    let mut d = plist::Value::from_file(&info).unwrap().into_dictionary().unwrap();
+    d.insert("CFBundleIdentifier".into(), Value::String("com.someone.else".into()));
+    Value::Dictionary(d).to_file_xml(&info).unwrap();
+    assert_eq!(sign_to(&s, inputs(&s), &other).unwrap_err().code(), codes::core::INVALID_ARGUMENT);
+    untouched(&other.join("_CodeSignature/CodeResources"));
+
+    // Inside the input, also through `..` and when nothing exists yet: refused before anything is created.
+    for inside in [s.app.join("Signed.app"), s.root.join("new/../Probe.app/Deep/Signed.app")] {
+        let e = sign_to(&s, inputs(&s), &inside).unwrap_err();
+        assert_eq!(e.code(), codes::core::INVALID_ARGUMENT, "{}", inside.display());
+        assert!(e.message().contains("overlaps"));
+    }
+    assert!(!s.app.join("Signed.app").exists() && !s.app.join("Deep").exists());
+    // Containing the input.
+    assert_eq!(sign_to(&s, inputs(&s), &s.root).unwrap_err().code(), codes::core::INVALID_ARGUMENT);
+    untouched(&s.app.join("Info.plist"));
+
+    // A symbolic link to an earlier output is not followed.
+    #[cfg(unix)]
+    {
+        let earlier = s.root.join("earlier/Probe.app");
+        sign_to(&s, inputs(&s), &earlier).unwrap();
+        let link = s.root.join("link.app");
+        std::os::unix::fs::symlink(&earlier, &link).unwrap();
+        let e = sign_to(&s, inputs(&s), &link).unwrap_err();
+        assert!(e.message().contains("symbolic link"), "{}", e.message());
+        untouched(&earlier.join("_CodeSignature/CodeResources"));
+    }
+}
+
+/// `SignOptions::bundle_ids` rewrites `CFBundleIdentifier` before signing (re-signing onto another App ID).
+#[test]
+fn rewrites_bundle_ids_before_signing() {
+    let s = setup();
+    let out = s.root.join("renamed/Probe.app");
+    let mut per = inputs(&s);
+    per.get_mut("").unwrap().profile = Some(s.widget_profile.clone()); // dev.russet.test.*
+    let identity = s.id.load();
+    let report = russet_sign::sign(SignRequest {
+        bundle: &s.app,
+        identity: &identity,
+        per_bundle: per,
+        options: SignOptions {
+            output: SignOutput::CopyTo(out.clone()),
+            bundle_ids: BTreeMap::from([(String::new(), "dev.russet.test.renamed".to_owned())]),
+            lint: None,
+            ..Default::default()
+        },
+    })
+    .unwrap();
+    assert_eq!(report.bundles[1].bundle_id, "dev.russet.test.renamed");
+    assert_eq!(AppBundle::open(&s.app).unwrap().identifier(), Some(APP_ID), "the input keeps its ID");
+    assert!(russet_sign::verify(&out, &VerifyOptions::default()).unwrap().ok);
 }
 
 fn zip_app(app: &Path, ipa: &Path, swift_support: bool) {
