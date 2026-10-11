@@ -86,6 +86,9 @@ pub struct LiveProvisioning {
 impl Provisioning for LiveProvisioning {
     async fn provision(&self, product: &BuiltProduct, udid: &str) -> Result<Provisioned> {
         let svc = self.accounts.get()?;
+        if let Some(cached) = cached_profile(&svc, product, udid)? {
+            return Ok(cached);
+        }
         let plan = svc
             .plan_project(&product.project, russet_sign::Distribution::Development, vec![udid.to_owned()], None)
             .await?;
@@ -103,6 +106,36 @@ impl Provisioning for LiveProvisioning {
             mutations: 0,
         })
     }
+}
+
+/// The offline fast path of [`LiveProvisioning`]: an app without nested bundles whose cached development profile
+/// covers its bundle ID, lists the device and one of the team's usable development certificates, and is valid for
+/// another day needs no App Store Connect round trip (the plan would be zero-mutation and pick that profile). It
+/// keeps `russet run` and `russet debug` fast and independent of ASC latency when nothing changed.
+fn cached_profile(svc: &russet_account::AccountService, product: &BuiltProduct, udid: &str) -> Result<Option<Provisioned>> {
+    if ["PlugIns", "Extensions", "AppClips", "Watch"].iter().any(|d| product.app.join(d).is_dir()) {
+        return Ok(None);
+    }
+    for identity in svc.identities().list(None)? {
+        if identity.kind != russet_account::CertKind::Development || identity.is_expired() {
+            continue;
+        }
+        let query = russet_account::ProfileQuery {
+            bundle_id: &product.bundle_id,
+            team: &identity.team_id,
+            cert_der: &identity.cert_der,
+            distribution: russet_sign::Distribution::Development,
+            device: Some(udid),
+        };
+        if let Some((_, path)) = svc.profiles().select(&query)? {
+            return Ok(Some(Provisioned {
+                profiles: [(String::new(), path)].into_iter().collect(),
+                team_id: Some(identity.team_id),
+                mutations: 0,
+            }));
+        }
+    }
+    Ok(None)
 }
 
 /// The signing step: copy, then `russet_sign::sign` with the team's identity.
