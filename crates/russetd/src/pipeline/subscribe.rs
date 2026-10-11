@@ -47,7 +47,8 @@ where
             detail,
         })
     };
-    let exited = |summary: russet_protocol::common::SessionSummary| {
+    let exited = |h: &SessionHandle| {
+        let summary = h.summary();
         let exit = summary.exit;
         RunNotification::Exited(RunExitedParams {
             subscription_id: sub.clone(),
@@ -56,13 +57,14 @@ where
             code: exit.as_ref().and_then(|e| e.code),
             signal: exit.as_ref().and_then(|e| e.signal),
             crash_id: exit.and_then(|e| e.crash_id),
+            error: h.error(),
         })
     };
     if !send(state(h.summary().state, None)) {
         return;
     }
     if h.is_ended() {
-        let _ = send(exited(h.summary()));
+        let _ = send(exited(&h));
         return;
     }
     tokio::pin!(stop);
@@ -108,7 +110,7 @@ where
                         batch.push(entry);
                     }
                     let _ = flush(&mut batch, &mut dropped);
-                    let _ = send(exited(h.summary()));
+                    let _ = send(exited(&h));
                     break;
                 }
                 Err(RecvError::Lagged(_)) => {}
@@ -129,27 +131,5 @@ where
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-
-    use std::sync::{Arc, Mutex};
-
-    use super::*;
-
-    #[test]
-    fn batch_limits_are_sane() {
-        assert!(OUTPUT_BATCH > 0 && OUTPUT_WINDOW <= Duration::from_millis(50));
-        let n = RunNotification::State(RunStateParams {
-            subscription_id: russet_debug::session::prefixed_ulid("sub_"),
-            session_id: russet_debug::new_session_id(),
-            state: russet_protocol::common::SessionState::Running,
-            detail: None,
-        });
-        let seen = Arc::new(Mutex::new(vec![n.clone()]));
-        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 }

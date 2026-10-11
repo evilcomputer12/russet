@@ -30,7 +30,8 @@ use russet_debug::{
 };
 use russet_device::{DeviceSelector, Udid};
 use russet_protocol::debug::{
-    BrokerInfo, BrokerTransport, DebugFrontend, DebugPrepareParams, DebugPrepareResult, DebugToolInfo, DebuggerFlavor,
+    BrokerInfo, BrokerTransport, DebugFrontend, DebugPrepareParams, DebugPrepareResult, DebugToolComponent,
+    DebugToolInfo, DebugToolProvenance, DebuggerFlavor,
 };
 use russet_protocol::run::{
     LaunchMode, RunListResult, RunOutputQueryParams, RunOutputQueryResult, RunStartParams, RunStartResult,
@@ -265,6 +266,7 @@ impl Pipeline {
         r.lease = p.session_lease.unwrap_or(SessionLease::Owned);
         r.project = Some(app.project.clone());
         r.process_name = app.product.executable.file_name().map(|n| n.to_string_lossy().into_owned());
+        r.local_executable = Some(app.product.executable.clone());
         r
     }
 
@@ -328,6 +330,7 @@ impl Pipeline {
                 DebugFrontend::None => Frontend::None,
             },
             attach_mode,
+            flavor,
             lldb: Some(lldb.clone()),
             lldb_dap: Some(lldb_dap.clone()),
             target: DebugTarget {
@@ -382,8 +385,8 @@ impl Pipeline {
             .session(&q.session_id)
             .ok_or_else(|| russet_debug::errors::session_not_found(q.session_id.as_str()))?;
         let filter = q.filter.clone().unwrap_or_default();
-        let (entries, dropped) = h.logs().query(q.since_ms, q.limit.map(|l| l as usize), &filter);
-        Ok(RunOutputQueryResult { entries, dropped })
+        let page = h.logs().read(q.after_seq, q.since_ms, q.limit.map(|l| l as usize), &filter);
+        Ok(RunOutputQueryResult { entries: page.entries, dropped: page.dropped, next_seq: page.next_seq })
     }
 
     /// `run.stop`.
@@ -405,29 +408,29 @@ impl Pipeline {
 pub fn wire_tool(t: &ToolInfo) -> DebugToolInfo {
     DebugToolInfo {
         component: match t.component {
-            Component::Lldb => "lldb",
-            Component::LldbDap => "lldb-dap",
-            Component::LibPython => "python-shared",
-            Component::Swift => "swift",
-            Component::DarwinSdk => "darwin-sdk",
-            Component::Linker => "linker",
-            Component::Xtool => "xtool",
-            Component::Flutter => "flutter",
-            Component::GenSnapshotIos => "gen-snapshot-ios",
-            Component::Llvm => "llvm",
-        }
-        .to_owned(),
+            Component::Lldb => DebugToolComponent::Lldb,
+            Component::LldbDap => DebugToolComponent::LldbDap,
+            Component::LibPython => DebugToolComponent::Libpython,
+            Component::Swift => DebugToolComponent::Swift,
+            Component::DarwinSdk => DebugToolComponent::DarwinSdk,
+            Component::Linker => DebugToolComponent::Linker,
+            Component::Xtool => DebugToolComponent::Xtool,
+            Component::Flutter => DebugToolComponent::Flutter,
+            Component::GenSnapshotIos => DebugToolComponent::GenSnapshotIos,
+            Component::Llvm => DebugToolComponent::Llvm,
+        },
         version: t.version.clone(),
         path: t.path.to_string_lossy().into_owned(),
         provenance: match &t.provenance {
-            Provenance::Managed { .. } => "managed",
-            Provenance::System => "system",
-            Provenance::Uv => "uv",
-            Provenance::XtoolBundle { .. } => "xtool-bundle",
-            Provenance::User => "user",
-            Provenance::ProjectPin => "project-pin",
-        }
-        .to_owned(),
+            Provenance::Managed { pin } => DebugToolProvenance::Managed { pin: pin.clone() },
+            Provenance::System => DebugToolProvenance::System,
+            Provenance::Uv => DebugToolProvenance::Uv,
+            Provenance::XtoolBundle { bundle } => {
+                DebugToolProvenance::XtoolBundle { bundle: bundle.to_string_lossy().into_owned() }
+            }
+            Provenance::User => DebugToolProvenance::User,
+            Provenance::ProjectPin => DebugToolProvenance::ProjectPin,
+        },
         env: t.env.clone(),
         ok: t.ok,
         problems: t.problems.clone(),

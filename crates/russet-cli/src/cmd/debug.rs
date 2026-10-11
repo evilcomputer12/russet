@@ -7,63 +7,83 @@
 //! pre-attach), appends the `--break` breakpoints and `process continue` to the daemon's Python-free
 //! `attach.lldb`, and runs LLDB with the resolver's environment:
 //!
-//! - interactive: `lldb -s session.lldb`; when LLDB quits, an owned session is stopped;
+//! - interactive: `lldb -s session.lldb` in the terminal; Ctrl-C belongs to LLDB (it interrupts the app), so
+//!   `russet` ignores SIGINT while LLDB runs; when LLDB quits, an owned session is stopped;
 //! - `--batch --command CMD…`: the script continues to the first stop, runs the commands there, and ends with
 //!   `process detach` (`--detach`) or `process kill` [D 84]; `--json` prints `{sessionId, pid, stop{reason,
-//!   threadId, frame{function, file, line}}, commands[{command, output}], detached, exitedAt?}`;
+//!   threadId, frame{function, file, line}}, commands[{command, output}], detached, exitedAt?}`. `--timeout SECS`
+//!   (default 120, 0 = none) bounds the run, and Ctrl-C ends it (exit 130): either ends the session under LLDB
+//!   (`run.stop`, kill, or detach with `--detach`). A batch that never stopped fails (`debug.processExited`,
+//!   `debug.lldbUnsupported`, `debug.brokerLost`, `debug.batchTimeout`), with the transcript in
+//!   `details.result`;
 //! - `--detach` makes the session `detached` (`debug.prepare {sessionLease: detached}`), so it outlives the CLI
 //!   and stays `running` with `debugger: detached` after LLDB's `D`;
 //! - `--print-config` prints the LLDB command line, environment and commands instead of running LLDB;
-//! - `russet debug prepare --json` prints `debug.prepare`'s result and keeps the (detached) session.
+//! - `russet debug prepare --json` prints `debug.prepare`'s result (`PreparedDebug`). With `--detach` it exits and
+//!   leaves a detached session (§7.6); without, it holds the owned session until it ends (for example when the
+//!   debugger that connected quits) or until Ctrl-C, which stops it.
 
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{ExitCode, ExitStatus};
+use std::time::Duration;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
-use russet_protocol::common::{AttachMode, SessionLease};
+use russet_protocol::common::{AttachMode, LogLevel, LogSource, SessionLease, SessionState};
 use russet_protocol::debug::{
     DebugFrontend, DebugPrepare, DebugPrepareParams, DebugPrepareResult, DebuggerFlavor, JitPolicy, SymbolTier,
 };
-use russet_protocol::run::{RunStop, RunStopParams};
-use russetd::pipeline::lldb::{self, BatchEnd, BatchSpec, BatchTranscript, Breakpoint};
+use russet_protocol::run::{
+    OutputFilter, RunList, RunListParams, RunOutputQuery, RunOutputQueryParams, RunStop, RunStopParams, StopMode,
+};
+use russetd::pipeline::lldb::{self, BatchEnd, BatchLimits, BatchSpec, BatchTranscript, Breakpoint};
 
-use super::run::{pipeline_args, project_dir, start_params};
+use super::run::{Interrupts, cancelled, interrupts, pipeline_args, project_dir, session_error, start_params};
 use crate::CliCtx;
+
+/// The options `russet debug` and `russet debug prepare` share.
+fn debug_args(c: Command) -> Command {
+    c.arg(
+        Arg::new("stop-on-entry")
+            .long("stop-on-entry")
+            .action(ArgAction::SetTrue)
+            .help("Stay stopped after the attach"),
+    )
+    .arg(
+        Arg::new("attach-mode")
+            .long("attach-mode")
+            .value_name("MODE")
+            .value_parser(["broker", "legacy-async"])
+            .help("broker (default), or the M1 fallback legacy-async"),
+    )
+    .arg(
+        Arg::new("jit")
+            .long("jit")
+            .value_name("MODE")
+            .value_parser(["auto", "native", "lldb-python", "off"])
+            .help("JIT servicer (Flutter)"),
+    )
+    .arg(
+        Arg::new("symbols")
+            .long("symbols")
+            .value_name("TIER")
+            .value_parser(["auto", "none", "core", "full"])
+            .help("Device symbols"),
+    )
+    .arg(Arg::new("flavor").long("flavor").value_name("F").value_parser(["swift", "llvm"]).help("LLDB flavor"))
+    .arg(Arg::new("detach").long("detach").action(ArgAction::SetTrue).help("Leave the app running when LLDB is done"))
+}
 
 /// The `debug` command.
 pub fn command() -> Command {
-    let debug = pipeline_args(Command::new("debug"))
+    let debug = debug_args(pipeline_args(Command::new("debug")))
         .about("Build, install, launch and debug with LLDB [--break FILE:LINE]… [--batch] [--detach]; debug prepare, jit-bench")
         .args_conflicts_with_subcommands(true)
         .arg(Arg::new("break").long("break").value_name("FILE:LINE").action(ArgAction::Append).help("A breakpoint"))
-        .arg(Arg::new("stop-on-entry").long("stop-on-entry").action(ArgAction::SetTrue).help("Stay stopped after the attach"))
         .arg(Arg::new("attach").long("attach").action(ArgAction::SetTrue).help("Attach to a running app (W11)"))
         .arg(Arg::new("pid").long("pid").value_name("N").requires("attach").help("With --attach: the process id"))
         .arg(Arg::new("bundle").long("bundle").value_name("B").requires("attach").help("With --attach: the bundle id"))
-        .arg(
-            Arg::new("attach-mode")
-                .long("attach-mode")
-                .value_name("MODE")
-                .value_parser(["broker", "legacy-async"])
-                .help("broker (default), or the M1 fallback legacy-async"),
-        )
-        .arg(
-            Arg::new("jit")
-                .long("jit")
-                .value_name("MODE")
-                .value_parser(["auto", "native", "lldb-python", "off"])
-                .help("JIT servicer (Flutter)"),
-        )
-        .arg(
-            Arg::new("symbols")
-                .long("symbols")
-                .value_name("TIER")
-                .value_parser(["auto", "none", "core", "full"])
-                .help("Device symbols"),
-        )
-        .arg(Arg::new("flavor").long("flavor").value_name("F").value_parser(["swift", "llvm"]).help("LLDB flavor"))
         .arg(Arg::new("print-config").long("print-config").action(ArgAction::SetTrue).help("Print the LLDB plan; do not run LLDB"))
         .arg(Arg::new("batch").long("batch").action(ArgAction::SetTrue).help("Run non-interactively"))
         .arg(
@@ -74,18 +94,19 @@ pub fn command() -> Command {
                 .requires("batch")
                 .help("With --batch: an LLDB command to run at the first stop"),
         )
-        .arg(Arg::new("detach").long("detach").action(ArgAction::SetTrue).help("Leave the app running when LLDB is done"))
+        .arg(
+            Arg::new("timeout")
+                .long("timeout")
+                .value_name("SECS")
+                .value_parser(clap::value_parser!(u64))
+                .requires("batch")
+                .help("With --batch: give up after SECS seconds (default 120; 0: never)"),
+        )
         .arg(Arg::new("lldb").long("lldb").value_name("PATH").help("Use this lldb instead of the resolved one"));
     debug
         .subcommand(
-            pipeline_args(Command::new("prepare"))
-                .about("Run the pipeline up to the broker attach and print the plan (keeps a detached session)")
-                .arg(
-                    Arg::new("attach-mode")
-                        .long("attach-mode")
-                        .value_name("MODE")
-                        .value_parser(["broker", "legacy-async"]),
-                ),
+            debug_args(pipeline_args(Command::new("prepare")))
+                .about("Run the pipeline up to the broker attach and print the plan; hold the session (or --detach)"),
         )
         .subcommand(super::stub("jit-bench", "Per-stop JIT latency on the device (W18)"))
 }
@@ -209,12 +230,77 @@ pub fn print_config(
 
 async fn prepare(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     let project = project_dir(cx)?;
-    let mut params = prepare_params(m, &project, cx.global.device.clone(), SessionLease::Detached)?;
+    let detach = m.get_flag("detach");
+    let lease = if detach { SessionLease::Detached } else { SessionLease::Owned };
+    let mut params = prepare_params(m, &project, cx.global.device.clone(), lease)?;
     params.frontend = Some(DebugFrontend::None);
     let prepared = cx.peer.call::<DebugPrepare>(params).await?;
     let v = serde_json::to_value(&prepared).map_err(|e| Error::new(codes::core::INTERNAL, e.to_string()))?;
     cx.reporter.result(&v);
+    if !detach {
+        hold(cx, &prepared).await?;
+    }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Keeps an owned session (and so its app) alive until it ends, or until Ctrl-C, which stops it (exit 130). A
+/// session that fails (for example `debug.handoffTimeout`: nobody connected within 60 s) returns its error.
+async fn hold(cx: &CliCtx, prepared: &DebugPrepareResult) -> Result<()> {
+    let mut interrupts = interrupts()?;
+    let sid = &prepared.session_id;
+    loop {
+        let list = cx.peer.call::<RunList>(RunListParams {}).await?;
+        match list.sessions.into_iter().find(|s| &s.session_id == sid) {
+            Some(s) if s.ended_at.is_none() => {}
+            Some(s) if matches!(s.state, SessionState::Failed | SessionState::Lost) => {
+                return Err(last_session_error(cx, prepared).await.unwrap_or_else(|| {
+                    Error::new(codes::debug::BROKER_LOST, format!("the debug session ended {:?}", s.state))
+                        .with_hint("See `russet logs --session` for what happened.")
+                }));
+            }
+            _ => return Ok(()),
+        }
+        tokio::select! {
+            () = interrupts.recv() => {
+                let _ = cx.peer.call::<RunStop>(RunStopParams { session_id: sid.clone(), mode: None }).await;
+                return Err(cancelled());
+            }
+            () = tokio::time::sleep(Duration::from_millis(500)) => {}
+        }
+    }
+}
+
+/// The error Russet reported in the session's output, if any.
+async fn last_session_error(cx: &CliCtx, prepared: &DebugPrepareResult) -> Option<Error> {
+    let filter = OutputFilter {
+        sources: Some(vec![LogSource::Russet]),
+        min_level: Some(LogLevel::Error),
+        ..OutputFilter::default()
+    };
+    let q = RunOutputQueryParams {
+        session_id: prepared.session_id.clone(),
+        after_seq: None,
+        since_ms: None,
+        limit: None,
+        filter: Some(filter),
+    };
+    let out = cx.peer.call::<RunOutputQuery>(q).await.ok()?;
+    out.entries.iter().rev().find_map(russetd::pipeline::logs::parse_error_entry).map(|e| session_error(&e))
+}
+
+/// Runs the interactive LLDB until it exits. LLDB shares the terminal and `russet`'s process group, so a Ctrl-C
+/// reaches it (it interrupts the app); `russet` ignores SIGINT meanwhile. Without that, `russet` would die and
+/// leave LLDB orphaned, and its owned session would be stopped under the user 2 s later.
+pub async fn run_interactive(cmd: &mut tokio::process::Command) -> std::io::Result<ExitStatus> {
+    // Watch for SIGINT before LLDB starts: from then on it never terminates `russet`.
+    let mut sigint = Interrupts::new()?;
+    let mut child = cmd.kill_on_drop(true).spawn()?;
+    loop {
+        tokio::select! {
+            status = child.wait() => return status,
+            () = sigint.recv() => {}
+        }
+    }
 }
 
 async fn debug(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
@@ -232,6 +318,7 @@ async fn debug(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
         commands: m.get_many::<String>("command").into_iter().flatten().cloned().collect(),
         end: if detach { BatchEnd::Detach } else { BatchEnd::Kill },
     });
+    let limits = batch_limits(m);
     let prepared = cx.peer.call::<DebugPrepare>(params).await?;
     let script = session_script(&prepared, &bps, stop_on_entry, batch.as_ref());
     let path = script_path(&prepared, &project);
@@ -248,32 +335,57 @@ async fn debug(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let mut cmd = tokio::process::Command::new(&program);
-    cmd.args(&args).envs(&prepared.lldb.env).kill_on_drop(true);
-    let outcome = if let Some(batch) = &batch {
-        cmd.stdin(std::process::Stdio::null());
-        let out = cmd.output().await.map_err(|e| lldb_spawn_error(&program, e))?;
-        let text = String::from_utf8_lossy(&out.stdout);
-        let t = lldb::parse_batch_output(&text, &batch.commands);
-        let exited_at = t.exited.then(russetd::pipeline::logs::now_rfc3339);
-        if cx.global.json {
-            cx.reporter.result(&batch_result(&prepared, &t, exited_at));
-        } else {
-            cx.reporter.result(&serde_json::Value::String(text.into_owned()));
+    cmd.args(&args).envs(&prepared.lldb.env);
+    let Some(batch) = &batch else {
+        run_interactive(&mut cmd).await.map_err(|e| lldb_spawn_error(&program, e))?;
+        if !detach {
+            // LLDB detaches on quit after `process connect`; an owned session's app is killed, as without --detach.
+            stop_session(cx, &prepared, StopMode::Kill).await;
         }
-        out.status
-    } else {
-        let mut child = cmd.spawn().map_err(|e| lldb_spawn_error(&program, e))?;
-        child.wait().await.map_err(|e| Error::new(codes::core::IO, format!("waiting for lldb: {e}")))?
+        return Ok(ExitCode::SUCCESS);
     };
+    let mut sigint = interrupts()?;
+    let end_mode = if detach { StopMode::Detach } else { StopMode::Kill };
+    let run = lldb::run_batch(cmd, limits, sigint.recv(), |_| stop_session(cx, &prepared, end_mode))
+        .await
+        .map_err(|e| lldb_spawn_error(&program, e))?;
+    let t = lldb::parse_batch_output(&run.stdout, &batch.commands);
+    let exited_at = t.exited.then(russetd::pipeline::logs::now_rfc3339);
+    let result = batch_result(&prepared, &t, exited_at);
     if !detach {
-        // LLDB detaches on quit after `process connect`; an owned session's app is killed, as without --detach.
-        let _ = cx.peer.call::<RunStop>(RunStopParams { session_id: prepared.session_id.clone(), mode: None }).await;
+        stop_session(cx, &prepared, StopMode::Kill).await;
     }
-    if !outcome.success() && batch.is_some() {
-        return Err(Error::new(codes::debug::LLDB_UNSUPPORTED, format!("lldb exited with {outcome}"))
-            .with_hint("Run `russet doctor`, or rerun without --batch to see LLDB's output."));
+    if !cx.global.json {
+        let mut text = run.stdout.clone();
+        text.push_str(&run.stderr);
+        cx.reporter.result(&serde_json::Value::String(text));
+    }
+    if let Some(e) = lldb::batch_failure(&t, &run) {
+        let mut details = e.to_data().details.unwrap_or_else(|| serde_json::json!({}));
+        details["result"] = result;
+        return Err(e.with_details(details));
+    }
+    if cx.global.json {
+        cx.reporter.result(&result);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// `--timeout` (with `--batch`): 120 s by default, `0` for none.
+pub fn batch_limits(m: &ArgMatches) -> BatchLimits {
+    let timeout = match m.try_get_one::<u64>("timeout").ok().flatten() {
+        Some(0) => None,
+        Some(secs) => Some(Duration::from_secs(*secs)),
+        None => Some(lldb::BATCH_TIMEOUT),
+    };
+    BatchLimits { timeout, ..BatchLimits::default() }
+}
+
+/// Ends the session: `kill`, or `detach` (the app keeps running untracked). Errors are ignored: the session may
+/// already be over.
+async fn stop_session(cx: &CliCtx, prepared: &DebugPrepareResult, mode: StopMode) {
+    let params = RunStopParams { session_id: prepared.session_id.clone(), mode: Some(mode) };
+    let _ = cx.peer.call::<RunStop>(params).await;
 }
 
 fn lldb_spawn_error(program: &Path, e: std::io::Error) -> Error {
@@ -287,7 +399,7 @@ mod tests {
 
     use std::collections::BTreeMap;
 
-    use russet_protocol::debug::{BrokerInfo, BrokerTransport, DebugToolInfo};
+    use russet_protocol::debug::{BrokerInfo, BrokerTransport, DebugToolComponent, DebugToolInfo, DebugToolProvenance};
     use russetd::pipeline::lldb::{BatchStop, CommandOutput, StopFrame};
 
     use super::*;
@@ -305,10 +417,10 @@ mod tests {
 
     fn prepared() -> DebugPrepareResult {
         let tool = DebugToolInfo {
-            component: "lldb".into(),
+            component: DebugToolComponent::Lldb,
             version: "21.0.0".into(),
             path: "/usr/lib/swift/usr/bin/lldb".into(),
-            provenance: "uv".into(),
+            provenance: DebugToolProvenance::Uv,
             env: BTreeMap::from([("PYTHONHOME".to_owned(), "/pbs".to_owned())]),
             ok: true,
             problems: vec![],
@@ -380,6 +492,46 @@ mod tests {
         assert_eq!(p.run.args.as_deref(), Some(&["-RussetProbeCrash".to_owned(), "1".to_owned()][..]));
         let m = parse(&["russet", "debug", "prepare", "--json"]);
         assert!(matches!(debug_matches(&m).subcommand(), Some(("prepare", _))));
+    }
+
+    #[test]
+    fn debug_prepare_takes_the_debug_flags() {
+        let m = parse(&[
+            "russet",
+            "debug",
+            "prepare",
+            "--detach",
+            "--stop-on-entry",
+            "--attach-mode",
+            "legacy-async",
+            "--flavor",
+            "llvm",
+            "--jit",
+            "off",
+            "--symbols",
+            "none",
+            "--json",
+        ]);
+        let Some(("prepare", p)) = debug_matches(&m).subcommand() else { panic!("no prepare") };
+        assert!(p.get_flag("detach"));
+        let params = prepare_params(p, Path::new("/p"), None, SessionLease::Detached).unwrap();
+        assert_eq!(params.stop_on_entry, Some(true));
+        assert_eq!(params.attach_mode, Some(AttachMode::LegacyAsync));
+        assert_eq!(
+            (params.flavor, params.jit, params.symbols),
+            (Some(DebuggerFlavor::Llvm), Some(JitPolicy::Off), Some(SymbolTier::None))
+        );
+        // Batch-only flags stay on `russet debug`.
+        assert!(crate::root_command().try_get_matches_from(["russet", "debug", "prepare", "--batch"]).is_err());
+    }
+
+    #[test]
+    fn the_batch_time_limit() {
+        let limit = |args: &[&str]| batch_limits(debug_matches(&parse(args))).timeout;
+        assert_eq!(limit(&["russet", "debug", "--batch"]), Some(lldb::BATCH_TIMEOUT));
+        assert_eq!(limit(&["russet", "debug", "--batch", "--timeout", "60"]), Some(Duration::from_secs(60)));
+        assert_eq!(limit(&["russet", "debug", "--batch", "--timeout", "0"]), None);
+        assert!(crate::root_command().try_get_matches_from(["russet", "debug", "--timeout", "5"]).is_err());
     }
 
     #[test]

@@ -16,6 +16,7 @@ use std::time::Duration;
 use russet_core::Result;
 use russet_core::error::codes;
 use russet_core::progress::{EventSink, JobEventKind, LogStream, ProgressSink};
+use russet_debug::TerminateMode;
 use russet_debug::launch::{LaunchSpec, Launched};
 use russet_debug::{BoxStream, DebugConfig, DebugService, DeviceServices, async_trait};
 use russet_device::{DeviceSelector, Udid};
@@ -318,6 +319,10 @@ struct Fixture {
 }
 
 async fn fixture(mutations: usize) -> Fixture {
+    fixture_with(mutations, russet_debug::broker::HANDOFF_TIMEOUT).await
+}
+
+async fn fixture_with(mutations: usize, handoff: Duration) -> Fixture {
     let dir = Scratch::new("run");
     let project = dir.0.join("RussetProbe");
     std::fs::create_dir_all(&project).unwrap();
@@ -328,6 +333,7 @@ async fn fixture(mutations: usize) -> Fixture {
         runtime_dir: dir.0.join("runtime"),
         state_dir: Some(dir.0.join("state")),
         lease_grace: Duration::from_millis(100),
+        broker: russet_debug::broker::BrokerOptions { handoff_timeout: Some(handoff), ..Default::default() },
         ..DebugConfig::default()
     };
     let debug = Arc::new(DebugService::new(dev.clone(), cfg));
@@ -391,7 +397,13 @@ async fn run_builds_signs_installs_if_changed_and_launches() {
     }
 
     // The output: stdout lines through run.output.query.
-    let q = RunOutputQueryParams { session_id: session.id().clone(), since_ms: None, limit: None, filter: None };
+    let q = RunOutputQueryParams {
+        session_id: session.id().clone(),
+        after_seq: None,
+        since_ms: None,
+        limit: None,
+        filter: None,
+    };
     let mut entries = Vec::new();
     for _ in 0..100 {
         entries = f.pipeline.output_query(&q).unwrap().entries;
@@ -403,6 +415,15 @@ async fn run_builds_signs_installs_if_changed_and_launches() {
     assert_eq!(entries.len(), 5);
     assert_eq!(entries[0].message, "PROBE seq=0 t=0");
     assert_eq!(entries[0].process.as_deref(), Some("Probe"));
+    // Followers page by number: `nextSeq` continues after the last entry.
+    let page = f.pipeline.output_query(&q).unwrap();
+    assert_eq!(page.next_seq, 5);
+    let rest = RunOutputQueryParams { after_seq: Some(3), ..q.clone() };
+    let tail: Vec<String> = f.pipeline.output_query(&rest).unwrap().entries.into_iter().map(|e| e.message).collect();
+    assert_eq!(tail, ["PROBE seq=3 t=300", "PROBE seq=4 t=400"]);
+    assert!(
+        f.pipeline.output_query(&RunOutputQueryParams { after_seq: Some(5), ..q.clone() }).unwrap().entries.is_empty()
+    );
     let filtered = RunOutputQueryParams {
         limit: Some(2),
         filter: Some(OutputFilter { contains: Some("seq=4".into()), ..OutputFilter::default() }),
@@ -511,7 +532,8 @@ async fn debug_prepare_launches_suspended_and_pre_attaches_the_broker() {
     assert!(text.contains("process connect -p gdb-remote \"unix-connect:///"));
     // The tools: lldb with its env; lldb-dap reported missing rather than failing the call.
     assert_eq!(r.lldb.env.get("PYTHONHOME").map(String::as_str), Some("/pbs"));
-    assert_eq!((r.lldb.component.as_str(), r.lldb.provenance.as_str()), ("lldb", "uv"));
+    assert_eq!(serde_json::to_value(&r.lldb).unwrap()["component"], "lldb");
+    assert_eq!(serde_json::to_value(&r.lldb).unwrap()["provenance"], serde_json::json!({"kind": "uv"}));
     assert!(!r.lldb_dap.ok && r.lldb_dap.problems[0].contains("no lldb-dap"));
     assert_eq!(r.dap_config["request"], "attach");
     assert!(r.dap_config["attachCommands"][0].as_str().unwrap().starts_with('!'));
@@ -566,4 +588,133 @@ async fn subscribers_get_state_output_and_the_end() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+/// An app that runs quietly; the test writes its output into the session.
+struct QuietDevice;
+
+#[async_trait]
+impl DeviceServices for QuietDevice {
+    async fn resolve(&self, _sel: &DeviceSelector) -> Result<Udid> {
+        Ok(Udid(UDID.into()))
+    }
+
+    async fn launch(&self, _udid: &Udid, _spec: &LaunchSpec) -> Result<Launched> {
+        Ok(Launched::pid_only(PID))
+    }
+
+    async fn connect_debugserver(&self, _udid: &Udid) -> Result<BoxStream> {
+        unreachable!("not debugged")
+    }
+
+    async fn signal(&self, _udid: &Udid, _pid: u32, _sig: i32) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// `run.subscribe`'s forwarder: output in batches of at most 200 entries, in order; a subscriber that falls more
+/// than the session channel's 1024 entries behind loses the oldest ones and the next `run.output` says how many
+/// (`dropped`), so every entry is delivered or counted. On a current-thread runtime the test pushes a burst the
+/// forwarder cannot keep up with, because it cannot run until the test yields.
+#[tokio::test]
+async fn the_forwarder_batches_output_and_reports_entries_it_fell_behind_on() {
+    const LINES: usize = 3000;
+    let svc = DebugService::new(Arc::new(QuietDevice), DebugConfig::default());
+    let mut req = russet_debug::RunRequest::new(DeviceSelector::Only, "dev.russet.test.probe");
+    req.lease = SessionLease::Detached;
+    let session = svc.run(req).await.unwrap();
+    let seen: Arc<Mutex<Vec<RunNotification>>> = Arc::default();
+    let sink = Arc::clone(&seen);
+    let subscribed = Arc::new(tokio::sync::Notify::new());
+    let ready = Arc::clone(&subscribed);
+    let task = tokio::spawn(forward_session(
+        session.clone(),
+        russet_debug::session::prefixed_ulid("sub_"),
+        move |n| {
+            // The forwarder subscribes to the output before it sends the state.
+            if matches!(n, RunNotification::State(_)) {
+                ready.notify_one();
+            }
+            sink.lock().unwrap().push(n);
+            true
+        },
+        std::future::pending(),
+    ));
+    subscribed.notified().await;
+    let view = session.logs();
+    for i in 0..LINES {
+        view.push(russet_debug::logs::stdio_entry(
+            russet_protocol::common::LogSource::Stdout,
+            format!("line {i}"),
+            Some(PID),
+            None,
+        ));
+    }
+    let accounted = |seen: &Mutex<Vec<RunNotification>>| {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .map(|n| match n {
+                RunNotification::Output(o) => o.entries.len() as u64 + o.dropped.unwrap_or(0),
+                _ => 0,
+            })
+            .sum::<u64>()
+    };
+    for _ in 0..500 {
+        if accounted(&seen) >= LINES as u64 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    session.terminate(TerminateMode::Kill).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), task).await.unwrap().unwrap();
+    let seen = seen.lock().unwrap().clone();
+    let outputs: Vec<&russet_protocol::run::RunOutputParams> =
+        seen.iter().filter_map(|n| if let RunNotification::Output(o) = n { Some(o) } else { None }).collect();
+    assert!(outputs.iter().all(|o| o.entries.len() <= russetd::pipeline::subscribe::OUTPUT_BATCH));
+    assert!(outputs.len() >= 1024 / russetd::pipeline::subscribe::OUTPUT_BATCH, "{} batches", outputs.len());
+    let dropped: u64 = outputs.iter().filter_map(|o| o.dropped).sum();
+    assert_eq!(dropped, (LINES - 1024) as u64, "the oldest entries beyond the channel are counted, not lost silently");
+    let numbers: Vec<usize> = outputs
+        .iter()
+        .flat_map(|o| o.entries.iter())
+        .map(|e| e.message.strip_prefix("line ").unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(numbers.len() as u64 + dropped, LINES as u64, "every entry is delivered or counted");
+    assert!(numbers.windows(2).all(|w| w[0] < w[1]), "in order, no duplicates");
+    assert_eq!(numbers.last(), Some(&(LINES - 1)), "the newest entries arrive");
+    assert!(matches!(seen.last(), Some(RunNotification::Exited(_))));
+}
+
+/// A debug session nobody attaches to fails with `debug.handoffTimeout`; `run.exited` says so.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn run_exited_carries_the_reason_a_session_failed() {
+    let f = fixture_with(0, Duration::from_millis(300)).await;
+    let p = DebugPrepareParams {
+        run: RunStartParams { session_lease: Some(SessionLease::Detached), ..params(&f) },
+        ..DebugPrepareParams::default()
+    };
+    let (_, session) = f.pipeline.prepare_debug(p, &Sink::default(), &CancellationToken::new()).await.unwrap();
+    let seen: Arc<Mutex<Vec<RunNotification>>> = Arc::default();
+    let sink = Arc::clone(&seen);
+    let sub = russet_debug::session::prefixed_ulid("sub_");
+    let forward = forward_session(
+        session.clone(),
+        sub,
+        move |n| {
+            sink.lock().unwrap().push(n);
+            true
+        },
+        std::future::pending(),
+    );
+    tokio::time::timeout(Duration::from_secs(10), forward).await.unwrap();
+    let seen = seen.lock().unwrap().clone();
+    let Some(RunNotification::Exited(e)) = seen.last() else { panic!("{seen:?}") };
+    assert_eq!(e.state, Some(SessionState::Failed));
+    let err = e.error.clone().unwrap();
+    assert_eq!((err.code, err.russet_code.as_str()), (6007, "debug.handoffTimeout"));
+    assert!(err.hint.is_some());
+    // The broker stopped the app it held.
+    assert!(f.dev.stub_log.lock().unwrap().iter().any(|p| p == "k"));
 }

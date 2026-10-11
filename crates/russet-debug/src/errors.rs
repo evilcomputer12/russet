@@ -33,7 +33,7 @@ pub fn hint(code: ErrorCode) -> Option<&'static str> {
             "Run `russet doctor`: Russet needs Swift's LLDB (or LLDB ≥ 23.1) with the remote-ios platform."
         }
         c if c == d::HANDOFF_TIMEOUT => {
-            "No debugger connected in time; run `russet debug` again and keep the terminal open."
+            "Connect within 60 s of the launch: run `russet debug` again (or `lldb -s <attach.lldb>` right after `russet debug prepare`)."
         }
         c if c == d::JIT_HOOK_NOT_FOUND => {
             "Upgrade Flutter: this engine does not export NOTIFY_DEBUGGER_ABOUT_RX_PAGES."
@@ -48,6 +48,9 @@ pub fn hint(code: ErrorCode) -> Option<&'static str> {
             "`po` falls back to `frame variable`; see `russet doctor` for the Swift expression overlay."
         }
         c if c == d::JIT_PAGE_MISSED => "This is a Russet JIT servicer bug; please report it with `russet bugreport`.",
+        c if c == d::BATCH_TIMEOUT => {
+            "Check that the --break line has code (the statement after a marker comment), or raise --timeout."
+        }
         _ => return None,
     })
 }
@@ -94,6 +97,17 @@ pub fn attach_failed(pid: u32, e: GdbError) -> Error {
 /// `debug.brokerLost` (6013) for a broken upstream connection.
 pub fn lost(e: GdbError) -> Error {
     error(codes::debug::BROKER_LOST, format!("lost the connection to debugserver: {e}")).caused_by(e)
+}
+
+/// `debug.handoffTimeout` (6007): no debugger took over the broker within `limit` (RD §6.3); the app was killed.
+pub fn handoff_timeout(limit: Option<std::time::Duration>) -> Error {
+    let within = limit.map(|d| format!(" within {} s", d.as_secs())).unwrap_or_default();
+    error(codes::debug::HANDOFF_TIMEOUT, format!("no debugger connected to the broker{within}; the app was stopped"))
+}
+
+/// `debug.brokerLost` (6013) for a session whose debugserver connection went away.
+pub fn session_lost() -> Error {
+    error(codes::debug::BROKER_LOST, "the connection to debugserver went away (device or tunnel gone)")
 }
 
 /// `debug.debugserverUnavailable` (6004).

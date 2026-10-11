@@ -11,6 +11,9 @@
 //!   arrives from stdio and os_trace within 50 ms, the os_trace copy is dropped (stdout wins). The dedup only
 //!   sees an os_trace entry that comes second, which is the usual order over USB.
 //! - Every entry is also appended to `state/sessions/<sid>/output.log` when the view has a file.
+//! - Entries are numbered in the order they arrive (`seq`, from 1). Followers page by that number
+//!   (`run.output.query {afterSeq}` → `nextSeq`), never by timestamps: an os_trace entry carries the device's
+//!   time and can arrive after a later stdout line.
 
 use std::collections::VecDeque;
 use std::io::Write;
@@ -30,9 +33,21 @@ pub const DEDUP_WINDOW: Duration = Duration::from_millis(50);
 pub use russet_protocol::run::OutputFilter;
 
 struct Stamped {
+    seq: u64,
     epoch_ms: i64,
     at: Instant,
     entry: LogEntry,
+}
+
+/// One page of [`LogView::read`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutputPage {
+    /// Oldest first.
+    pub entries: Vec<LogEntry>,
+    /// How many entries the buffer has dropped so far.
+    pub dropped: u64,
+    /// The number of the newest entry the view holds (0 before the first): pass it as `after_seq` to continue.
+    pub next_seq: u64,
 }
 
 struct Ring {
@@ -97,6 +112,7 @@ impl LogView {
             }
         }
         ring.next_seq += 1;
+        let seq = ring.next_seq;
         if let Some(f) = ring.file.as_mut() {
             let _ = writeln!(f, "{} {:?} {:?} {}", entry.ts, entry.source, entry.level, entry.message);
         }
@@ -105,29 +121,50 @@ impl LogView {
             ring.dropped += 1;
         }
         let epoch_ms = parse_ts_ms(&entry.ts).unwrap_or_else(now_epoch_ms);
-        ring.entries.push_back(Stamped { epoch_ms, at: now, entry: entry.clone() });
+        ring.entries.push_back(Stamped { seq, epoch_ms, at: now, entry: entry.clone() });
         drop(ring);
         let _ = self.tx.send(entry);
         true
     }
 
-    /// Entries at or after `since_ms` (Unix epoch milliseconds) that match `filter`, oldest first, at most
-    /// `limit` (the newest ones when the limit cuts); plus how many entries the buffer has dropped so far.
-    pub fn query(&self, since_ms: Option<i64>, limit: Option<usize>, filter: &OutputFilter) -> (Vec<LogEntry>, u64) {
+    /// Entries numbered after `after_seq`, stamped at or after `since_ms` (Unix epoch milliseconds), that match
+    /// `filter`, oldest first, at most `limit`. When the limit cuts, a follower (`after_seq` set) gets the oldest
+    /// entries and a `next_seq` that resumes right after them, so paging never skips any; a plain query gets the
+    /// newest ones.
+    pub fn read(
+        &self,
+        after_seq: Option<u64>,
+        since_ms: Option<i64>,
+        limit: Option<usize>,
+        filter: &OutputFilter,
+    ) -> OutputPage {
         let ring = lock(&self.ring);
-        let mut out: Vec<LogEntry> = ring
+        let mut hits: Vec<&Stamped> = ring
             .entries
             .iter()
+            .filter(|s| after_seq.is_none_or(|a| s.seq > a))
             .filter(|s| since_ms.is_none_or(|t| s.epoch_ms >= t))
             .filter(|s| filter.matches(&s.entry))
-            .map(|s| s.entry.clone())
             .collect();
+        let mut next_seq = ring.next_seq;
         if let Some(limit) = limit
-            && out.len() > limit
+            && hits.len() > limit
         {
-            out.drain(..out.len() - limit);
+            if after_seq.is_some() {
+                hits.truncate(limit);
+                next_seq = hits.last().map_or(after_seq.unwrap_or(0), |s| s.seq);
+            } else {
+                hits.drain(..hits.len() - limit);
+            }
         }
-        (out, ring.dropped)
+        let entries = hits.into_iter().map(|s| s.entry.clone()).collect();
+        OutputPage { entries, dropped: ring.dropped, next_seq }
+    }
+
+    /// [`LogView::read`] by time only: the entries and the dropped count.
+    pub fn query(&self, since_ms: Option<i64>, limit: Option<usize>, filter: &OutputFilter) -> (Vec<LogEntry>, u64) {
+        let page = self.read(None, since_ms, limit, filter);
+        (page.entries, page.dropped)
     }
 
     /// New entries as they come.
@@ -147,8 +184,8 @@ impl LogView {
         lock(&self.ring).dropped
     }
 
-    /// The sequence number the next entry gets.
-    pub fn next_seq(&self) -> u64 {
+    /// The number of the newest entry (0 before the first).
+    pub fn last_seq(&self) -> u64 {
         lock(&self.ring).next_seq
     }
 }
@@ -174,6 +211,39 @@ pub fn stdio_entry(source: LogSource, message: String, pid: Option<u32>, process
 /// A line from Russet itself (`source: russet`), for example "attached" or "detached".
 pub fn russet_entry(level: LogLevel, message: impl Into<String>) -> LogEntry {
     LogEntry { level, source: LogSource::Russet, ..stdio_entry(LogSource::Russet, message.into(), None, None) }
+}
+
+/// The `subsystem` of Russet's own entries that report a session's error.
+pub const ERROR_SUBSYSTEM: &str = "russet";
+
+/// Why a session failed, as an output entry: `source: russet`, level `error`, `subsystem: russet`, `category` =
+/// the code's name, and a message in ARCHITECTURE §13.1's display form (`debug.handoffTimeout (6007): … Hint: …`).
+pub fn error_entry(e: &russet_protocol::run::SessionError) -> LogEntry {
+    let mut text = format!("{} ({}): {}", e.russet_code, e.code, e.message);
+    if let Some(h) = &e.hint {
+        text.push_str(". Hint: ");
+        text.push_str(h);
+    }
+    LogEntry {
+        subsystem: Some(ERROR_SUBSYSTEM.to_owned()),
+        category: Some(e.russet_code.clone()),
+        ..russet_entry(LogLevel::Error, text)
+    }
+}
+
+/// The session error an [`error_entry`] reports, read back (for clients that only see the output).
+pub fn parse_error_entry(e: &LogEntry) -> Option<russet_protocol::run::SessionError> {
+    if e.source != LogSource::Russet || e.level != LogLevel::Error || e.subsystem.as_deref() != Some(ERROR_SUBSYSTEM) {
+        return None;
+    }
+    let russet_code = e.category.clone()?;
+    let rest = e.message.strip_prefix(&russet_code)?.strip_prefix(" (")?;
+    let (number, rest) = rest.split_once("): ")?;
+    let (message, hint) = match rest.split_once(". Hint: ") {
+        Some((m, h)) => (m.to_owned(), Some(h.to_owned())),
+        None => (rest.to_owned(), None),
+    };
+    Some(russet_protocol::run::SessionError { code: number.parse().ok()?, russet_code, message, hint })
 }
 
 /// Reads `reader` line by line (`\n`, with `\r` dropped, as CoreDevice's PTY sends `\r\n`) into `view` until
@@ -275,6 +345,61 @@ mod tests {
         assert_eq!(v.query(None, None, &text).0.len(), 1);
         assert_eq!(v.query(Some(now_epoch_ms() + 60_000), None, &OutputFilter::default()).0.len(), 0);
         assert_eq!(v.query(Some(0), None, &OutputFilter::default()).0.len(), 2);
+    }
+
+    #[test]
+    fn followers_page_by_arrival_not_by_timestamp() {
+        let v = LogView::default();
+        v.push(entry(LogSource::Stdout, LogLevel::Default, "first"));
+        let page = v.read(None, None, None, &OutputFilter::default());
+        assert_eq!((page.entries.len(), page.next_seq), (1, 1));
+        // An os_trace entry stamped by the device before the stdout line arrives after the poll: a time cursor
+        // would skip it, the sequence cursor returns it.
+        let mut late = entry(LogSource::Oslog, LogLevel::Default, "late, stamped earlier");
+        late.ts = "2026-10-11T08:59:59.000Z".into();
+        v.push(late);
+        v.push(entry(LogSource::Stdout, LogLevel::Default, "third"));
+        let next = v.read(Some(page.next_seq), None, None, &OutputFilter::default());
+        let msgs: Vec<&str> = next.entries.iter().map(|e| e.message.as_str()).collect();
+        assert_eq!(msgs, ["late, stamped earlier", "third"]);
+        assert_eq!(next.next_seq, 3);
+        assert_eq!(v.last_seq(), 3);
+        // Nothing new: an empty page with the same cursor; a filter does not move entries past the cursor.
+        assert!(v.read(Some(3), None, None, &OutputFilter::default()).entries.is_empty());
+        let only_stdout = OutputFilter { sources: Some(vec![LogSource::Stdout]), ..OutputFilter::default() };
+        let filtered = v.read(Some(1), None, None, &only_stdout);
+        assert_eq!((filtered.entries.len(), filtered.next_seq), (1, 3));
+        // Numbers keep counting when the buffer drops entries.
+        let small = LogView::new(2);
+        for i in 0..5 {
+            small.push(entry(LogSource::Stdout, LogLevel::Default, &format!("{i}")));
+        }
+        let page = small.read(Some(3), None, None, &OutputFilter::default());
+        assert_eq!((page.entries.len(), page.dropped, page.next_seq), (2, 3, 5));
+        // A limited follower gets the oldest entries and resumes right after them; nothing is skipped.
+        let first = v.read(Some(0), None, Some(2), &OutputFilter::default());
+        let msgs: Vec<&str> = first.entries.iter().map(|e| e.message.as_str()).collect();
+        assert_eq!((msgs.as_slice(), first.next_seq), (["first", "late, stamped earlier"].as_slice(), 2));
+        let rest = v.read(Some(first.next_seq), None, Some(2), &OutputFilter::default());
+        assert_eq!((rest.entries[0].message.as_str(), rest.next_seq), ("third", 3));
+    }
+
+    #[test]
+    fn error_entries_read_back() {
+        let err = russet_protocol::run::SessionError {
+            code: 6007,
+            russet_code: "debug.handoffTimeout".into(),
+            message: "no debugger connected to the broker within 60 s; the app was stopped".into(),
+            hint: Some("Connect within 60 s of the launch.".into()),
+        };
+        let e = error_entry(&err);
+        assert_eq!((e.source, e.level), (LogSource::Russet, LogLevel::Error));
+        assert!(e.message.starts_with("debug.handoffTimeout (6007): no debugger"), "{}", e.message);
+        assert_eq!(parse_error_entry(&e), Some(err.clone()));
+        let no_hint = russet_protocol::run::SessionError { hint: None, ..err };
+        assert_eq!(parse_error_entry(&error_entry(&no_hint)), Some(no_hint));
+        assert_eq!(parse_error_entry(&russet_entry(LogLevel::Error, "debug.x (1): y")), None);
+        assert_eq!(parse_error_entry(&entry(LogSource::Stdout, LogLevel::Error, "debug.x (1): y")), None);
     }
 
     #[test]

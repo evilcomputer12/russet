@@ -7,6 +7,9 @@
 //! values, and whether a debugger is attached is `debugger` (`none`, `attached`, `detached`), never a state.
 //! Files (ARCHITECTURE §14.8): `state/sessions/<sid>/{session.json,output.log}` and `state/sessions.json`, the
 //! list of live sessions for crash cleanup; the last [`KEEP_SESSIONS`] session directories are kept.
+//! `session.json` has RD §21's fields (device, app, launch, broker, LLDB), filled in as the session learns them,
+//! and its `outcome` says how the session ended, with the error when Russet knows one (for example
+//! `debug.handoffTimeout`).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -20,6 +23,7 @@ use russet_protocol::common::{
     AttachMode, DebuggerState, LogLevel, SessionExit, SessionKind, SessionLease, SessionState as WireState,
     SessionSummary,
 };
+use russet_protocol::run::SessionError;
 use serde_json::json;
 use tokio::sync::{broadcast, watch};
 
@@ -72,8 +76,51 @@ pub(crate) enum Control {
 }
 
 pub(crate) struct Ended {
+    state: SessionState,
     at: String,
     exit: Option<SessionExit>,
+    error: Option<SessionError>,
+}
+
+/// What `session.json` records about the device (RD §21); the device plane fills it when it can
+/// ([`DeviceServices::describe`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeviceFacts {
+    /// For example `iPhone13,2`.
+    pub product_type: Option<String>,
+    /// For example `27.0`.
+    pub product_version: Option<String>,
+    /// For example `24A437`.
+    pub build_version: Option<String>,
+    /// `usb` or `wifi`.
+    pub transport: Option<String>,
+}
+
+/// The LLDB a debug session prepared (RD §21 `lldb`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LldbFacts {
+    /// `swift` or `llvm`.
+    pub flavor: String,
+    pub version: String,
+    /// The libpython it runs with, for example `cpython-3.12.15-linux-x86_64-gnu` (from `PYTHONHOME`).
+    pub python: Option<String>,
+}
+
+/// RD §21's `session.json` fields beyond the summary, filled in as the session learns them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionFacts {
+    pub device: DeviceFacts,
+    /// The app bundle on the device.
+    pub app_device_path: Option<String>,
+    /// `CFBundleExecutable`.
+    pub app_executable: Option<String>,
+    /// The local executable's `LC_UUID`.
+    pub app_uuid: Option<String>,
+    /// The launch strategy: `auto`, `coredevice` or `dvt`.
+    pub launch: Option<String>,
+    /// The broker URL LLDB connects to.
+    pub lldb_url: Option<String>,
+    pub lldb: Option<LldbFacts>,
 }
 
 pub(crate) struct Session {
@@ -99,6 +146,9 @@ pub(crate) struct Session {
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
     /// The device's exit notice and the end of stdout, held back while the broker decides how the process ended.
     exit_watch: Mutex<Option<ExitSignals>>,
+    facts: Mutex<SessionFacts>,
+    /// Held while a record is computed and written, so the last write is never an older view.
+    persisting: Mutex<()>,
 }
 
 /// What tells a session that its process ended when no debugger holds it.
@@ -133,6 +183,7 @@ pub(crate) struct SessionInit {
     pub attach_mode: Option<AttachMode>,
     pub state_dir: Option<PathBuf>,
     pub log_capacity: usize,
+    pub facts: SessionFacts,
 }
 
 impl SessionHandle {
@@ -174,6 +225,8 @@ impl SessionHandle {
             registry,
             keep: Mutex::new(Vec::new()),
             exit_watch: Mutex::new(None),
+            facts: Mutex::new(init.facts),
+            persisting: Mutex::new(()),
         };
         let h = Self { inner: Arc::new(s) };
         h.persist();
@@ -185,6 +238,9 @@ impl SessionHandle {
     }
 
     pub fn state(&self) -> SessionState {
+        if let Some(e) = lock(&self.inner.ended).as_ref() {
+            return e.state.clone();
+        }
         self.inner.state.borrow().clone()
     }
 
@@ -231,9 +287,23 @@ impl SessionHandle {
         self.inner.logs.clone()
     }
 
+    /// Why the session failed, when it ended with an error Russet knows (`run.exited.error`).
+    pub fn error(&self) -> Option<SessionError> {
+        lock(&self.inner.ended).as_ref().and_then(|e| e.error.clone())
+    }
+
+    /// RD §21's facts the session has gathered so far.
+    pub fn facts(&self) -> SessionFacts {
+        lock(&self.inner.facts).clone()
+    }
+
     /// The wire summary (ARCHITECTURE §9.5).
     pub fn summary(&self) -> SessionSummary {
         let ended = lock(&self.inner.ended);
+        let state = match ended.as_ref() {
+            Some(e) => e.state.wire(),
+            None => self.inner.state.borrow().wire(),
+        };
         SessionSummary {
             session_id: self.inner.id.clone(),
             kind: self.inner.kind,
@@ -241,7 +311,7 @@ impl SessionHandle {
             udid: lock(&self.inner.udid).clone(),
             pid: self.pid(),
             project: self.inner.project.clone(),
-            state: self.state().wire(),
+            state,
             lease: self.inner.lease,
             debugger: self.debugger(),
             attach_mode: self.inner.attach_mode,
@@ -252,11 +322,14 @@ impl SessionHandle {
     }
 
     /// Waits until the session ends; returns its final state.
+    /// The final state is announced only once `session.json` records it, so a waiter that reads the file
+    /// afterwards sees the end.
     pub async fn wait(&self) -> SessionState {
         let mut rx = self.inner.state.subscribe();
         loop {
-            if self.is_ended() {
-                return rx.borrow().clone();
+            let s = rx.borrow_and_update().clone();
+            if s.is_final() {
+                return s;
             }
             if rx.changed().await.is_err() {
                 return self.state();
@@ -264,13 +337,13 @@ impl SessionHandle {
         }
     }
 
-    /// Waits up to `limit` for `pred` on the state; returns the state then.
+    /// Waits up to `limit` for `pred` on the state, or for the end; returns the state then.
     pub async fn wait_for(&self, limit: Duration, pred: impl Fn(&SessionState) -> bool) -> SessionState {
         let mut rx = self.inner.state.subscribe();
         let deadline = tokio::time::Instant::now() + limit;
         loop {
             let s = rx.borrow_and_update().clone();
-            if pred(&s) || self.is_ended() {
+            if pred(&s) || s.is_final() {
                 return s;
             }
             match tokio::time::timeout_at(deadline, rx.changed()).await {
@@ -306,7 +379,9 @@ impl SessionHandle {
                 match (how, handle.state()) {
                     (_, BrokerState::Exited { code, signal }) => self.end_exited(code, signal),
                     (TerminateMode::Detach, _) => self.end_untracked(),
-                    (TerminateMode::Kill, BrokerState::Lost) => self.end(SessionState::Lost, None),
+                    (TerminateMode::Kill, BrokerState::Lost) => {
+                        self.end_failed(SessionState::Lost, &crate::errors::session_lost());
+                    }
                     // The debugger had detached already: the app runs on its own, so the device kills it.
                     (TerminateMode::Kill, BrokerState::Detached) => {
                         process.kill().await?;
@@ -370,6 +445,12 @@ impl SessionHandle {
 
     pub(crate) fn set_pid(&self, pid: u32) {
         self.inner.pid.store(pid, Ordering::SeqCst);
+        self.persist();
+    }
+
+    /// Records facts for `session.json`.
+    pub(crate) fn update_facts(&self, f: impl FnOnce(&mut SessionFacts)) {
+        f(&mut lock(&self.inner.facts));
         self.persist();
     }
 
@@ -484,41 +565,49 @@ impl SessionHandle {
         self.end(SessionState::Exited { code: -1 }, None);
     }
 
+    /// Ends the session as `failed` or `lost` because of `e`, which `run.exited`, `session.json` and the output
+    /// (a `russet` entry, level `error`, `category` = the code's name) report.
+    pub(crate) fn end_failed(&self, state: SessionState, e: &russet_core::Error) {
+        let error = SessionError {
+            code: e.code().number(),
+            russet_code: e.code().as_str().to_owned(),
+            message: e.message().to_owned(),
+            hint: e.hint().map(str::to_owned),
+        };
+        if !self.is_ended() {
+            self.inner.logs.push(logs::error_entry(&error));
+        }
+        self.end_with(state, None, Some(error));
+    }
+
     pub(crate) fn end(&self, state: SessionState, exit: Option<SessionExit>) {
+        self.end_with(state, exit, None);
+    }
+
+    /// Ends the session. The end is decided under the `ended` lock (later transitions are ignored), then
+    /// recorded (`session.json`, `sessions.json`), and only then announced to waiters and subscribers.
+    fn end_with(&self, state: SessionState, exit: Option<SessionExit>, error: Option<SessionError>) {
         {
             let mut ended = lock(&self.inner.ended);
             if ended.is_some() {
                 return;
             }
-            *ended = Some(Ended { at: logs::now_rfc3339(), exit: exit.clone() });
-            self.inner.state.send_replace(state.clone());
+            *ended =
+                Some(Ended { state: state.clone(), at: logs::now_rfc3339(), exit: exit.clone(), error: error.clone() });
         }
-        let _ = self.inner.events.send(SessionEvent::State(state.clone()));
-        let _ = self.inner.events.send(SessionEvent::Ended { state: state.wire(), exit });
         lock(&self.inner.keep).clear();
         self.persist();
+        self.inner.state.send_replace(state.clone());
+        let _ = self.inner.events.send(SessionEvent::State(state.clone()));
+        let _ = self.inner.events.send(SessionEvent::Ended { state: state.wire(), exit, error });
     }
 
     /// Writes `session.json` and updates `sessions.json`.
     pub(crate) fn persist(&self) {
+        let _one_at_a_time = lock(&self.inner.persisting);
         let summary = self.summary();
         if let Some(dir) = &self.inner.dir {
-            let record = json!({
-                "schema": 1,
-                "sessionId": summary.session_id,
-                "kind": summary.kind,
-                "device": {"udid": summary.udid},
-                "app": {"bundleId": summary.bundle_id},
-                "pid": summary.pid,
-                "project": summary.project,
-                "state": summary.state,
-                "lease": summary.lease,
-                "debugger": summary.debugger,
-                "attachMode": summary.attach_mode,
-                "startedAt": summary.started_at,
-                "endedAt": summary.ended_at,
-                "outcome": summary.exit,
-            });
+            let record = session_record(&summary, &self.facts(), self.error());
             if let Ok(bytes) = serde_json::to_vec_pretty(&record) {
                 let _ = crate::fsutil::atomic_write(&dir.join("session.json"), &bytes);
             }
@@ -527,6 +616,54 @@ impl SessionHandle {
             update_registry(path, &summary);
         }
     }
+}
+
+/// `session.json` (RD §21): `schema`, `sessionId`, `kind`, `device`, `app`, `pid`, `launch`, `broker`, `jit` (W18),
+/// `lldb`, `startedAt`, `endedAt` and `outcome`, plus the summary's `project`, `state`, `lease`, `debugger` and
+/// `attachMode`. Unknown values are `null`; `outcome` is `null` until the session ends, then `{state, exit?,
+/// error?}`.
+fn session_record(s: &SessionSummary, f: &SessionFacts, error: Option<SessionError>) -> serde_json::Value {
+    let outcome = s.ended_at.as_ref().map(|_| {
+        let mut o = json!({"state": s.state});
+        if let Some(exit) = &s.exit {
+            o["exit"] = json!(exit);
+        }
+        if let Some(e) = &error {
+            o["error"] = json!(e);
+        }
+        o
+    });
+    json!({
+        "schema": 1,
+        "sessionId": s.session_id,
+        "kind": s.kind,
+        "device": {
+            "udid": s.udid,
+            "productType": f.device.product_type,
+            "productVersion": f.device.product_version,
+            "buildVersion": f.device.build_version,
+            "transport": f.device.transport,
+        },
+        "app": {
+            "bundleId": s.bundle_id,
+            "devicePath": f.app_device_path,
+            "executable": f.app_executable,
+            "uuid": f.app_uuid,
+        },
+        "pid": s.pid,
+        "launch": f.launch,
+        "broker": f.lldb_url.as_ref().map(|url| json!({"lldbUrl": url})),
+        "jit": null,
+        "lldb": f.lldb.as_ref().map(|l| json!({"flavor": l.flavor, "version": l.version, "python": l.python})),
+        "project": s.project,
+        "state": s.state,
+        "lease": s.lease,
+        "debugger": s.debugger,
+        "attachMode": s.attach_mode,
+        "startedAt": s.started_at,
+        "endedAt": s.ended_at,
+        "outcome": outcome,
+    })
 }
 
 impl SessionState {
@@ -659,6 +796,7 @@ mod tests {
             attach_mode: Some(AttachMode::Broker),
             state_dir,
             log_capacity: 100,
+            facts: SessionFacts::default(),
         }
     }
 

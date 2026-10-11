@@ -89,17 +89,53 @@ pub struct DebugPrepareParams {
     pub attach_mode: Option<AttachMode>,
 }
 
-/// A resolved LLDB tool as `debug.prepare` reports it: the shape of `toolchain.resolve`'s `ToolInfo`
-/// (ARCHITECTURE §8.1). `env` is part of the contract: every launcher applies it (§16.2).
+/// A toolchain component, with the wire values of `toolchain.*`'s `ToolInfo.component` (ARCHITECTURE §8.1, W3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum DebugToolComponent {
+    Swift,
+    DarwinSdk,
+    Linker,
+    Lldb,
+    LldbDap,
+    Libpython,
+    Xtool,
+    Flutter,
+    GenSnapshotIos,
+    Llvm,
+}
+
+/// Where a resolved tool came from, in the wire shape of `toolchain.*`'s `ToolInfo.provenance` (W3): an object
+/// tagged by `kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum DebugToolProvenance {
+    /// Installed by Russet; `pin` is `<component>@<version>`.
+    Managed { pin: String },
+    /// Found on the system (`PATH`, `ldconfig`).
+    System,
+    /// An existing uv-managed python-build-standalone.
+    Uv,
+    /// Inside an xtool SDK bundle, read in place.
+    #[serde(rename_all = "camelCase")]
+    XtoolBundle { bundle: String },
+    /// Installed by the user elsewhere.
+    User,
+    /// Named by the project (`[debug] lldb = "<path>"`).
+    ProjectPin,
+}
+
+/// A resolved LLDB tool as `debug.prepare` reports it: the wire shape of `toolchain.resolve`'s `ToolInfo`
+/// (ARCHITECTURE §8.1), field for field, so `PreparedDebug.lldb` can switch to W3's type once it is on `main`.
+/// `env` is part of the contract: every launcher applies it (§16.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DebugToolInfo {
     /// `lldb` or `lldb-dap`.
-    pub component: String,
+    pub component: DebugToolComponent,
     pub version: String,
     pub path: String,
-    /// `managed`, `system`, `uv`, `xtool-bundle`, `user` or `project-pin`.
-    pub provenance: String,
+    pub provenance: DebugToolProvenance,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     pub ok: bool,
@@ -366,11 +402,11 @@ mod tests {
 
     #[test]
     fn the_prepared_debug_shape() {
-        let tool = |c: &str| DebugToolInfo {
-            component: c.into(),
+        let tool = |c: DebugToolComponent, name: &str| DebugToolInfo {
+            component: c,
             version: "21.0.0".into(),
-            path: format!("/usr/lib/swift/usr/bin/{c}"),
-            provenance: "system".into(),
+            path: format!("/usr/lib/swift/usr/bin/{name}"),
+            provenance: DebugToolProvenance::System,
             env: BTreeMap::from([("PYTHONHOME".to_owned(), "/pbs".to_owned())]),
             ok: true,
             problems: vec![],
@@ -379,8 +415,8 @@ mod tests {
             session_id: serde_json::from_value(json!("ses_01J00000000000000000000000")).unwrap(),
             pid: 932,
             bundle_id: "dev.russet.test.probe".into(),
-            lldb: tool("lldb"),
-            lldb_dap: tool("lldb-dap"),
+            lldb: tool(DebugToolComponent::Lldb, "lldb"),
+            lldb_dap: tool(DebugToolComponent::LldbDap, "lldb-dap"),
             broker: BrokerInfo {
                 transport: BrokerTransport::Unix,
                 path: Some("/run/user/1000/russet/sessions/ses_x/gdb.sock".into()),
@@ -397,11 +433,39 @@ mod tests {
         let v = serde_json::to_value(&r).unwrap();
         assert_eq!(v["sessionId"], "ses_01J00000000000000000000000");
         assert_eq!(v["lldbDap"]["component"], "lldb-dap");
+        assert_eq!(v["lldb"]["provenance"], json!({"kind": "system"}));
         assert_eq!(v["broker"]["transport"], "unix");
         assert_eq!(v["broker"]["lldbUrl"], "unix-connect:///run/user/1000/russet/sessions/ses_x/gdb.sock");
         assert_eq!(v["attachMode"], "broker");
         assert!(v.get("dap").is_none());
         let back: DebugPrepareResult = serde_json::from_value(v).unwrap();
         assert_eq!(back, r);
+    }
+
+    /// W3's `ToolInfo` (ARCHITECTURE §8.1) on the wire: kebab-case components, provenance tagged by `kind`.
+    #[test]
+    fn tool_info_has_the_toolchain_wire_shape() {
+        let t = DebugToolInfo {
+            component: DebugToolComponent::Libpython,
+            version: "3.12.15".into(),
+            path: "/d/toolchains/python-shared/cpython-3.12.15/lib/libpython3.12.so".into(),
+            provenance: DebugToolProvenance::Managed { pin: "python-shared@3.12.15".into() },
+            env: BTreeMap::new(),
+            ok: true,
+            problems: vec![],
+        };
+        let v = serde_json::to_value(&t).unwrap();
+        assert_eq!(v["component"], "libpython");
+        assert_eq!(v["provenance"], json!({"kind": "managed", "pin": "python-shared@3.12.15"}));
+        let xtool =
+            DebugToolProvenance::XtoolBundle { bundle: "/home/u/.swiftpm/swift-sdks/darwin.artifactbundle".into() };
+        assert_eq!(
+            serde_json::to_value(&xtool).unwrap(),
+            json!({"kind": "xtool-bundle", "bundle": "/home/u/.swiftpm/swift-sdks/darwin.artifactbundle"})
+        );
+        assert_eq!(serde_json::to_value(DebugToolProvenance::ProjectPin).unwrap(), json!({"kind": "project-pin"}));
+        assert_eq!(serde_json::to_value(DebugToolComponent::GenSnapshotIos).unwrap(), json!("gen-snapshot-ios"));
+        let back: DebugToolInfo = serde_json::from_value(v).unwrap();
+        assert_eq!(back, t);
     }
 }

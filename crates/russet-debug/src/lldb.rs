@@ -15,9 +15,14 @@
 //!   [D 84]. Batch scripts are run through `command source -e false`, so a failing `--command` still reaches
 //!   the final detach or kill.
 //! - [`parse_batch_output`]: turns LLDB's echoed transcript into the `--json` result of ARCHITECTURE §8.7.
+//! - [`run_batch`] and [`batch_failure`]: a batch run with a time limit and Ctrl-C handling, and why a run that
+//!   never stopped failed (LLDB's batch mode exits 0 even when `process connect` fails; its errors go to stderr).
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -425,6 +430,185 @@ fn exited_status(line: &str) -> Option<i32> {
     after.split_whitespace().next()?.parse().ok()
 }
 
+/// What ended a batch run before LLDB finished by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchCut {
+    /// The time limit (`russet debug --timeout`) passed.
+    Timeout(Duration),
+    /// Ctrl-C.
+    Interrupted,
+}
+
+/// A finished batch run of LLDB.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BatchRun {
+    /// LLDB's exit code; `None` when a signal ended it. Batch mode exits 0 even when commands fail, so the
+    /// transcript says more ([`batch_failure`]).
+    pub code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    /// What ended the run early, if anything.
+    pub cut: Option<BatchCut>,
+    /// LLDB was still running a grace period after the session ended under it, and was killed.
+    pub killed: bool,
+}
+
+/// How long LLDB gets to finish once the session ended under it, by default.
+pub const BATCH_GRACE: Duration = Duration::from_secs(10);
+/// `russet debug --batch`'s default time limit (`--timeout`).
+pub const BATCH_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The time limits of [`run_batch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BatchLimits {
+    /// The whole run: connect, the first stop and the commands. `None`: no limit.
+    pub timeout: Option<Duration>,
+    /// How long LLDB gets to exit after the session ended under it.
+    pub grace: Duration,
+}
+
+impl Default for BatchLimits {
+    fn default() -> Self {
+        Self { timeout: Some(BATCH_TIMEOUT), grace: BATCH_GRACE }
+    }
+}
+
+/// Runs LLDB in batch mode: stdin closed, output captured, and on Unix in its own process group, so a terminal
+/// Ctrl-C reaches only Russet, which decides what happens. When the time limit passes or `interrupt` resolves
+/// first, `end_session` ends the session under LLDB (`run.stop`): the broker kills or detaches the app and drops
+/// LLDB's connection, so a `process continue` that waits for a stop returns, and the script's remaining commands
+/// fail fast. LLDB then gets `limits.grace` to exit before it is killed.
+pub async fn run_batch<I, E, F>(
+    mut cmd: tokio::process::Command,
+    limits: BatchLimits,
+    interrupt: I,
+    end_session: E,
+) -> std::io::Result<BatchRun>
+where
+    I: Future<Output = ()>,
+    E: FnOnce(BatchCut) -> F,
+    F: Future<Output = ()>,
+{
+    use tokio::io::AsyncReadExt as _;
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    #[cfg(unix)]
+    cmd.process_group(0);
+    let mut child = cmd.spawn()?;
+    let drain = |pipe: Option<Box<dyn tokio::io::AsyncRead + Send + Unpin>>| {
+        tokio::spawn(async move {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf).await;
+            }
+            buf
+        })
+    };
+    let out = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn tokio::io::AsyncRead + Send + Unpin>));
+    let err = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn tokio::io::AsyncRead + Send + Unpin>));
+    let timeout = limits.timeout;
+    let deadline = async {
+        match timeout {
+            Some(t) => tokio::time::sleep(t).await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::pin!(interrupt, deadline);
+    let (status, cut) = tokio::select! {
+        status = child.wait() => (Some(status?), None),
+        () = &mut deadline => (None, Some(BatchCut::Timeout(timeout.unwrap_or_default()))),
+        () = &mut interrupt => (None, Some(BatchCut::Interrupted)),
+    };
+    let mut killed = false;
+    let status = match (status, cut) {
+        (Some(status), _) => status,
+        (None, cut) => {
+            if let Some(cut) = cut {
+                end_session(cut).await;
+            }
+            match tokio::time::timeout(limits.grace, child.wait()).await {
+                Ok(status) => status?,
+                Err(_) => {
+                    killed = true;
+                    child.kill().await?;
+                    child.wait().await?
+                }
+            }
+        }
+    };
+    let collect = |h: tokio::task::JoinHandle<Vec<u8>>| async move {
+        // A grandchild could hold a pipe open; never wait for it long.
+        let abort = h.abort_handle();
+        match tokio::time::timeout(Duration::from_secs(2), h).await {
+            Ok(Ok(b)) => String::from_utf8_lossy(&b).into_owned(),
+            _ => {
+                abort.abort();
+                String::new()
+            }
+        }
+    };
+    let (stdout, stderr) = (collect(out).await, collect(err).await);
+    Ok(BatchRun { code: status.code(), stdout, stderr, cut, killed })
+}
+
+/// Why a batch run did not do its job, if it did not: stop at the first stop and run the commands there
+/// (ARCHITECTURE §8.7). In order:
+///
+/// - Ctrl-C: `core.cancelled` (exit 130);
+/// - the time limit: `debug.batchTimeout`;
+/// - no stop: `debug.processExited` when LLDB saw the app exit first, `debug.lldbUnsupported` when LLDB lacks
+///   the platform, else `debug.brokerLost` (LLDB could not reach the session's broker, or lost it).
+///
+/// `details` carries LLDB's first error lines and its exit status.
+pub fn batch_failure(t: &BatchTranscript, run: &BatchRun) -> Option<russet_core::Error> {
+    use russet_core::error::codes;
+    let lldb_errors: Vec<&str> = run.stderr.lines().filter(|l| l.starts_with("error:")).take(8).collect();
+    let mut details = serde_json::json!({
+        "stopped": t.stop.is_some(),
+        "lldbErrors": lldb_errors,
+        "lldbExit": run.code,
+        "lldbKilled": run.killed,
+    });
+    match run.cut {
+        Some(BatchCut::Interrupted) => {
+            return Some(russet_core::Error::new(codes::core::CANCELLED, "interrupted: the batch was stopped"));
+        }
+        Some(BatchCut::Timeout(limit)) => {
+            details["timeoutSecs"] = limit.as_secs().into();
+            let what = if t.stop.is_some() { "finish its commands" } else { "stop" };
+            return Some(
+                crate::errors::error(
+                    codes::debug::BATCH_TIMEOUT,
+                    format!("the batch did not {what} within {} s", limit.as_secs()),
+                )
+                .with_details(details),
+            );
+        }
+        None => {}
+    }
+    if t.stop.is_some() {
+        return None;
+    }
+    if t.exited {
+        let status = t.exit_status.map(|s| format!(" with status {s}")).unwrap_or_default();
+        return Some(
+            crate::errors::error(codes::debug::PROCESS_EXITED, format!("the app exited{status} before it stopped"))
+                .with_hint("Check the --break FILE:LINE, and the app's output with `russet logs --session`.")
+                .with_details(details),
+        );
+    }
+    if run.stderr.contains("unable to find a plug-in for the platform") {
+        return Some(
+            crate::errors::error(codes::debug::LLDB_UNSUPPORTED, "this LLDB has no remote-ios platform")
+                .with_details(details),
+        );
+    }
+    Some(
+        crate::errors::error(codes::debug::BROKER_LOST, "LLDB never stopped the app: it could not reach the broker")
+            .with_hint("Check the session with `russet sessions` and run again; LLDB's errors are in the details.")
+            .with_details(details),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,6 +784,100 @@ Process 1134583 detached
         let t = parse_batch_output(out, &["frame info".to_owned()]);
         assert!(t.commands[0].output.starts_with("frame #0:"), "{:?}", t.commands);
         assert_eq!(t.stop.unwrap_or_else(|| unreachable!()).frame.line, Some(12));
+    }
+
+    #[cfg(unix)]
+    fn sh(script: &str) -> tokio::process::Command {
+        let mut c = tokio::process::Command::new("sh");
+        c.arg("-c").arg(script);
+        c
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_batch_run_captures_lldbs_output_and_status() {
+        let run = run_batch(
+            sh("echo out; echo 'error: x' >&2; exit 3"),
+            BatchLimits::default(),
+            std::future::pending(),
+            |_| async {},
+        )
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!((run.code, run.stdout.as_str(), run.stderr.as_str()), (Some(3), "out\n", "error: x\n"));
+        assert_eq!((run.cut, run.killed), (None, false));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_time_limit_ends_the_session_and_lldb_follows() {
+        let flag = std::env::temp_dir().join(format!("russet-batch-{}", std::process::id()));
+        let _ = std::fs::remove_file(&flag);
+        let mut cmd = sh("while [ ! -e \"$F\" ]; do sleep 0.02; done; echo 'Process 7 exited with status = -1'");
+        cmd.env("F", &flag);
+        let limits = BatchLimits { timeout: Some(Duration::from_millis(200)), grace: Duration::from_secs(10) };
+        let ended = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let seen = std::sync::Arc::clone(&ended);
+        let f = flag.clone();
+        let run = run_batch(cmd, limits, std::future::pending(), move |cut| async move {
+            // What run.stop does to LLDB: its connection drops and `process continue` returns.
+            *seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(cut);
+            let _ = std::fs::write(&f, b"");
+        })
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+        let _ = std::fs::remove_file(&flag);
+        let cut = Some(BatchCut::Timeout(Duration::from_millis(200)));
+        assert_eq!(*ended.lock().unwrap_or_else(std::sync::PoisonError::into_inner), cut);
+        assert_eq!((run.cut, run.killed, run.code), (cut, false, Some(0)));
+        assert!(run.stdout.contains("exited"));
+        let e = batch_failure(&parse_batch_output(&run.stdout, &[]), &run).unwrap_or_else(|| unreachable!());
+        assert_eq!(e.code(), russet_core::error::codes::debug::BATCH_TIMEOUT);
+        assert_eq!(e.to_data().details.unwrap_or_default()["timeoutSecs"], 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_interrupt_cuts_the_run_and_a_stuck_lldb_is_killed() {
+        let started = std::time::Instant::now();
+        let limits = BatchLimits { timeout: None, grace: Duration::from_millis(300) };
+        let interrupt = tokio::time::sleep(Duration::from_millis(100));
+        let run = run_batch(sh("trap '' INT TERM; sleep 30"), limits, interrupt, |_| async {})
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!((run.cut, run.killed, run.code), (Some(BatchCut::Interrupted), true, None));
+        assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+        let e = batch_failure(&BatchTranscript::default(), &run).unwrap_or_else(|| unreachable!());
+        assert_eq!(e.code(), russet_core::error::codes::core::CANCELLED);
+    }
+
+    #[test]
+    fn batch_failures_name_what_went_wrong() {
+        use russet_core::error::codes;
+        let run = |stderr: &str| BatchRun { code: Some(0), stderr: stderr.into(), ..BatchRun::default() };
+        let code = |t: &BatchTranscript, r: &BatchRun| batch_failure(t, r).map(|e| e.code());
+        // The batch stopped: success, whatever LLDB's errors (a failing --command is part of the output).
+        let stopped = parse_batch_output(TRANSCRIPT, &[]);
+        assert_eq!(code(&stopped, &run("error: no variable named 'nothing'")), None);
+        // The app exited before any stop.
+        let exited = BatchTranscript { exited: true, exit_status: Some(0), ..BatchTranscript::default() };
+        assert_eq!(code(&exited, &run("")), Some(codes::debug::PROCESS_EXITED));
+        // LLDB without the platform; LLDB that could not reach the broker (captured from LLDB 21.0.0).
+        let none = BatchTranscript::default();
+        let platform = run("error: unable to find a plug-in for the platform named \"remote-ios\"\n");
+        assert_eq!(code(&none, &platform), Some(codes::debug::LLDB_UNSUPPORTED));
+        let unreachable = run("error: No such file or directory\nerror: Process must be launched.\n");
+        let e = batch_failure(&none, &unreachable).unwrap_or_else(|| unreachable!());
+        assert_eq!(e.code(), codes::debug::BROKER_LOST);
+        let details = e.to_data().details.unwrap_or_default();
+        assert_eq!(details["lldbErrors"][0], "error: No such file or directory");
+        assert_eq!(details["stopped"], false);
+        // A timeout after the stop says so.
+        let late = BatchRun { cut: Some(BatchCut::Timeout(Duration::from_secs(120))), ..run("") };
+        let e = batch_failure(&stopped, &late).unwrap_or_else(|| unreachable!());
+        assert_eq!(e.code(), codes::debug::BATCH_TIMEOUT);
+        assert!(e.message().contains("finish its commands within 120 s"), "{}", e.message());
+        assert!(e.hint().is_some());
     }
 
     #[test]

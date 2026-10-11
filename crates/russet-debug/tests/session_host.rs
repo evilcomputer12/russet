@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::HostDevice;
-use russet_debug::lldb::{self, BatchEnd, BatchSpec, Breakpoint, InitSettings, LldbPlatform};
+use russet_debug::lldb::{self, BatchCut, BatchEnd, BatchLimits, BatchSpec, Breakpoint, InitSettings, LldbPlatform};
 use russet_debug::logs::OutputFilter;
 use russet_debug::{
     AttachMode, DebugConfig, DebugRequest, DebugService, DebugTarget, DebuggerState, Frontend, RunRequest,
@@ -81,6 +81,7 @@ fn debug_request(f: &Fixture, lease: SessionLease, attach_mode: AttachMode) -> D
         stop_on_entry: false,
         frontend: Frontend::LldbCli,
         attach_mode,
+        flavor: russet_protocol::debug::DebuggerFlavor::Swift,
         lldb: Some(lldb_tool(&f.tools)),
         lldb_dap: None,
         target: DebugTarget {
@@ -95,14 +96,27 @@ fn debug_request(f: &Fixture, lease: SessionLease, attach_mode: AttachMode) -> D
     }
 }
 
-/// What `russet debug --batch` does after `debug.prepare`: append breakpoints, continue, probe, commands, end.
-async fn run_batch(f: &Fixture, prepared: &russet_debug::PreparedDebug, end: BatchEnd) -> lldb::BatchTranscript {
+/// What `russet debug --batch` does after `debug.prepare`: append breakpoints, continue, probe, commands, end,
+/// through the CLI's runner (`lldb::run_batch`), with `on_cut` standing in for its `run.stop`.
+async fn run_script<I, E, F>(
+    f: &Fixture,
+    prepared: &russet_debug::PreparedDebug,
+    bps: &[Breakpoint],
+    end: BatchEnd,
+    limits: BatchLimits,
+    interrupt: I,
+    on_cut: E,
+) -> (lldb::BatchTranscript, lldb::BatchRun)
+where
+    I: std::future::Future<Output = ()>,
+    E: FnOnce(BatchCut) -> F,
+    F: std::future::Future<Output = ()>,
+{
     let commands = vec!["frame variable probeValue".to_owned()];
-    let bps = vec![Breakpoint { file: "probe.c".into(), line: f.line }];
     let script = lldb::session_script(
         &prepared.lldb.init_commands,
         &prepared.lldb.attach_commands,
-        &bps,
+        bps,
         false,
         Some(&BatchSpec { commands: commands.clone(), end }),
     );
@@ -111,12 +125,26 @@ async fn run_batch(f: &Fixture, prepared: &russet_debug::PreparedDebug, end: Bat
     }
     let path = f.dir.join(format!("batch-{}.lldb", prepared.session.id()));
     std::fs::write(&path, lldb::script_text(&script)).unwrap();
-    let run = common::run_lldb(&f.tools, &lldb::batch_args(&path), Duration::from_secs(90)).await;
-    assert_eq!(run.status, Some(0), "{}\n{}", run.stdout, run.stderr);
-    if std::env::var_os("RUSSET_TEST_SHOW_LLDB").is_some() {
-        eprintln!("{}", run.stdout);
+    let mut cmd = tokio::process::Command::new(&f.tools.lldb);
+    cmd.args(lldb::batch_args(&path));
+    for (k, v) in &f.tools.env {
+        cmd.env(k, v);
     }
-    lldb::parse_batch_output(&run.stdout, &commands)
+    let run = lldb::run_batch(cmd, limits, interrupt, on_cut).await.unwrap();
+    if std::env::var_os("RUSSET_TEST_SHOW_LLDB").is_some() {
+        eprintln!("{}\n{}", run.stdout, run.stderr);
+    }
+    (lldb::parse_batch_output(&run.stdout, &commands), run)
+}
+
+/// A batch to the breakpoint on the probe's marker line, with a 90 s limit.
+async fn run_batch(f: &Fixture, prepared: &russet_debug::PreparedDebug, end: BatchEnd) -> lldb::BatchTranscript {
+    let bps = vec![Breakpoint { file: "probe.c".into(), line: f.line }];
+    let limits = BatchLimits { timeout: Some(Duration::from_secs(90)), ..BatchLimits::default() };
+    let (t, run) = run_script(f, prepared, &bps, end, limits, std::future::pending(), |_| async {}).await;
+    assert_eq!((run.code, run.cut), (Some(0), None), "{}\n{}", run.stdout, run.stderr);
+    assert!(lldb::batch_failure(&t, &run).is_none(), "{}\n{}", run.stdout, run.stderr);
+    t
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -193,6 +221,61 @@ async fn batch_without_detach_kills_the_app_and_ends_exited() {
     )
     .unwrap();
     assert_eq!(record["state"], "exited");
+}
+
+/// A breakpoint that never resolves (W9's failure mode): the time limit ends the session under LLDB, LLDB's
+/// blocked `process continue` returns, and the run fails with `debug.batchTimeout`; the app is killed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_batch_that_never_stops_times_out_and_kills_the_app() {
+    let Some(f) = fixture("batch timeout") else { return };
+    let prepared = f.svc.prepare_debug(debug_request(&f, SessionLease::Owned, AttachMode::Broker)).await.unwrap();
+    let s = prepared.session.clone();
+    let never = vec![Breakpoint { file: "nosuch.c".into(), line: 1 }];
+    let limits = BatchLimits { timeout: Some(Duration::from_secs(3)), grace: Duration::from_secs(20) };
+    let started = std::time::Instant::now();
+    let session = s.clone();
+    let (t, run) =
+        run_script(&f, &prepared, &never, BatchEnd::Kill, limits, std::future::pending(), |cut| async move {
+            assert!(matches!(cut, BatchCut::Timeout(_)));
+            session.terminate(TerminateMode::Kill).await.unwrap();
+        })
+        .await;
+    assert_eq!(run.cut, Some(BatchCut::Timeout(Duration::from_secs(3))));
+    assert!(!run.killed, "LLDB exits by itself once the session ended: {}\n{}", run.stdout, run.stderr);
+    assert!(started.elapsed() < Duration::from_secs(15), "{:?}", started.elapsed());
+    assert!(t.stop.is_none());
+    let e = lldb::batch_failure(&t, &run).expect("a failure");
+    assert_eq!(e.code(), russet_core::error::codes::debug::BATCH_TIMEOUT);
+    assert_eq!(e.code().exit_code(), 9);
+    assert!(common::eventually(Duration::from_secs(5), || !process_alive(prepared.pid)).await);
+    assert_eq!(s.summary().state, WireSessionState::Exited);
+}
+
+/// Ctrl-C with `--detach`: the session is ended with `run.stop {mode: detach}` under LLDB; LLDB exits, the app
+/// keeps running untracked, and the run reports `core.cancelled`.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_detached_batch_leaves_the_app_running() {
+    let Some(f) = fixture("batch interrupt") else { return };
+    let prepared = f.svc.prepare_debug(debug_request(&f, SessionLease::Detached, AttachMode::Broker)).await.unwrap();
+    let s = prepared.session.clone();
+    let never = vec![Breakpoint { file: "nosuch.c".into(), line: 1 }];
+    let limits = BatchLimits { timeout: None, grace: Duration::from_secs(20) };
+    let interrupt = tokio::time::sleep(Duration::from_secs(2));
+    let session = s.clone();
+    let (t, run) = run_script(&f, &prepared, &never, BatchEnd::Detach, limits, interrupt, |cut| async move {
+        assert_eq!(cut, BatchCut::Interrupted);
+        session.terminate(TerminateMode::Detach).await.unwrap();
+    })
+    .await;
+    assert_eq!((run.cut, run.killed), (Some(BatchCut::Interrupted), false), "{}\n{}", run.stdout, run.stderr);
+    let e = lldb::batch_failure(&t, &run).expect("a failure");
+    assert_eq!(e.code(), russet_core::error::codes::core::CANCELLED);
+    // The broker removed LLDB's (pending) breakpoint and detached: the app runs on, its heartbeat continues.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(process_alive(prepared.pid), "the app keeps running after a detach");
+    assert!(s.is_ended());
+    let _ = std::process::Command::new("kill").args(["-9", &prepared.pid.to_string()]).status();
+    assert!(common::eventually(Duration::from_secs(5), || !process_alive(prepared.pid)).await);
 }
 
 #[tokio::test(flavor = "multi_thread")]

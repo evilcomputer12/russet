@@ -111,6 +111,7 @@ fn request(lease: SessionLease) -> DebugRequest {
         stop_on_entry: false,
         frontend: Frontend::LldbCli,
         attach_mode: AttachMode::Broker,
+        flavor: russet_protocol::debug::DebuggerFlavor::Swift,
         lldb: None,
         lldb_dap: None,
         target: DebugTarget {
@@ -176,6 +177,79 @@ async fn a_failed_attach_kills_the_suspended_app_and_fails_the_session() {
     let summaries = svc.sessions();
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].state, WireSessionState::Failed);
+}
+
+/// Nobody connects within the handoff limit: the broker kills the app and the session ends `failed` with
+/// `debug.handoffTimeout` (6007), which `session.json`, the output and `SessionHandle::error` report. The record
+/// also carries RD §21's device, app, launch, broker and LLDB fields.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_handoff_timeout_fails_the_session_with_its_error_and_session_json_has_rd_21s_fields() {
+    let dir = common::scratch("sf-handoff");
+    let dev = fake_device(932);
+    let cfg = DebugConfig {
+        runtime_dir: dir.join("run"),
+        state_dir: Some(dir.join("state")),
+        broker: russet_debug::broker::BrokerOptions {
+            handoff_timeout: Some(Duration::from_millis(300)),
+            ..Default::default()
+        },
+        ..DebugConfig::default()
+    };
+    let svc = DebugService::new(dev.clone(), cfg);
+    let exe = dir.join("RussetProbe");
+    std::fs::write(&exe, macho::synthetic_ios_executable([9; 16])).unwrap();
+    let mut r = request(SessionLease::Detached);
+    r.target.local_executable = exe;
+    r.run.process_name = Some("RussetProbe".into());
+    r.lldb = Some(russet_toolchain::ToolInfo {
+        component: russet_toolchain::Component::Lldb,
+        version: "21.0.0".into(),
+        path: "/usr/lib/swift/usr/bin/lldb".into(),
+        provenance: russet_toolchain::Provenance::System,
+        env: [("PYTHONHOME".to_owned(), "/u/python/cpython-3.12.15-linux-x86_64-gnu".to_owned())].into(),
+        ok: true,
+        problems: vec![],
+    });
+    let prepared = svc.prepare_debug(r).await.unwrap();
+    let s = prepared.session.clone();
+    let end = s.wait_for(Duration::from_secs(10), SessionState::is_final).await;
+    assert_eq!(end, SessionState::Failed);
+    let err = s.error().expect("the session knows why it failed");
+    assert_eq!((err.code, err.russet_code.as_str()), (6007, "debug.handoffTimeout"));
+    assert!(err.message.contains("within 0 s") || err.message.contains("within"), "{}", err.message);
+    assert!(err.hint.is_some());
+    assert!(dev.fake.wait_for(Duration::from_secs(5), |r| r.killed), "the broker stopped the app");
+    // The output says so, in a form clients read back.
+    let (entries, _) = s.logs().query(None, None, &Default::default());
+    let reported: Vec<_> = entries.iter().filter_map(russet_debug::logs::parse_error_entry).collect();
+    assert_eq!(reported, std::slice::from_ref(&err));
+    // session.json (RD §21).
+    let record: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.join("state/sessions").join(s.id().as_str()).join("session.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(record["schema"], 1);
+    assert_eq!(record["kind"], "debug");
+    assert_eq!(record["device"]["productType"], "iPhone13,2");
+    assert_eq!(record["device"]["productVersion"], "27.0");
+    assert_eq!(record["device"]["buildVersion"], "24A437");
+    assert_eq!(record["device"]["transport"], "usb");
+    assert_eq!(record["app"]["bundleId"], "dev.russet.test.probe");
+    assert_eq!(record["app"]["devicePath"], "/private/var/containers/Bundle/Application/1C2/RussetProbe.app");
+    assert_eq!(record["app"]["executable"], "RussetProbe");
+    assert_eq!(record["app"]["uuid"], "09090909-0909-0909-0909-090909090909");
+    assert_eq!(record["pid"], 932);
+    assert_eq!(record["launch"], "auto");
+    assert!(record["broker"]["lldbUrl"].as_str().unwrap().starts_with("unix-connect:///"));
+    assert_eq!(
+        record["lldb"],
+        serde_json::json!({"flavor": "swift", "version": "21.0.0", "python": "cpython-3.12.15-linux-x86_64-gnu"})
+    );
+    assert!(record["jit"].is_null());
+    assert!(record["endedAt"].is_string());
+    assert_eq!(record["outcome"]["state"], "failed");
+    assert_eq!(record["outcome"]["error"]["russetCode"], "debug.handoffTimeout");
+    assert_eq!(record["outcome"]["error"]["code"], 6007);
 }
 
 /// A device whose app console the test controls, with the fake debugserver behind it.

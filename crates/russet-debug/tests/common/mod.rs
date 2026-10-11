@@ -143,6 +143,15 @@ impl DeviceServices for FakeDevice {
         self.signals.lock().unwrap().push((pid, sig));
         Ok(())
     }
+
+    async fn describe(&self, _udid: &Udid) -> Result<Option<russet_debug::DeviceFacts>> {
+        Ok(Some(russet_debug::DeviceFacts {
+            product_type: Some("iPhone13,2".into()),
+            product_version: Some("27.0".into()),
+            build_version: Some("24A437".into()),
+            transport: Some("usb".into()),
+        }))
+    }
 }
 
 /// Output of an LLDB run.

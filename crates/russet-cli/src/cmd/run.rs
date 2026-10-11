@@ -5,9 +5,11 @@
 //! (relaunch, reload).
 //!
 //! - `russet run` calls `run.start` (build → sign → install-if-changed → launch) and then follows the app's
-//!   output until it exits or Ctrl-C (which stops it). `--detach` prints `{sessionId, pid, bundleId}` and leaves a
-//!   detached session (§7.6); `--background` returns the job id at once. `--exit-code app` exits with the app's
-//!   status (128 + signal for signals).
+//!   output until it exits, or until Ctrl-C, which stops it and exits 130 (`core.cancelled`, §13.4). It follows by
+//!   entry number (`run.output.query {afterSeq}` → `nextSeq`), so a late os_trace entry is never skipped.
+//!   `--detach` prints `{sessionId, pid, bundleId}` and leaves a detached session (§7.6); `--background` sets the
+//!   RPC flag and prints the `{jobId}` the job layer answers. `--exit-code app` exits with the app's status
+//!   (128 + signal for signals).
 //! - `russet sessions` lists `SessionSummary` values (`--json`: `{sessions: […]}`).
 //! - `russet stop [<session> | --all]` ends sessions; `--detach` leaves the apps running.
 
@@ -20,10 +22,10 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_core::ids::SessionId;
-use russet_protocol::common::{LogEntry, SessionLease, SessionSummary};
+use russet_protocol::common::{SessionLease, SessionState, SessionSummary};
 use russet_protocol::run::{
-    InstallMode, LaunchMode, RunList, RunListParams, RunOutputQuery, RunOutputQueryParams, RunStart, RunStartParams,
-    RunStop, RunStopParams, StopMode,
+    InstallMode, LaunchMode, RunList, RunListParams, RunOutputQuery, RunOutputQueryParams, RunStart,
+    RunStartBackground, RunStartParams, RunStop, RunStopParams, SessionError, StopMode,
 };
 
 use crate::CliCtx;
@@ -179,9 +181,16 @@ fn json(v: &impl serde::Serialize) -> Result<serde_json::Value> {
 
 async fn run_app(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     let project = project_dir(cx)?;
-    let detach = m.get_flag("detach") || m.get_flag("background");
+    let background = m.get_flag("background");
+    let detach = m.get_flag("detach") || background;
     let lease = if detach { SessionLease::Detached } else { SessionLease::Owned };
     let params = start_params(m, &project, cx.global.device.clone(), lease)?;
+    if background {
+        // The job layer answers `{jobId}` at once; the job (and its detached session) outlive this process.
+        let job = cx.peer.call::<RunStartBackground>(params).await?;
+        cx.reporter.result(&json(&job)?);
+        return Ok(ExitCode::SUCCESS);
+    }
     let started = cx.peer.call::<RunStart>(params).await?;
     let Some(session_id) = started.session_id.clone() else {
         // --no-launch: built, signed, installed.
@@ -199,90 +208,109 @@ async fn run_app(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     Ok(if want_app_status { app_exit_code(summary.as_ref()) } else { ExitCode::SUCCESS })
 }
 
-/// Prints the session's output until it ends (or Ctrl-C, which stops it); returns the final summary.
-pub async fn follow(cx: &CliCtx, session_id: &SessionId) -> Result<Option<SessionSummary>> {
-    let mut cursor = OutputCursor::default();
-    loop {
-        let q = RunOutputQueryParams {
-            session_id: session_id.clone(),
-            since_ms: cursor.since_ms,
-            limit: None,
-            filter: None,
-        };
-        let out = cx.peer.call::<RunOutputQuery>(q).await?;
-        for e in cursor.fresh(out.entries) {
-            cx.reporter.result(&json(&e)?);
+/// Ctrl-C, watched from the moment this is created: SIGINT then no longer terminates `russet`, and one that arrives
+/// while the command is busy (inside an RPC call) is kept for the next [`Interrupts::recv`].
+pub struct Interrupts {
+    #[cfg(unix)]
+    inner: tokio::signal::unix::Signal,
+    #[cfg(windows)]
+    inner: tokio::signal::windows::CtrlC,
+}
+
+impl Interrupts {
+    pub fn new() -> std::io::Result<Self> {
+        #[cfg(unix)]
+        let inner = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+        #[cfg(windows)]
+        let inner = tokio::signal::windows::ctrl_c()?;
+        Ok(Self { inner })
+    }
+
+    /// Resolves at the next Ctrl-C.
+    pub async fn recv(&mut self) {
+        if self.inner.recv().await.is_none() {
+            // The runtime is shutting down: never resolve.
+            std::future::pending::<()>().await;
         }
+    }
+}
+
+/// [`Interrupts::new`] as a Russet error.
+pub fn interrupts() -> Result<Interrupts> {
+    Interrupts::new().map_err(|e| Error::new(codes::core::IO, format!("cannot watch for Ctrl-C: {e}")))
+}
+
+/// What Ctrl-C ends with: `core.cancelled`, exit 130 (ARCHITECTURE §13.4).
+pub fn cancelled() -> Error {
+    Error::new(codes::core::CANCELLED, "interrupted")
+}
+
+/// Prints the session's output until it ends; returns the final summary. Ctrl-C stops the session and returns
+/// `core.cancelled`; a session that ended `failed` or `lost` with an error returns that error.
+pub async fn follow(cx: &CliCtx, session_id: &SessionId) -> Result<Option<SessionSummary>> {
+    let mut interrupts = interrupts()?;
+    let mut after: Option<u64> = None;
+    let mut failure: Option<SessionError> = None;
+    loop {
+        print_new(cx, session_id, &mut after, &mut failure).await?;
         let list = cx.peer.call::<RunList>(RunListParams {}).await?;
         let me = list.sessions.into_iter().find(|s| &s.session_id == session_id);
         match me {
             Some(s) if s.ended_at.is_none() => {}
             other => {
                 // The app may have printed its last lines between the query and the list.
-                let q = RunOutputQueryParams {
-                    session_id: session_id.clone(),
-                    since_ms: cursor.since_ms,
-                    limit: None,
-                    filter: None,
-                };
-                if let Ok(out) = cx.peer.call::<RunOutputQuery>(q).await {
-                    for e in cursor.fresh(out.entries) {
-                        cx.reporter.result(&json(&e)?);
-                    }
+                let _ = print_new(cx, session_id, &mut after, &mut failure).await;
+                let failed =
+                    other.as_ref().is_some_and(|s| matches!(s.state, SessionState::Failed | SessionState::Lost));
+                if let (true, Some(e)) = (failed, failure) {
+                    return Err(session_error(&e));
                 }
                 return Ok(other);
             }
         }
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
+            () = interrupts.recv() => {
                 let _ = cx.peer.call::<RunStop>(RunStopParams { session_id: session_id.clone(), mode: None }).await;
-                return Ok(None);
+                return Err(cancelled());
             }
             () = tokio::time::sleep(Duration::from_millis(250)) => {}
         }
     }
 }
 
-/// Polls `run.output.query` without repeating entries: `sinceMs` is inclusive, so the entries already printed at
-/// the last millisecond are skipped.
-#[derive(Debug, Default)]
-pub struct OutputCursor {
-    pub since_ms: Option<i64>,
-    printed_at_since: usize,
-}
-
-impl OutputCursor {
-    /// The entries not printed yet, in order.
-    pub fn fresh(&mut self, entries: Vec<LogEntry>) -> Vec<LogEntry> {
-        let mut out = Vec::new();
-        let mut skip = self.printed_at_since;
-        for e in entries {
-            let ms = ts_ms(&e.ts);
-            if let (Some(since), Some(ms)) = (self.since_ms, ms) {
-                if ms < since {
-                    continue;
-                }
-                if ms == since && skip > 0 {
-                    skip -= 1;
-                    continue;
-                }
-            }
-            match (ms, self.since_ms) {
-                (Some(ms), Some(since)) if ms == since => self.printed_at_since += 1,
-                (Some(ms), _) => {
-                    self.since_ms = Some(ms);
-                    self.printed_at_since = 1;
-                }
-                (None, _) => {}
-            }
-            out.push(e);
+/// Prints the entries after `after` and moves it on; remembers the last error Russet reported for the session.
+async fn print_new(
+    cx: &CliCtx,
+    session_id: &SessionId,
+    after: &mut Option<u64>,
+    failure: &mut Option<SessionError>,
+) -> Result<()> {
+    let q = RunOutputQueryParams {
+        session_id: session_id.clone(),
+        after_seq: *after,
+        since_ms: None,
+        limit: None,
+        filter: None,
+    };
+    let out = cx.peer.call::<RunOutputQuery>(q).await?;
+    *after = Some(out.next_seq);
+    for e in &out.entries {
+        if let Some(err) = russetd::pipeline::logs::parse_error_entry(e) {
+            *failure = Some(err);
         }
-        out
+        cx.reporter.result(&json(e)?);
     }
+    Ok(())
 }
 
-fn ts_ms(ts: &str) -> Option<i64> {
-    russetd::pipeline::logs::parse_ts_ms(ts)
+/// A session's error as the CLI reports it (exit status from the code, ARCHITECTURE §13.4).
+pub fn session_error(e: &SessionError) -> Error {
+    let code = russet_core::error::ErrorCode::from_number(e.code).unwrap_or(codes::core::INTERNAL);
+    let err = Error::new(code, e.message.clone());
+    match &e.hint {
+        Some(h) => err.with_hint(h.clone()),
+        None => err,
+    }
 }
 
 /// `--exit-code app`: the app's status, 128 + signal for a signal (RD §20).
@@ -327,7 +355,7 @@ async fn stop(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use russet_protocol::common::{LogLevel, LogSource, SessionExit};
+    use russet_protocol::common::SessionExit;
 
     use super::*;
 
@@ -394,34 +422,30 @@ mod tests {
     }
 
     #[test]
-    fn the_output_cursor_never_repeats_an_entry() {
-        let e = |ts: &str, msg: &str| LogEntry {
-            ts: ts.into(),
-            source: LogSource::Stdout,
-            level: LogLevel::Default,
-            message: msg.into(),
-            pid: None,
-            tid: None,
-            process: None,
-            subsystem: None,
-            category: None,
-            image_uuid: None,
-            image_offset: None,
-            mach_ts: None,
-        };
-        let mut c = OutputCursor::default();
-        let first = c.fresh(vec![e("2026-10-11T09:00:00.100Z", "a"), e("2026-10-11T09:00:00.200Z", "b")]);
-        assert_eq!(first.len(), 2);
-        assert_eq!(c.since_ms, Some(1_791_709_200_200));
-        // The server returns everything at or after 200 ms again, plus new ones.
-        let again = c.fresh(vec![
-            e("2026-10-11T09:00:00.200Z", "b"),
-            e("2026-10-11T09:00:00.200Z", "c"),
-            e("2026-10-11T09:00:00.300Z", "d"),
-        ]);
-        let msgs: Vec<&str> = again.iter().map(|x| x.message.as_str()).collect();
-        assert_eq!(msgs, ["c", "d"]);
-        assert!(c.fresh(vec![e("2026-10-11T09:00:00.300Z", "d")]).is_empty());
+    fn session_errors_keep_their_code_and_hint() {
+        let e = session_error(&SessionError {
+            code: 6007,
+            russet_code: "debug.handoffTimeout".into(),
+            message: "no debugger connected to the broker within 60 s; the app was stopped".into(),
+            hint: Some("Connect within 60 s.".into()),
+        });
+        assert_eq!(e.code(), codes::debug::HANDOFF_TIMEOUT);
+        assert_eq!(e.code().exit_code(), 9);
+        assert_eq!(e.hint(), Some("Connect within 60 s."));
+        let unknown =
+            session_error(&SessionError { code: 1, russet_code: "x".into(), message: "m".into(), hint: None });
+        assert_eq!(unknown.code(), codes::core::INTERNAL);
+        assert_eq!(cancelled().code().exit_code(), 130);
+    }
+
+    #[test]
+    fn background_and_detach_parse() {
+        let m = parse(&["russet", "run", "--background"]);
+        let p = start_params(sub(&m, "run"), std::path::Path::new("/p"), None, SessionLease::Detached).unwrap();
+        assert_eq!((p.background, p.session_lease), (Some(true), Some(SessionLease::Detached)));
+        let m = parse(&["russet", "run", "--detach"]);
+        let p = start_params(sub(&m, "run"), std::path::Path::new("/p"), None, SessionLease::Detached).unwrap();
+        assert_eq!(p.background, None, "--detach never sets the RPC flag (§7.6)");
     }
 
     #[test]

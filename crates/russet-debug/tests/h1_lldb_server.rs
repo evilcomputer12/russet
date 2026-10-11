@@ -118,13 +118,19 @@ async fn lldb_sync_connect_through_the_broker_returns_a_stopped_process() {
             other => panic!("{other:?}"),
         }
         let url = handle.lldb_url();
+        // `platform shell date` around the connect times it without LLDB's start-up (and without Python).
+        let clock = "platform shell date +%s%N";
         let args: Vec<String> = [
             "-x",
             "-b",
             "-o",
             &format!("target create {}", common::path_str(&probe.path)),
             "-o",
+            clock,
+            "-o",
             &format!("process connect -p gdb-remote {url}"),
+            "-o",
+            clock,
             "-o",
             "process status",
             "-o",
@@ -137,7 +143,17 @@ async fn lldb_sync_connect_through_the_broker_returns_a_stopped_process() {
         assert_eq!(run.status, Some(0), "{transport}: {}\n{}", run.stdout, run.stderr);
         assert!(run.stdout.contains(&format!("Process {pid} stopped")), "{transport}: {}", run.stdout);
         assert!(run.stdout.contains("exited with status = 9"), "{transport}: {}", run.stdout);
-        // LLDB's start-up dominates; the connect itself is immediate (RD V4: ~260 ms).
+        // RD §23.2: the connect returns in < 2 s with a stopped process (RD V4 measured ~260 ms).
+        let stamps: Vec<u128> = run
+            .stdout
+            .lines()
+            .filter(|l| l.len() >= 18 && l.bytes().all(|b| b.is_ascii_digit()))
+            .map(|l| l.parse().unwrap())
+            .collect();
+        assert_eq!(stamps.len(), 2, "{transport}: {}", run.stdout);
+        let connect = Duration::from_nanos(u64::try_from(stamps[1] - stamps[0]).unwrap());
+        eprintln!("H1 {transport}: process connect through the broker took {connect:?}");
+        assert!(connect < Duration::from_secs(2), "{transport}: the connect took {connect:?}");
         assert!(run.elapsed < Duration::from_secs(20), "{transport}: {:?}", run.elapsed);
         assert!(matches!(handle.wait_for(|_| false).await, BrokerState::Exited { .. }));
         let _ = child.wait();

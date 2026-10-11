@@ -22,7 +22,16 @@
 >   the breakpoints and watchpoints the debugger set (`z0`–`z4`), so the app cannot trap on them later (§4.6).
 > - `run.output.query {sinceMs}` is Unix epoch milliseconds; the filter has `sources`, `minLevel`, `contains`,
 >   `subsystem` and `category` (no regular expressions yet). An os_trace entry is dropped as a duplicate only when
->   it arrives within 50 ms after the same stdio line (§12).
+>   it arrives within 50 ms after the same stdio line (§12). Followers page by arrival instead
+>   (`{afterSeq}` → `nextSeq`, as `job.log` does), because an os_trace entry carries the device's timestamp and
+>   can arrive after a later stdout line; a limited page resumes right after its last entry.
+> - Additions to the catalog's shapes, pending a contract PR: `run.exited` carries `error` (code, `russetCode`,
+>   message, hint) when Russet knows why a session `failed` or was `lost` (for example `debug.handoffTimeout`);
+>   the same error is also written into the session's output as a `russet` entry, so `russet run` and
+>   `russet debug` exit with its code. `debug.batchTimeout` (6017) reports a `--batch` that did not stop and finish
+>   its commands within `--timeout`. `russet run --background` reads `run.start`'s job answer (`{jobId}`).
+> - Ctrl-C in `russet run`/`russet debug --batch` stops the session and exits 130 (`core.cancelled`); batch LLDB
+>   runs in its own process group so the interrupt reaches only Russet.
 > - The prototypes are ported into `crates/russet-testkit/src/debug` (fake debugserver, synthetic Mach-O,
 >   lldb-server and LLDB discovery, `jitdemo.c`, `probe.c`, DAP client) and deleted. On the host, `probe.c
 >   --suspended` waits until a tracer attaches (a self-raised `SIGSTOP` would be re-reported to LLDB after the first

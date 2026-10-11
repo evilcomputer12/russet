@@ -463,9 +463,10 @@ async fn serve_task(
                 return;
             }
             () = handoff => {
-                emit(BrokerEvent::HandoffTimeout);
                 tracing::warn!(timeout = ?opts.handoff_timeout, "no debugger connected to the broker in time");
+                // Announced once the app is gone, so whoever ends the session on it never races the kill.
                 let _ = finish(client, TerminateMode::Kill, false, &[]).await;
+                emit(BrokerEvent::HandoffTimeout);
                 set(BrokerState::HandoffTimedOut);
                 return;
             }

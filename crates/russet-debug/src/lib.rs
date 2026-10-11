@@ -52,7 +52,7 @@ pub use russet_protocol::common::{
     AttachMode, DebuggerState, LogEntry, SessionExit, SessionKind, SessionLease, SessionState as WireSessionState,
     SessionSummary,
 };
-pub use session::{SessionHandle, new_session_id};
+pub use session::{DeviceFacts, LldbFacts, SessionFacts, SessionHandle, new_session_id};
 
 /// `async_trait`, for implementations of [`DeviceServices`] and for russetd's pipeline ports: russetd's manifest
 /// is a seam file without the crate, and the macro's expansion names only `core` and `std` items.
@@ -156,6 +156,12 @@ pub trait DeviceServices: Send + Sync {
     async fn os_log(&self, _udid: &Udid, _pid: u32) -> Result<Option<mpsc::Receiver<LogEntry>>> {
         Ok(None)
     }
+
+    /// What `session.json` records about the device (RD §21: product type, iOS version and build, transport).
+    /// `None` until the device plane maps its `DeviceInfo` here (W4's F2 fields).
+    async fn describe(&self, _udid: &Udid) -> Result<Option<DeviceFacts>> {
+        Ok(None)
+    }
 }
 
 fn only_device(m: &DeviceManager) -> Result<Udid> {
@@ -255,6 +261,8 @@ pub struct RunRequest {
     pub project: Option<PathBuf>,
     /// The process name for log entries (`CFBundleExecutable`).
     pub process_name: Option<String>,
+    /// The local build of the main executable, whose `LC_UUID` `session.json` records.
+    pub local_executable: Option<PathBuf>,
 }
 
 impl RunRequest {
@@ -268,6 +276,7 @@ impl RunRequest {
             lease: SessionLease::Owned,
             project: None,
             process_name: None,
+            local_executable: None,
         }
     }
 }
@@ -303,6 +312,8 @@ pub struct DebugRequest {
     pub stop_on_entry: bool,
     pub frontend: Frontend,
     pub attach_mode: AttachMode,
+    /// `swift` (default) or `llvm` (ARCHITECTURE §16.1), for `session.json`.
+    pub flavor: russet_protocol::debug::DebuggerFlavor,
     /// The resolved LLDB and lldb-dap (`ToolInfo.env` is applied to every LLDB child, ARCHITECTURE §16.2).
     pub lldb: Option<russet_toolchain::ToolInfo>,
     pub lldb_dap: Option<russet_toolchain::ToolInfo>,
@@ -366,10 +377,11 @@ pub enum SessionState {
 pub enum SessionEvent {
     State(SessionState),
     Debugger(DebuggerState),
-    /// The session ended (`run.exited`).
+    /// The session ended (`run.exited`), with the error when Russet knows why it failed.
     Ended {
         state: WireSessionState,
         exit: Option<SessionExit>,
+        error: Option<russet_protocol::run::SessionError>,
     },
 }
 
@@ -446,7 +458,12 @@ impl DebugService {
 
     /// Launches without a debugger.
     pub async fn run(&self, r: RunRequest) -> Result<SessionHandle> {
-        let h = self.new_session(SessionKind::Run, &r, None);
+        let facts = SessionFacts {
+            app_executable: r.process_name.clone(),
+            app_uuid: local_uuid(r.local_executable.clone()).await,
+            ..SessionFacts::default()
+        };
+        let h = self.new_session(SessionKind::Run, &r, None, facts);
         match self.run_inner(&h, r).await {
             Ok(()) => Ok(h),
             Err(e) => {
@@ -460,11 +477,13 @@ impl DebugService {
     async fn run_inner(&self, h: &SessionHandle, r: RunRequest) -> Result<()> {
         let udid = self.dev.resolve(&r.device).await?;
         h.set_udid(&udid.0);
+        self.describe_device(h, &udid).await;
         h.set_state(SessionState::Launching);
         let mut spec = LaunchSpec::new(r.bundle_id.clone(), r.args.clone(), &r.env);
         spec.strategy = r.launch;
         let mut launched = self.dev.launch(&udid, &spec).await?;
         h.set_pid(launched.pid);
+        record_launch(h, &launched);
         let process = ProcessRef { dev: self.devices(), udid: udid.clone(), pid: launched.pid };
         if let Err(control) = h.set_control(Control::Process(process)).await {
             session::stop_control(control).await;
@@ -481,7 +500,13 @@ impl DebugService {
 
     /// Suspended launch plus the broker attach (or a plain forward for `legacy-async`).
     pub async fn prepare_debug(&self, r: DebugRequest) -> Result<PreparedDebug> {
-        let h = self.new_session(SessionKind::Debug, &r.run, Some(r.attach_mode));
+        let facts = SessionFacts {
+            app_executable: r.run.process_name.clone(),
+            app_uuid: local_uuid(Some(r.target.local_executable.clone())).await,
+            lldb: r.lldb.as_ref().map(|t| lldb_facts(r.flavor, t)),
+            ..SessionFacts::default()
+        };
+        let h = self.new_session(SessionKind::Debug, &r.run, Some(r.attach_mode), facts);
         match self.prepare_inner(&h, r).await {
             Ok(p) => Ok(p),
             Err(e) => {
@@ -496,6 +521,7 @@ impl DebugService {
     async fn prepare_inner(&self, h: &SessionHandle, r: DebugRequest) -> Result<PreparedDebug> {
         let udid = self.dev.resolve(&r.run.device).await?;
         h.set_udid(&udid.0);
+        self.describe_device(h, &udid).await;
         h.set_state(SessionState::Launching);
         let mut spec = LaunchSpec::new(r.run.bundle_id.clone(), r.run.args.clone(), &r.run.env);
         spec.strategy = r.run.launch;
@@ -503,6 +529,7 @@ impl DebugService {
         let mut launched = self.dev.launch(&udid, &spec).await?;
         let pid = launched.pid;
         h.set_pid(pid);
+        record_launch(h, &launched);
         // Anything that fails from here on must not leave a stopped app behind.
         let cleanup = |dev: Arc<dyn DeviceServices>, udid: Udid| async move {
             let _ = dev.signal(&udid, pid, 9).await;
@@ -535,6 +562,7 @@ impl DebugService {
         let (endpoint, lldb_url) = match r.attach_mode {
             AttachMode::Broker => {
                 let opts = self.cfg.broker.clone();
+                let opts_handoff = opts.handoff_timeout;
                 let mut b = match Broker::connect(stream, opts).await {
                     Ok(b) => b,
                     Err(e) => {
@@ -557,7 +585,8 @@ impl DebugService {
                 };
                 let endpoint = handle.endpoint().clone();
                 let url = handle.lldb_url();
-                follow_broker(h.clone(), handle.subscribe(), self.devices(), udid.clone(), pid);
+                let ends = BrokerEnds { dev: self.devices(), udid: udid.clone(), pid, handoff: opts_handoff };
+                follow_broker(h.clone(), handle.subscribe(), ends);
                 let process = ProcessRef { dev: self.devices(), udid: udid.clone(), pid };
                 if let Err(control) = h.set_control(Control::Broker { handle, process }).await {
                     session::stop_control(control).await;
@@ -633,6 +662,7 @@ impl DebugService {
             None => (PathBuf::from("lldb"), BTreeMap::new()),
         };
         let args = attach_script.as_deref().map(lldb::interactive_args).unwrap_or_default();
+        h.update_facts(|f| f.lldb_url = Some(lldb_url.clone()));
         h.set_state(SessionState::Ready);
         Ok(PreparedDebug {
             session: h.clone(),
@@ -672,7 +702,13 @@ impl DebugService {
         lock(&self.sessions).values().cloned().collect()
     }
 
-    fn new_session(&self, kind: SessionKind, r: &RunRequest, attach_mode: Option<AttachMode>) -> SessionHandle {
+    fn new_session(
+        &self,
+        kind: SessionKind,
+        r: &RunRequest,
+        attach_mode: Option<AttachMode>,
+        facts: SessionFacts,
+    ) -> SessionHandle {
         let h = SessionHandle::create(SessionInit {
             id: new_session_id(),
             kind,
@@ -682,6 +718,7 @@ impl DebugService {
             attach_mode,
             state_dir: self.cfg.state_dir.clone(),
             log_capacity: self.cfg.log_capacity,
+            facts,
         });
         let _ = self.created.send(h.clone());
         let mut map = lock(&self.sessions);
@@ -694,6 +731,15 @@ impl DebugService {
             }
         }
         h
+    }
+
+    /// Records the device's facts for `session.json`; a device plane that cannot describe it is not an error.
+    async fn describe_device(&self, h: &SessionHandle, udid: &Udid) {
+        match self.dev.describe(udid).await {
+            Ok(Some(facts)) => h.update_facts(|f| f.device = facts),
+            Ok(None) => {}
+            Err(e) => tracing::debug!(error = %e, "no device facts for session.json"),
+        }
     }
 
     fn endpoint_spec(&self, sid: &SessionId) -> EndpointSpec {
@@ -769,6 +815,42 @@ impl Drop for RuntimeDirGuard {
     }
 }
 
+/// The local executable's `LC_UUID` (read off the async threads); `None` when unknown.
+async fn local_uuid(path: Option<PathBuf>) -> Option<String> {
+    let path = path?;
+    tokio::task::spawn_blocking(move || macho::identity(&path).ok().flatten().and_then(|id| id.uuid)).await.ok()?
+}
+
+/// `session.json`'s `lldb`: the flavor, the version and the libpython (`PYTHONHOME`'s last component).
+fn lldb_facts(flavor: russet_protocol::debug::DebuggerFlavor, t: &russet_toolchain::ToolInfo) -> LldbFacts {
+    let python = t.env.get("PYTHONHOME").and_then(|home| {
+        Path::new(home).file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| !n.is_empty())
+    });
+    let flavor = match flavor {
+        russet_protocol::debug::DebuggerFlavor::Swift => "swift",
+        russet_protocol::debug::DebuggerFlavor::Llvm => "llvm",
+    };
+    LldbFacts { flavor: flavor.to_owned(), version: t.version.clone(), python }
+}
+
+/// What the launch told `session.json`: the strategy, the app's directory and executable on the device.
+fn record_launch(h: &SessionHandle, launched: &Launched) {
+    let strategy = match launched.strategy {
+        LaunchStrategy::Auto => "auto",
+        LaunchStrategy::CoreDevice => "coredevice",
+        LaunchStrategy::Dvt => "dvt",
+    };
+    let dir = launched.device_app_dir();
+    let exe = launched.executable.as_deref().and_then(|e| e.rsplit('/').next()).map(str::to_owned);
+    h.update_facts(|f| {
+        f.launch = Some(strategy.to_owned());
+        f.app_device_path = dir.or(f.app_device_path.take());
+        if f.app_executable.is_none() {
+            f.app_executable = exe;
+        }
+    });
+}
+
 /// A stop (`run.stop`, the owner leaving) arrived while the session was still launching.
 fn stopped_while_launching() -> Error {
     Error::new(codes::core::CANCELLED, "the session was stopped while it launched")
@@ -798,14 +880,17 @@ fn watch_exit(
     }
 }
 
-/// Maps broker events onto the session.
-fn follow_broker(
-    h: SessionHandle,
-    mut events: broadcast::Receiver<BrokerEvent>,
+/// What [`follow_broker`] needs once the broker lets go: the process, and the handoff limit for the error.
+struct BrokerEnds {
     dev: Arc<dyn DeviceServices>,
     udid: Udid,
     pid: u32,
-) {
+    handoff: Option<Duration>,
+}
+
+/// Maps broker events onto the session.
+fn follow_broker(h: SessionHandle, mut events: broadcast::Receiver<BrokerEvent>, ends: BrokerEnds) {
+    let BrokerEnds { dev, udid, pid, handoff } = ends;
     tokio::spawn(async move {
         loop {
             let e = match events.recv().await {
@@ -843,11 +928,11 @@ fn follow_broker(
                     return;
                 }
                 BrokerEvent::Lost => {
-                    h.end(SessionState::Lost, None);
+                    h.end_failed(SessionState::Lost, &errors::session_lost());
                     return;
                 }
                 BrokerEvent::HandoffTimeout => {
-                    h.end(SessionState::Failed, None);
+                    h.end_failed(SessionState::Failed, &errors::handoff_timeout(handoff));
                     return;
                 }
             }

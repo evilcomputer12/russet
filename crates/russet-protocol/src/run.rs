@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use russet_core::ids::{SessionId, SubscriptionId};
+use russet_core::ids::{JobId, SessionId, SubscriptionId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -111,6 +111,28 @@ crate::rpc_method!(
     Permission::Device, long_running
 );
 
+/// What `run.start` answers with `background: true` (ARCHITECTURE §7.6): the job, whose result `job.wait` returns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RunStartJob {
+    pub job_id: JobId,
+}
+
+/// `run.start` with `background: true`, typed for the job layer's `{jobId}` answer. Not a method of its own (it is
+/// not in [`METHODS`]): the daemon serves `run.start` ([`RunStart`]), and a client that sets `background` calls
+/// through this marker to read the answer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct RunStartBackground;
+
+impl crate::Method for RunStartBackground {
+    const NAME: &'static str = "run.start";
+    const PERMISSION: crate::Permission = crate::Permission::Device;
+    const CONFIRM: crate::Confirm = crate::Confirm::Plain;
+    const LONG_RUNNING: bool = true;
+    type Params = RunStartParams;
+    type Result = RunStartJob;
+}
+
 /// Params of `run.list`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -192,6 +214,11 @@ impl OutputFilter {
 #[serde(rename_all = "camelCase")]
 pub struct RunOutputQueryParams {
     pub session_id: SessionId,
+    /// Only entries numbered after this one: the previous result's `nextSeq` (entries are numbered in the order
+    /// they arrive; followers page by number, as `job.log` does, because os_trace timestamps come from the device).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub after_seq: Option<u64>,
     /// Only entries at or after this time: Unix epoch milliseconds (compare `LogEntry.ts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
@@ -213,6 +240,10 @@ pub struct RunOutputQueryResult {
     /// How many entries the session's 10,000-entry buffer has dropped so far.
     #[ts(type = "number")]
     pub dropped: u64,
+    /// The number of the newest entry the session holds (0 before the first): pass it as `afterSeq` to continue.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub next_seq: u64,
 }
 crate::rpc_method!(
     /// `run.output.query` (class `read`). W7 (Wave 1).
@@ -317,6 +348,21 @@ crate::rpc_notification!(
     RunOutputParams
 );
 
+/// Why a session failed, when Russet knows: the error of ARCHITECTURE §13.1 in the shape the CLI's `--json`
+/// prints, for example `debug.handoffTimeout` when no debugger took over the broker in time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionError {
+    /// The Russet number, for example `6007`.
+    pub code: i32,
+    /// The stable name, for example `debug.handoffTimeout`.
+    pub russet_code: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hint: Option<String>,
+}
+
 /// Params of the `run.exited` notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -336,6 +382,10 @@ pub struct RunExitedParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub crash_id: Option<String>,
+    /// Why the session failed (state `failed` or `lost`), when Russet knows (an addition to the catalog's fields).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<SessionError>,
 }
 crate::rpc_notification!(
     /// `run.exited` (daemon → client). W7.
@@ -400,8 +450,14 @@ mod tests {
             "sinceMs": 1791709200123i64, "limit": 50, "filter": {"sources": ["stdout"], "minLevel": "error"}}))
         .unwrap();
         assert_eq!(q.since_ms, Some(1_791_709_200_123));
+        assert_eq!(q.after_seq, None);
         let f = q.filter.unwrap();
         assert_eq!(f.sources, Some(vec![LogSource::Stdout]));
+        let follow: RunOutputQueryParams =
+            serde_json::from_value(json!({"sessionId": "ses_01J00000000000000000000000", "afterSeq": 41})).unwrap();
+        assert_eq!(follow.after_seq, Some(41));
+        let page = RunOutputQueryResult { entries: vec![], dropped: 0, next_seq: 41 };
+        assert_eq!(serde_json::to_value(&page).unwrap(), json!({"entries": [], "dropped": 0, "nextSeq": 41}));
         let stop: RunStopParams =
             serde_json::from_value(json!({"sessionId": "ses_01J00000000000000000000000", "mode": "detach"})).unwrap();
         assert_eq!(stop.mode, Some(StopMode::Detach));
@@ -412,12 +468,38 @@ mod tests {
             code: None,
             signal: Some(11),
             crash_id: None,
+            error: None,
         };
         assert_eq!(
             serde_json::to_value(&exited).unwrap(),
             json!({"subscriptionId": "sub_01J00000000000000000000000", "sessionId": "ses_01J00000000000000000000000",
                    "state": "crashed", "signal": 11})
         );
+        let failed = RunExitedParams {
+            state: Some(SessionState::Failed),
+            signal: None,
+            error: Some(SessionError {
+                code: 6007,
+                russet_code: "debug.handoffTimeout".into(),
+                message: "no debugger connected within 60 s".into(),
+                hint: Some("Run `russet debug` again.".into()),
+            }),
+            ..exited
+        };
+        let v = serde_json::to_value(&failed).unwrap();
+        assert_eq!(v["error"]["russetCode"], "debug.handoffTimeout");
+        assert_eq!(v["error"]["code"], 6007);
+    }
+
+    #[test]
+    fn a_background_start_is_the_same_method_with_a_job_answer() {
+        use crate::Method;
+        assert_eq!(RunStartBackground::NAME, RunStart::NAME);
+        assert_eq!(RunStartBackground::PERMISSION, RunStart::PERMISSION);
+        assert_eq!(RunStartBackground::LONG_RUNNING, RunStart::LONG_RUNNING);
+        assert_eq!(METHODS.iter().filter(|m| m.name == "run.start").count(), 1, "registered once");
+        let job: RunStartJob = serde_json::from_value(json!({"jobId": "job_01J00000000000000000000000"})).unwrap();
+        assert_eq!(serde_json::to_value(&job).unwrap(), json!({"jobId": "job_01J00000000000000000000000"}));
     }
 
     #[test]
@@ -457,6 +539,8 @@ mod tests {
         let start = <RunStartParams as TS>::decl(&cfg);
         assert!(start.contains("project: string") && start.contains("sessionLease?: SessionLease"), "{start}");
         let q = <RunOutputQueryParams as TS>::decl(&cfg);
-        assert!(q.contains("sinceMs?: number"), "{q}");
+        assert!(q.contains("sinceMs?: number") && q.contains("afterSeq?: number"), "{q}");
+        let r = <RunOutputQueryResult as TS>::decl(&cfg);
+        assert!(r.contains("nextSeq: number"), "{r}");
     }
 }
