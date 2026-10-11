@@ -394,3 +394,31 @@ async fn the_deployment_target_must_be_valid_for_the_sdk() {
     assert_eq!(err.code(), codes::config::INVALID);
     assert!(err.hint().is_some_and(|h| h.contains("17.0")));
 }
+
+/// No secret from the environment reaches the job log or the caller's sink, even when the toolchain prints an
+/// environment dump (Swift Build does on a failed tool launch [V build V7]).
+#[tokio::test]
+async fn environment_dumps_never_reach_the_logs() {
+    const CANARY: &str = "russet-canary-7f3a9c";
+    let (dir, root) = tmp();
+    let project = support::copy_probe(&root);
+    let mut swift = ScriptedSwift::new(DESCRIBE, "russetprobe", fake_binary(&[], &[]));
+    Arc::get_mut(&mut swift).unwrap().extra_lines = vec![
+        format!("note: running /usr/bin/env -i HOME=/home/u GITHUB_TOKEN={CANARY} PATH=/usr/bin actool --version"),
+        format!("warning: actool failed: /usr/bin/env -i AWS_SECRET_ACCESS_KEY={CANARY} actool --compile"),
+    ];
+    let env =
+        BuildEnv::new(Arc::new(FixedSdk(fake_facts(&root))), root.join("data"), root.join("cache"), swift.clone())
+            .with_macho(Arc::new(FakeMachO::default()));
+    let sink = RecordingSink::default();
+    let out =
+        Builder::new(env).unwrap().build(BuildRequest::new(&project), &sink, CancellationToken::new()).await.unwrap();
+    let log = std::fs::read_to_string(project.join(".russet/logs").join(format!("{}.jsonl", out.build_id))).unwrap();
+    assert!(log.contains("GITHUB_TOKEN=<redacted>"), "the dump is logged, redacted");
+    assert!(log.contains("AWS_SECRET_ACCESS_KEY=<redacted>"), "diagnostics are redacted too");
+    assert!(out.lints.is_empty() || !format!("{:?}", out.lints).contains(CANARY));
+    assert!(!log.contains(CANARY));
+    assert!(sink.lines.lock().unwrap().iter().all(|(_, l)| !l.contains(CANARY)));
+    assert!(!std::fs::read_to_string(&out.report_path).unwrap().contains(CANARY));
+    drop(dir);
+}

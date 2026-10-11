@@ -548,7 +548,8 @@ pub fn parse_line(stream: LogStream, line: &str) -> Option<BuildEvent> {
     if let Some(event) = parse_progress(trimmed) {
         return Some(event);
     }
-    if let Some(d) = parse_diagnostic(trimmed) {
+    if let Some(mut d) = parse_diagnostic(trimmed) {
+        d.message = redact_env_dump(&d.message);
         return Some(BuildEvent::Diagnostic { diagnostic: d });
     }
     Some(BuildEvent::Log { stream, line: redact_env_dump(trimmed) })

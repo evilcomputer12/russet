@@ -376,6 +376,8 @@ pub struct ScriptedSwift {
     pub package_identity: String,
     pub binary: Vec<u8>,
     pub fail_with: Option<String>,
+    /// Extra lines `swift build` prints (for example an environment dump).
+    pub extra_lines: Vec<String>,
     pub calls: Mutex<Vec<Vec<String>>>,
     pub envs: Mutex<Vec<BTreeMap<OsString, OsString>>>,
 }
@@ -387,6 +389,7 @@ impl ScriptedSwift {
             package_identity: identity.to_owned(),
             binary,
             fail_with: None,
+            extra_lines: Vec::new(),
             calls: Mutex::new(Vec::new()),
             envs: Mutex::new(Vec::new()),
         })
@@ -424,6 +427,9 @@ impl CommandRunner for ScriptedSwift {
             Some("build") => {
                 sink.log(LogStream::Stdout, "Building for debugging...");
                 sink.log(LogStream::Stdout, "[1 / 2] Compiling");
+                for line in &self.extra_lines {
+                    sink.log(LogStream::Stderr, line);
+                }
                 if let Some(msg) = &self.fail_with {
                     sink.log(LogStream::Stderr, msg);
                     return Ok(CommandOutput {
