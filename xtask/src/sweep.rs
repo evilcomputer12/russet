@@ -9,12 +9,16 @@
 //! 2. `cargo sweep --time N` when cargo-sweep is installed; otherwise the built-in equivalent removes the
 //!    entries of `deps/`, `build/`, `.fingerprint/`, `examples/` and `incremental/` whose newest file is older
 //!    than N days (the dev box mounts /home `noatime`, so modification times are the only usage signal);
-//! 3. measure the slot against the cap (6 GiB); with `--clean-over-cap`, a slot still over the cap loses its
+//! 3. measure the slot (each file once, however many hard links cargo gave it) against the cap, 6 GiB by default
+//!    (`--max-gib`, or `RUSSET_SWEEP_CAP_GIB`); with `--clean-over-cap`, a slot still over the cap loses its
 //!    profile directories (what `cargo clean` would remove), keeping the lock files.
 //!
 //! The cargo wrappers (`cargo xtask ci|test|build`) call [`sweep_if_due`] first, which runs step 2 at most once
-//! per `--time` days per slot (stamp file `.russet-sweep`), so the weekly sweep happens without a scheduler.
-//! Only Russet's own slots are touched (AGENTS.md §6: never touch files Russet did not create). Owner: W8.
+//! per `--time` days per slot (stamp file `.russet-sweep`), so the weekly sweep happens without a scheduler. It
+//! never cleans: a slot over the cap is reported with what to do, because cleaning a shared slot throws away the
+//! other worktrees' builds. The time-based sweep alone does not keep a slot that several worktrees build in under
+//! 6 GiB (QA-24); a larger cap or per-worktree slots are the lead's call. Only Russet's own slots are touched
+//! (AGENTS.md §6: never touch files Russet did not create). Owner: W8.
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -33,6 +37,10 @@ const CARGO_LOCKS: &[&str] = &[".cargo-lock", ".cargo-build-lock", ".cargo-artif
 const UNIT_DIRS: &[&str] = &["deps", "build", ".fingerprint", "examples", "incremental"];
 /// Profile directories of a target dir (and host-target subdirectories cargo creates for cross builds).
 const PROFILE_DIRS: &[&str] = &["debug", "release"];
+/// The cap per slot (QA §10, QA-24; AGENTS.md §6).
+pub const DEFAULT_CAP_GIB: f64 = 6.0;
+/// Overrides the cap, for the automatic sweep too, until the lead settles the slot policy.
+pub const CAP_ENV: &str = "RUSSET_SWEEP_CAP_GIB";
 
 /// Flags of `cargo xtask sweep`.
 #[derive(Debug, clap::Args)]
@@ -40,9 +48,9 @@ pub struct Args {
     /// Remove artifacts not rebuilt for this many days (`cargo sweep --time`)
     #[arg(long, default_value_t = 7)]
     pub time: u64,
-    /// The cap per slot, in GiB
-    #[arg(long, value_name = "GiB", default_value_t = 6.0)]
-    pub max_gib: f64,
+    /// The cap per slot, in GiB (default: RUSSET_SWEEP_CAP_GIB, else 6)
+    #[arg(long, value_name = "GiB")]
+    pub max_gib: Option<f64>,
     /// Slot directories (default: every ~/.cache/russet-dev/target-* and CARGO_TARGET_DIR)
     #[arg(long = "slot", value_name = "DIR")]
     pub slots: Vec<PathBuf>,
@@ -73,7 +81,11 @@ pub fn run(args: Args) -> Result<()> {
         println!("sweep: no target slots found (~/.cache/russet-dev/target-*, CARGO_TARGET_DIR)");
         return Ok(());
     }
-    let cap = (args.max_gib * GIB as f64) as u64;
+    let cap_gib = match args.max_gib {
+        Some(g) => g,
+        None => cap_gib_from_env()?,
+    };
+    let cap = (cap_gib * GIB as f64) as u64;
     let mut over = Vec::new();
     for slot in &slots {
         let opts = Options { days: args.time, cap, clean_over_cap: args.clean_over_cap, dry_run: args.dry_run };
@@ -84,13 +96,26 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
     if !over.is_empty() {
-        println!(
-            "warning: still over the {} GiB cap: {} (rerun with --clean-over-cap when no build is running)",
-            args.max_gib,
-            over.join(", ")
-        );
+        println!("warning: still over the {cap_gib} GiB cap: {}. {OVER_CAP_ADVICE}", over.join(", "));
     }
     Ok(())
+}
+
+/// What to do about a slot over the cap.
+const OVER_CAP_ADVICE: &str = "Rerun `cargo xtask sweep --clean-over-cap` when no build runs (every worktree of \
+     the slot rebuilds afterwards); a slot shared by several worktrees outgrows the cap within days, so a larger \
+     cap (RUSSET_SWEEP_CAP_GIB) or per-worktree slots are the lead's call";
+
+/// The cap from [`CAP_ENV`], else [`DEFAULT_CAP_GIB`].
+pub fn cap_gib_from_env() -> Result<f64> {
+    match std::env::var(CAP_ENV) {
+        Ok(v) if !v.trim().is_empty() => {
+            let g: f64 = v.trim().parse().with_context(|| format!("{CAP_ENV}={v:?} is not a number of GiB"))?;
+            anyhow::ensure!(g.is_finite() && g > 0.0, "{CAP_ENV} must be a positive number of GiB");
+            Ok(g)
+        }
+        _ => Ok(DEFAULT_CAP_GIB),
+    }
 }
 
 /// Options of one slot's sweep.
@@ -154,8 +179,9 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Runs the time-based sweep on `slot` when its stamp is older than `days` (or missing). Used by the cargo
-/// wrappers; never cleans, and never fails the caller: problems become a returned note.
+/// Runs the time-based sweep on `slot` when its stamp is older than `days` (or missing), and measures the slot
+/// against the cap ([`cap_gib_from_env`]). Used by the cargo wrappers; never cleans, and never fails the caller:
+/// problems become a returned note, and a slot over the cap a warning with [`OVER_CAP_ADVICE`].
 pub fn sweep_if_due(slot: &Path, days: u64) -> Option<String> {
     if !slot.is_dir() {
         return None;
@@ -167,9 +193,15 @@ pub fn sweep_if_due(slot: &Path, days: u64) -> Option<String> {
     if !due {
         return None;
     }
-    let opts = Options { days, cap: u64::MAX, clean_over_cap: false, dry_run: false };
+    let cap_gib = match cap_gib_from_env() {
+        Ok(g) => g,
+        Err(e) => return Some(format!("sweep: {e:#}")),
+    };
+    let cap = (cap_gib * GIB as f64) as u64;
+    let opts = Options { days, cap, clean_over_cap: false, dry_run: false };
     Some(match sweep_slot(slot, &opts) {
-        Ok(r) => describe(&r, 6 * GIB),
+        Ok(r) if r.over_cap => format!("{}\nwarning: {OVER_CAP_ADVICE}", describe(&r, cap)),
+        Ok(r) => describe(&r, cap),
         Err(e) => format!("sweep: {}: {e:#}", slot.display()),
     })
 }
@@ -332,13 +364,31 @@ fn newest_mtime(path: &Path) -> Option<SystemTime> {
     newest.or(own)
 }
 
-/// Total size of the files below `dir`, without following symlinks. Hard links are counted once per name.
+/// Total size of the files below `dir`, without following symlinks. A file with several hard links (cargo links
+/// every final artifact from `deps/` into the profile directory) counts once, as `du` counts it; on Windows,
+/// where std exposes no file identity, once per name.
 pub fn dir_size(dir: &Path) -> u64 {
-    let Ok(meta) = fs::symlink_metadata(dir) else { return 0 };
-    if !meta.is_dir() {
-        return meta.len();
+    let mut seen = std::collections::HashSet::new();
+    size_counting_inodes_once(dir, &mut seen)
+}
+
+fn size_counting_inodes_once(path: &Path, seen: &mut std::collections::HashSet<(u64, u64)>) -> u64 {
+    let Ok(meta) = fs::symlink_metadata(path) else { return 0 };
+    if meta.is_dir() {
+        return fs::read_dir(path)
+            .map(|rd| rd.flatten().map(|e| size_counting_inodes_once(&e.path(), seen)).sum())
+            .unwrap_or(0);
     }
-    fs::read_dir(dir).map(|rd| rd.flatten().map(|e| dir_size(&e.path())).sum()).unwrap_or(0)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.nlink() > 1 && !seen.insert((meta.dev(), meta.ino())) {
+            return 0;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = seen;
+    meta.len()
 }
 
 #[cfg(test)]
@@ -433,5 +483,37 @@ mod tests {
     fn sizes_add_up() {
         let slot = fake_slot();
         assert_eq!(dir_size(slot.path()), 1000 + 1000 + 10 + 10 + 10 + 10);
+    }
+
+    /// cargo hard-links final artifacts from deps/ into the profile directory; they take the space once.
+    #[cfg(unix)]
+    #[test]
+    fn hard_links_count_once() {
+        let slot = fake_slot();
+        let s = slot.path();
+        fs::hard_link(s.join("debug/deps/libnew-2222.rlib"), s.join("debug/libnew.rlib")).expect("link");
+        assert_eq!(dir_size(s), 1000 + 1000 + 10 + 10 + 10 + 10);
+    }
+
+    #[test]
+    fn the_cap_defaults_to_6_gib() {
+        // The variable is read, never set, here: tests share the process environment.
+        if std::env::var_os(CAP_ENV).is_none() {
+            assert_eq!(cap_gib_from_env().expect("cap"), DEFAULT_CAP_GIB);
+        }
+    }
+
+    #[test]
+    fn the_due_sweep_reports_a_slot_over_the_cap() {
+        let slot = fake_slot();
+        touch(&slot.path().join("debug/deps/libbig-4444.rlib"), 64 * 1024, 0);
+        // Under the default 6 GiB cap the fake slot is small: no warning.
+        let note = sweep_if_due(slot.path(), 7).expect("due");
+        assert!(!note.contains("OVER THE CAP"), "{note}");
+        let o = Options { days: 7, cap: 1024, clean_over_cap: false, dry_run: false };
+        let r = sweep_slot(slot.path(), &o).expect("sweep");
+        assert!(r.over_cap && !r.cleaned);
+        assert!(describe(&r, 1024).contains("OVER THE CAP"));
+        assert!(slot.path().join("debug/deps/libbig-4444.rlib").exists(), "reporting never cleans");
     }
 }
