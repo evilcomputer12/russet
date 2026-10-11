@@ -5162,15 +5162,28 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "p12-keystore",
+ "p256 0.14.0",
+ "plist",
+ "ring",
  "rsa",
  "russet-asc",
  "russet-core",
  "russet-doctor",
+ "russet-macho",
  "russet-secrets",
  "russet-sign",
  "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "time",
  "tokio",
+ "toml 1.1.8+spec-1.1.0",
+ "url",
+ "wiremock",
  "x509-cert 0.2.5",
+ "zeroize",
 ]
 
 [[package]]
