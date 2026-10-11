@@ -25,6 +25,8 @@ SecretStore over a keyring-core master key and sealed files; passphrase, env and
 - Nothing blocks or touches the keyring at open: keyring-core runs on blocking threads on first use, and
   `SecretStore::status()` probes it (`secrets.status`, doctor's `secrets.backend`).
 - `redact`: the field-name rule and the JWT/PEM/Bearer mask of ARCHITECTURE §12.2 for the logging layer (W2).
+- `file::read_secret_file`: the local-file import of `secrets.set {fromFile}`: regular files of at most 1 MiB only
+  (opened with `O_NONBLOCK`, checked with `fstat`, so a FIFO never blocks), read into one zeroizing buffer.
 
 ## Tests
 

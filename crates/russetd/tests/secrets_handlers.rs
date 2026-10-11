@@ -88,6 +88,13 @@ async fn imports_are_refused_from_agents_and_bad_paths() {
     std::fs::write(&big, vec![0u8; russet_secrets::MAX_SECRET_BYTES + 1]).expect("big");
     let err = h::set(&store, &conn(ClientKind::Cli), params(big.display().to_string())).await.expect_err("too big");
     assert_eq!(err.code(), codes::core::INVALID_ARGUMENT);
+    if cfg!(unix) {
+        // Only regular files: a directory (or a FIFO, see russet-secrets' file tests) is refused, never read.
+        let err = h::set(&store, &conn(ClientKind::Cli), params(dir.path().display().to_string()))
+            .await
+            .expect_err("a directory");
+        assert_eq!(err.code(), codes::core::INVALID_ARGUMENT);
+    }
     let bad_id = p::SecretsSetParams { id: "nope".into(), label: None, from_file: file.display().to_string() };
     assert_eq!(
         h::set(&store, &conn(ClientKind::Cli), bad_id).await.map_err(|e| e.code()).err(),

@@ -3,9 +3,7 @@
 
 //! `secrets.*` wire shapes (ARCHITECTURE §8.1): metadata only, and `secrets.set` takes a file, never a value.
 
-use russet_protocol::secrets::{
-    LOCAL_FILE_IMPORTS, SecretBackend, SecretKind, SecretMeta, SecretsSetParams, SecretsStatusResult,
-};
+use russet_protocol::secrets::{SecretBackend, SecretKind, SecretMeta, SecretsSetParams, SecretsStatusResult};
 use russet_protocol::{Permission, registry};
 use serde_json::json;
 
@@ -16,9 +14,6 @@ fn secrets_methods_have_their_classes() {
     assert_eq!(class("secrets.list"), Some(Permission::Read));
     assert_eq!(class("secrets.set"), Some(Permission::Secrets));
     assert_eq!(class("secrets.delete"), Some(Permission::Secrets));
-    for m in LOCAL_FILE_IMPORTS {
-        assert!(registry().iter().any(|i| i.name == *m), "{m} is registered");
-    }
 }
 
 #[test]

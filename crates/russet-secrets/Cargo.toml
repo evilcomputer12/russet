@@ -29,6 +29,10 @@ time = { workspace = true, features = ["formatting", "parsing"] }
 tokio = { workspace = true, features = ["rt"] }
 zeroize.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# O_NONBLOCK and O_NOCTTY for local-file imports (src/file.rs).
+libc = "0.2.190"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus-secret-service-keyring-store.workspace = true
 

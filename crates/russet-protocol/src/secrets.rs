@@ -158,10 +158,6 @@ crate::rpc_method!(
     Permission::Secrets
 );
 
-/// The methods a non-interactive CLI may call with `--yes` although their class is `secrets` (ARCHITECTURE §7.5)
-/// [D 85]: the local-file imports. The permission engine (W2) reads this list.
-pub const LOCAL_FILE_IMPORTS: &[&str] = &["account.importXtool", "account.addAscKey", "secrets.set"];
-
 /// Methods the daemon serves in this namespace.
 pub const METHODS: &[MethodInfo] = &[SecretsStatus::INFO, SecretsList::INFO, SecretsSet::INFO, SecretsDelete::INFO];
 /// Notifications the daemon sends in this namespace.

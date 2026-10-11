@@ -7,14 +7,13 @@
 //! is accepted from `cli` and `ide` connections only (the permission engine already denies `secrets` to `mcp`
 //! and `flutter-device`; this is the second line). A non-interactive CLI reaches it with `--yes` (§7.5) [D 85].
 
-use std::io::Read as _;
 use std::path::PathBuf;
 
 use russet_core::error::{Error, Result, codes};
 use russet_core::rpc::{ClientKind, ConnInfo};
 use russet_ipc::Router;
 use russet_protocol::secrets as p;
-use russet_secrets::{BackendKind, SecretBytes, SecretId, SecretKind, SecretMeta, SecretStore};
+use russet_secrets::{BackendKind, SecretId, SecretKind, SecretMeta, SecretStore};
 use time::format_description::well_known::Rfc3339;
 
 use super::config::secrets_of;
@@ -121,9 +120,10 @@ pub async fn set(store: &dyn SecretStore, conn: &ConnInfo, params: p::SecretsSet
         )
         .with_hint("Pass the file's absolute path."));
     }
-    let bytes = tokio::task::spawn_blocking(move || read_capped(&path)).await.map_err(|e| {
-        Error::new(codes::core::INTERNAL, format!("the read task failed: {e}")).with_hint("Report this bug.")
-    })??;
+    let bytes =
+        tokio::task::spawn_blocking(move || russet_secrets::file::read_secret_file(&path)).await.map_err(|e| {
+            Error::new(codes::core::INTERNAL, format!("the read task failed: {e}")).with_hint("Report this bug.")
+        })??;
     let label = params.label.unwrap_or_else(|| {
         std::path::Path::new(&params.from_file)
             .file_name()
@@ -132,26 +132,6 @@ pub async fn set(store: &dyn SecretStore, conn: &ConnInfo, params: p::SecretsSet
     });
     let meta = store.put(&id, &label, bytes).await?;
     Ok(wire_meta(&meta))
-}
-
-fn read_capped(path: &std::path::Path) -> Result<SecretBytes> {
-    let file = std::fs::File::open(path).map_err(|e| {
-        let code = if e.kind() == std::io::ErrorKind::NotFound { codes::core::NOT_FOUND } else { codes::core::IO };
-        Error::new(code, format!("cannot read {}: {e}", path.display()))
-            .with_hint("Check the path and its permissions.")
-    })?;
-    let mut buf = Vec::new();
-    let read = file.take(russet_secrets::MAX_SECRET_BYTES as u64 + 1).read_to_end(&mut buf);
-    // Wrapped at once, so the bytes are zeroized however this returns.
-    let bytes = SecretBytes::new(buf);
-    read.map_err(|e| {
-        Error::new(codes::core::IO, format!("cannot read {}: {e}", path.display())).with_hint("Check the file.")
-    })?;
-    if bytes.len() > russet_secrets::MAX_SECRET_BYTES {
-        return Err(Error::new(codes::core::INVALID_ARGUMENT, format!("{} is larger than 1 MiB", path.display()))
-            .with_hint("Secrets are keys and tokens; this file is too large to be one."));
-    }
-    Ok(bytes)
 }
 
 /// `secrets.delete`.

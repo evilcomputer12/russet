@@ -11,6 +11,8 @@
 //! - [`EnvStore`](env::EnvStore): read-only `RUSSET_ASC_*` and `RUSSET_SIGNING_P12_*` (CI).
 //! - [`MemoryStore`](memory::MemoryStore): tests.
 //! - [`redact`]: field-name and value redaction for logs and reports.
+//! - [`file::read_secret_file`]: the local-file import of `secrets.set {fromFile}` (regular files only, one
+//!   zeroizing buffer).
 //!
 //! Values never cross IPC: `secrets.*` methods return [`SecretMeta`] only. [`SecretBytes`] zeroizes on drop and
 //! has a redacting `Debug`, no `Display` and no `Serialize`.
@@ -33,6 +35,7 @@ use zeroize::Zeroizing;
 pub mod auto;
 pub mod crypto;
 pub mod env;
+pub mod file;
 pub mod keyring;
 pub mod memory;
 pub mod passphrase;
