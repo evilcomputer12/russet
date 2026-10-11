@@ -401,8 +401,9 @@ pub fn parse_batch_output(output: &str, user_commands: &[String]) -> BatchTransc
             },
         });
     }
-    // Each user command's section, in order (a command may appear twice; take them in sequence).
-    let mut cursor = 0;
+    // Each user command's section, in order, after the stop probe (whose `thread info` and `frame info` would
+    // otherwise answer a user command with the same text); a command may appear twice, so take them in sequence.
+    let mut cursor = sections.iter().rposition(|(c, _)| c == "settings clear frame-format").map(|i| i + 1).unwrap_or(0);
     for wanted in user_commands {
         let found = sections[cursor..].iter().position(|(c, _)| c == wanted.trim());
         match found {
@@ -588,6 +589,17 @@ Process 1134583 detached
         let t = parse_batch_output(&killed, &cmds[..1]);
         assert!(t.exited && !t.detached);
         assert_eq!(t.exit_status, Some(9));
+    }
+
+    #[test]
+    fn user_commands_are_not_confused_with_the_probe() {
+        let out = "(lldb) process continue\nProcess 7 stopped\n(lldb) thread info\nRUSSET-STOP-TID 0x1\nRUSSET-STOP-REASON breakpoint 1.1\n\
+                   (lldb) frame info\nRUSSET-FRAME-LINE 12\n(lldb) settings clear thread-format\n(lldb) settings clear frame-format\n\
+                   (lldb) frame info\nframe #0: 0x0000000100004000 RussetProbe`ContentView.body.getter at ContentView.swift:12:9\n\
+                   (lldb) process detach\nProcess 7 detached\n";
+        let t = parse_batch_output(out, &["frame info".to_owned()]);
+        assert!(t.commands[0].output.starts_with("frame #0:"), "{:?}", t.commands);
+        assert_eq!(t.stop.unwrap_or_else(|| unreachable!()).frame.line, Some(12));
     }
 
     #[test]
