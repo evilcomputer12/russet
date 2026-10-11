@@ -22,6 +22,15 @@
 //!
 //! Nothing here mutates the test process's own environment (that is unsound with threads): apply the env to a
 //! child with [`TempHome::apply`], and pass [`TempHome::dirs`] to in-process code.
+//!
+//! **The scripted backend in the daemon, today.** ARCHITECTURE §3.3 item 7 makes `scripted:<scenario.toml>` the
+//! lane-D backend, so it is the default here. The daemon cannot build [`crate::ScriptedConnector`] yet: russetd
+//! may not depend on this dev crate (§5.2), and W8 has asked the lead for a contract change (move the connector
+//! where russetd may use it). Until then a daemon started with `scripted:` starts, reports
+//! `deviceBackend: "scripted:…"`, and answers device methods with an error (`core.notImplemented` in W2's
+//! `DeviceSlot`). So: tests of the device plane drive [`crate::ScriptedConnector`] in process, as an
+//! `Arc<dyn russet_device::io::ServiceConnector>`; daemon-level tests that need no device keep the default; a
+//! daemon-level test that asserts the device plane is absent picks [`Backend::None`].
 
 use std::ffi::{OsStr, OsString};
 use std::io;

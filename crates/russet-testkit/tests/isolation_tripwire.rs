@@ -5,12 +5,13 @@
 //! `RUSSET_DEVICE_BACKEND=scripted:…` and a tripwire `USBMUXD_SOCKET_ADDRESS` never connects to the tripwire,
 //! even when a client lists and watches devices.
 //!
-//! It exercises W4's `DeviceManager` (through W2's daemon and `DeviceSlot`), and it cannot see a direct open of
-//! `/run/usbmuxd` (W2's `live_connectors_constructed() == 0` assertion covers that). So it lands `#[ignore]`d;
-//! W9 enables it after W4 merges:
+//! It exercises W4's `DeviceManager` (through W2's daemon and `DeviceSlot`, which must also build the scripted
+//! connector for `scripted:`; see the testkit README), and it cannot see a direct open of `/run/usbmuxd` (W2's
+//! `live_connectors_constructed() == 0` assertion covers that). So it lands `#[ignore]`d; W9 enables it after W4
+//! merges. `russet_bin()` builds this worktree's `russet` first:
 //!
 //! ```sh
-//! cargo build -p russet-cli && cargo test -p russet-testkit --test isolation_tripwire -- --ignored
+//! cargo test -p russet-testkit --test isolation_tripwire -- --ignored
 //! ```
 
 #![cfg(unix)]

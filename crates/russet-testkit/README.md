@@ -14,7 +14,8 @@ Scripted, replay and recording connectors, mock usbmuxd, cassettes, HTTP fakes, 
 | `TempHome` (`src/home.rs`) | Every test that starts a daemon: a fresh `RUSSET_HOME` with `RUSSET_SECRETS_BACKEND=memory`, a private `RUSSET_LIVE_DEVICE_LOCK`, `RUSSET_OFFLINE=1` and the scripted device backend; `RUSSET_LANE` and the other leaking variables are removed. `home.apply(&mut cmd)` for children, `home.dirs()` / `home.socket_path()` for in-process daemons |
 | `ScriptedConnector` + `Control` (`src/scripted.rs`) | Core's FakeDeviceBackend [D 46]: an `io::ServiceConnector` played from a scenario file, with attach/detach, facade calls, scripted service streams, syslog lines and failures, and a `Control` handle (attach, detach, push a log line, inject a failure, list the operations, check every scripted step ran) |
 | `scenarios/default.toml` | The lane-D device: one synthetic iPhone 12 on iOS 27.0, ready, with the RussetProbe heartbeat. `export RUSSET_DEVICE_BACKEND="scripted:$PWD/crates/russet-testkit/scenarios/default.toml"` |
-| `SpawnedDaemon` (`src/daemon.rs`) | `russet daemon run` in a `TempHome`: waits until the socket accepts, keeps the daemon's log, kills it on drop. `russet_bin()` finds the binary (`RUSSET_TEST_BIN`, else `target/<profile>/russet`) |
+| `SpawnedDaemon` (`src/daemon.rs`) | `russet daemon run` in a `TempHome`: waits until the socket accepts, keeps the daemon's log, kills it on drop. `russet_bin()` gives the binary: `RUSSET_TEST_BIN`, else this worktree's build from `cargo build -p russet-cli --bin russet` (once per test process), never another worktree's from a shared slot |
+| `Tripwire::bind_tcp` | The TCP form of the tripwire (`127.0.0.1:<port>`, what Windows uses), available on every platform |
 | `Tripwire` (`src/tripwire.rs`) | A `USBMUXD_SOCKET_ADDRESS` socket that records connections; `TempHome::builder().tripwire()` wires it in |
 | `lsp`, `Transcript` (`src/lsp.rs`, `src/transcript.rs`) | russet/1 framing and JSON-RPC transcript replay with captures (`$capture:x`, `${x}`), wildcards (`$any`, `$absent`, `$type:…`, `$prefix:…`, `$contains`) and ignorable notifications. Example: `transcripts/fake-daemon.transcript.jsonl` |
 | `fake_daemon` (`src/fake_daemon.rs`) | A tiny russet/1 peer (`initialize`, `daemon.ping`, `test.echo`, `test.slow` with progress and cancel, `test.confirm` with `ui.confirm`) to test clients and harnesses without the real daemon |
@@ -37,8 +38,14 @@ home.tripwire().unwrap().assert_untouched()?;               // lane D never talk
 ```
 
 In-process daemons (`russetd::InProcess::start`) take `DaemonOptions { dirs: home.dirs().clone(), endpoint:
-Endpoint::Unix(home.socket_path()), .. }`; how they receive a `ScriptedConnector` is W2's `DeviceSlot`
-(ARCHITECTURE §5.3).
+Endpoint::Unix(home.socket_path()), .. }`.
+
+**The scripted backend in the daemon is pending a contract change.** ARCHITECTURE §5.3 places `ScriptedConnector`
+here, in a dev crate that russetd may not depend on (§5.2), while §3.3 item 7 and §14.9 want the daemon to run it for
+`RUSSET_DEVICE_BACKEND=scripted:<file>`. W8 asked the lead to move `src/scenario.rs` and `src/scripted.rs` (they
+depend only on russet-core, russet-device, idevice, tokio, futures, async-trait, serde, serde_json and toml) where
+russetd may use them, and to let `DaemonOptions` carry an injected connector. Until then a daemon started with
+`scripted:` answers device methods with an error, and device-plane tests use `ScriptedConnector` in process.
 
 ## Scenario files
 

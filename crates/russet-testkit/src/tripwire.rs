@@ -9,6 +9,9 @@
 //! the mux, so a test points the variable at a tripwire and asserts afterwards that nothing connected. The
 //! tripwire cannot see a direct open of `/run/usbmuxd`; W2's `live_connectors_constructed() == 0` assertion
 //! covers that side.
+//!
+//! [`Tripwire::bind`] picks the platform's form: a Unix socket on Unix, `127.0.0.1:<port>` elsewhere.
+//! [`Tripwire::bind_tcp`] is the TCP form on every platform, so the Windows variant is tested on Linux too.
 
 use std::ffi::OsString;
 use std::io;
@@ -34,10 +37,10 @@ pub struct Tripwire {
 impl Tripwire {
     /// Binds a tripwire: a Unix socket `dir/usbmuxd-tripwire.sock` (Unix) or `127.0.0.1:<port>` (Windows).
     pub fn bind(dir: &Path) -> io::Result<Self> {
-        let hits = Arc::new(AtomicUsize::new(0));
-        let stop = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
         {
+            let hits = Arc::new(AtomicUsize::new(0));
+            let stop = Arc::new(AtomicBool::new(false));
             let path = dir.join("usbmuxd-tripwire.sock");
             let listener = std::os::unix::net::UnixListener::bind(&path)?;
             listener.set_nonblocking(true)?;
@@ -48,13 +51,20 @@ impl Tripwire {
         #[cfg(not(unix))]
         {
             let _ = dir;
-            let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-            listener.set_nonblocking(true)?;
-            let addr = listener.local_addr()?.to_string();
-            let thread =
-                spawn_accept_loop(move || listener.accept().map(|_| ()), Arc::clone(&hits), Arc::clone(&stop))?;
-            Ok(Self { addr: addr.into(), path: None, hits, stop, thread: Some(thread) })
+            Self::bind_tcp()
         }
+    }
+
+    /// Binds a TCP tripwire on `127.0.0.1:<free port>`, the form Windows uses (`USBMUXD_SOCKET_ADDRESS=host:port`;
+    /// idevice and pymobiledevice3 read a value with a `:` as a TCP address on every platform).
+    pub fn bind_tcp() -> io::Result<Self> {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let addr = listener.local_addr()?.to_string();
+        let thread = spawn_accept_loop(move || listener.accept().map(|_| ()), Arc::clone(&hits), Arc::clone(&stop))?;
+        Ok(Self { addr: addr.into(), path: None, hits, stop, thread: Some(thread) })
     }
 
     /// `(USBMUXD_SOCKET_ADDRESS, value)` for a child's environment.

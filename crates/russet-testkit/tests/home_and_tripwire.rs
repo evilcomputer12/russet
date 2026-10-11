@@ -114,6 +114,26 @@ async fn the_tripwire_counts_idevice_connections() {
     assert!(err.contains("talked to the device mux"), "{err}");
 }
 
+/// The TCP form Windows uses, exercised on every platform: idevice parses a `host:port` value of
+/// `USBMUXD_SOCKET_ADDRESS` into `UsbmuxdAddr::TcpSocket` (idevice 0.1.68 `from_env_var`) and connects there.
+#[tokio::test]
+async fn the_tcp_tripwire_counts_idevice_connections() {
+    let tripwire = Tripwire::bind_tcp().expect("bind");
+    let (_, value) = tripwire.env();
+    let addr: std::net::SocketAddr = value.to_string_lossy().parse().expect("host:port, as idevice parses it");
+    assert!(addr.ip().is_loopback());
+    tripwire.assert_untouched().expect("nothing yet");
+    let _ = idevice::usbmuxd::UsbmuxdAddr::TcpSocket(addr).to_socket().await;
+    for _ in 0..100 {
+        if tripwire.hits() > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(tripwire.hits(), 1);
+    assert!(tripwire.assert_untouched().is_err());
+}
+
 #[test]
 fn a_home_can_carry_a_tripwire() {
     let home = TempHome::builder().tripwire().build().expect("home");

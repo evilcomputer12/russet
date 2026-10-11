@@ -17,6 +17,7 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use crate::home::TempHome;
@@ -122,22 +123,81 @@ fn connectable(_socket: &Path) -> bool {
     false
 }
 
-/// The `russet` binary for spawned-daemon tests: `RUSSET_TEST_BIN`, else `russet` next to the test binary's
-/// target directory (`target/<profile>/russet`), built by `cargo build -p russet-cli`.
+/// The `russet` binary for spawned-daemon tests: `RUSSET_TEST_BIN` when set; otherwise this worktree's own
+/// build, made by `cargo build --locked -p russet-cli --bin russet` once per test process (a no-op when it is
+/// fresh). A cargo target slot shared by several worktrees (AGENTS.md §6) can hold another worktree's `russet` at
+/// `target/<profile>/russet`; asking cargo from this workspace rebuilds it from this worktree's sources first
+/// (the `RUSSET_BUILD_WORKTREE` guard), so a test never spawns another branch's daemon. Cargo releases the build
+/// lock before it runs tests, so the nested build only waits for builds of other worktrees in the slot.
 pub fn russet_bin() -> io::Result<PathBuf> {
     if let Some(p) = std::env::var_os("RUSSET_TEST_BIN") {
         return Ok(PathBuf::from(p));
     }
-    let exe = std::env::current_exe()?;
-    // target/<profile>/deps/<test>-<hash> → target/<profile>/russet
-    let profile_dir = exe.parent().and_then(Path::parent).ok_or_else(|| io::Error::other("no target directory"))?;
-    let bin = profile_dir.join(format!("russet{}", std::env::consts::EXE_SUFFIX));
-    if bin.is_file() {
-        Ok(bin)
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("{} does not exist: run `cargo build -p russet-cli` first, or set RUSSET_TEST_BIN", bin.display()),
-        ))
+    static BUILT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    BUILT.get_or_init(build_russet).clone().map_err(io::Error::other)
+}
+
+/// `cargo build -p russet-cli --bin russet` in this workspace, with the test binary's profile; the executable
+/// cargo reports.
+fn build_russet() -> Result<PathBuf, String> {
+    let workspace = crate::testkit_dir()
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| "the testkit is not inside a workspace".to_string())?;
+    // Cargo sets CARGO for the tests it runs; nextest passes it on.
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut cmd = Command::new(cargo);
+    cmd.current_dir(workspace).args([
+        "build",
+        "--locked",
+        "--package",
+        "russet-cli",
+        "--bin",
+        "russet",
+        "--message-format",
+        "json-render-diagnostics",
+    ]);
+    if !cfg!(debug_assertions) {
+        cmd.arg("--release");
+    }
+    let out = cmd
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("running cargo build -p russet-cli: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("cargo build -p russet-cli --bin russet failed with {}", out.status));
+    }
+    russet_executable(&String::from_utf8_lossy(&out.stdout))
+        .ok_or_else(|| "cargo build -p russet-cli named no `russet` executable".to_string())
+}
+
+/// The `russet` executable in cargo's JSON messages (`compiler-artifact` of the `russet` bin target).
+pub fn russet_executable(messages: &str) -> Option<PathBuf> {
+    messages.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).find_map(|m| {
+        let is_bin = m["target"]["kind"].as_array().is_some_and(|k| k.iter().any(|k| k == "bin"));
+        (m["reason"] == "compiler-artifact" && m["target"]["name"] == "russet" && is_bin)
+            .then(|| m["executable"].as_str().map(PathBuf::from))
+            .flatten()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_russet_executable_is_read_from_cargo_messages() {
+        let messages = [
+            r#"{"reason":"compiler-artifact","target":{"name":"russet_cli","kind":["lib"]},"executable":null}"#,
+            "not json",
+            r#"{"reason":"compiler-artifact","target":{"name":"russet","kind":["bin"]},"executable":"/t/debug/russet"}"#,
+            r#"{"reason":"build-finished","success":true}"#,
+        ]
+        .join("\n");
+        assert_eq!(russet_executable(&messages), Some(PathBuf::from("/t/debug/russet")));
+        assert_eq!(russet_executable(r#"{"reason":"build-finished","success":true}"#), None);
+        let fresh = r#"{"reason":"compiler-artifact","target":{"name":"russet","kind":["bin"]},"executable":"/t/r","fresh":true}"#;
+        assert_eq!(russet_executable(fresh), Some(PathBuf::from("/t/r")), "a fresh artifact is reported too");
     }
 }
