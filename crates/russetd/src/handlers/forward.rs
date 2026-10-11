@@ -34,8 +34,9 @@ async fn forward_open(cx: DaemonCtx, rq: RequestCtx, p: p::ForwardOpenParams) ->
     Ok(result)
 }
 
-async fn forward_close(cx: DaemonCtx, _rq: RequestCtx, p: p::ForwardCloseParams) -> Result<p::ForwardCloseResult> {
-    rpc::forward_close(manager(&cx).await?.as_ref(), p)
+/// Only the connection that opened a forward closes it (ARCHITECTURE §6.3); `perm.denied` for anyone else.
+async fn forward_close(cx: DaemonCtx, rq: RequestCtx, p: p::ForwardCloseParams) -> Result<p::ForwardCloseResult> {
+    rpc::forward_close(manager(&cx).await?.as_ref(), &caller(&rq), p)
 }
 
 async fn forward_list(cx: DaemonCtx, _rq: RequestCtx, _p: p::ForwardListParams) -> Result<p::ForwardListResult> {

@@ -45,7 +45,7 @@ pub mod wire;
 
 pub use apps::{AppFilter, AppInfo, InstallOptions, InstalledApp};
 pub use crash::{CrashQuery, IpsReport};
-pub use debug::{BindSpec, ForwardHandle, ForwardTarget, LocalEndpoint};
+pub use debug::{AcceptPolicy, BindSpec, ForwardHandle, ForwardOptions, ForwardTarget, LocalEndpoint};
 pub use logs::{LogFilter, LogStream};
 pub use manager::{DdiConfig, DeviceConfig, DeviceEvent, DeviceHandle, DeviceManager};
 pub use model::{DeviceInfo, DeviceSelector, DeviceSummary, Readiness, Udid};

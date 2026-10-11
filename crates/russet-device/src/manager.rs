@@ -248,13 +248,15 @@ impl DeviceManager {
         self.shared.forwards.list()
     }
 
-    /// Closes a forward by lease (`forward.close`); `core.notFound` when none matches.
-    pub fn close_forward(&self, lease: &LeaseId) -> Result<()> {
-        if self.shared.forwards.close(lease) {
-            Ok(())
-        } else {
-            Err(russet_core::Error::new(codes::core::NOT_FOUND, format!("no forward with lease {lease}")))
-        }
+    /// `forward.close` from connection `conn`: only the connection that opened the forward may close it
+    /// (ARCHITECTURE §6.3). `core.notFound` when no forward has this lease, `perm.denied` for another connection's.
+    pub fn close_forward(&self, lease: &LeaseId, conn: &str) -> Result<()> {
+        self.shared.forwards.close_owned(lease, conn)
+    }
+
+    /// Ends a forward whatever its owner (its lease ended, or a `system` caller forced it); `false` when none matches.
+    pub fn end_forward(&self, lease: &LeaseId) -> bool {
+        self.shared.forwards.close(lease)
     }
 
     /// `device.alias.set`: records the alias in `[devices.aliases]` of the global config and in this manager.

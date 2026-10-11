@@ -235,7 +235,9 @@ pub async fn forward_open(
         Some(pf::ForwardBindParam { tcp: None, unix: None }) => None,
         Some(_) => return Err(invalid_argument("bind takes tcp or unix, not both")),
     };
-    let fwd = crate::debug::open_forward_with(&h, target, bind).await?;
+    let owner = (!c.conn.is_empty()).then(|| c.conn.clone());
+    let fwd =
+        crate::debug::open_forward_opts(&h, target, crate::debug::ForwardOptions { bind, owner, policy: None }).await?;
     let result =
         pf::ForwardOpenResult { lease_id: fwd.id.clone(), local: fwd.local.display(), url: fwd.local.lldb_url() };
     Ok((result, fwd))
@@ -250,8 +252,9 @@ pub fn bind_param(b: &BindSpec) -> pf::ForwardBindParam {
     }
 }
 
-pub fn forward_close(m: &DeviceManager, p: pf::ForwardCloseParams) -> Result<pf::ForwardCloseResult> {
-    m.close_forward(&p.lease_id)?;
+/// `forward.close`: the caller must be the connection that opened the forward.
+pub fn forward_close(m: &DeviceManager, c: &Caller, p: pf::ForwardCloseParams) -> Result<pf::ForwardCloseResult> {
+    m.close_forward(&p.lease_id, &c.conn)?;
     Ok(pf::ForwardCloseResult {})
 }
 
