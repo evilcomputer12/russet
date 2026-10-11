@@ -302,10 +302,21 @@ fn measure(path: &Path) -> Result<(u64, Option<String>)> {
     if !out.status.success() {
         bail!("powershell failed: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut parts = text.split_whitespace();
-    let free: u64 = parts.next().context("no output from DriveInfo")?.parse().context("DriveInfo output")?;
-    Ok((free, parts.next().map(str::to_owned)))
+    parse_drive_info(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Parses the PowerShell line `<AvailableFreeSpace> <drive name>` of the Windows measurement. Compiled and tested
+/// on every platform, so only the PowerShell call itself is Windows-only.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn parse_drive_info(text: &str) -> Result<(u64, Option<String>)> {
+    let line = text.lines().map(str::trim).rfind(|l| !l.is_empty()).context("no output from DriveInfo")?;
+    let mut parts = line.splitn(2, char::is_whitespace);
+    let free: u64 = parts
+        .next()
+        .unwrap_or_default()
+        .parse()
+        .with_context(|| format!("DriveInfo output {line:?} does not start with a byte count"))?;
+    Ok((free, parts.next().map(str::trim).filter(|d| !d.is_empty()).map(str::to_owned)))
 }
 
 /// Parses `df -P -k` output: the last line's fourth column is the available space in KiB, the sixth onwards the
@@ -390,6 +401,18 @@ mod tests {
         assert_eq!(parse_df(spaced).expect("parse").1.as_deref(), Some("/mnt/a b"));
         assert!(parse_df("").is_err());
         assert!(parse_df("Filesystem\nnonsense\n").is_err());
+    }
+
+    #[test]
+    fn windows_drive_info_is_parsed() {
+        let (free, drive) = parse_drive_info("85899345920 C:\\\r\n").expect("parse");
+        assert_eq!(free, 80 * GIB);
+        assert_eq!(drive.as_deref(), Some("C:\\"));
+        // A profile or module banner before the line does not matter; the last line counts.
+        assert_eq!(parse_drive_info("WARNING: x\r\n1024 D:\\\r\n").expect("parse").0, 1024);
+        assert_eq!(parse_drive_info("2048").expect("parse"), (2048, None));
+        assert!(parse_drive_info("").is_err());
+        assert!(parse_drive_info("C:\\ 1024").is_err());
     }
 
     #[test]
