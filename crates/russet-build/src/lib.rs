@@ -892,7 +892,15 @@ impl Builder {
         em: &Emitter<'_>,
         cancel: &CancellationToken,
     ) -> Result<Vec<u8>> {
-        let task_id = format!("t{}", title.len() ^ spec.args.len());
+        // A stable id per tool step: `swift-package-resolve`, `dsymutil`, …
+        let task_id: String = title
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+            .collect::<String>()
+            .split('-')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("-");
         let t0 = Instant::now();
         em.emit(BuildEvent::Task {
             task_id: task_id.clone(),
@@ -1053,14 +1061,13 @@ impl Builder {
             state: if ok { TaskState::Finished } else { TaskState::Failed },
             duration_ms: Some(t0.elapsed().as_millis() as u64),
         });
-        let out = out?;
+        out?;
         if !ok {
             if cancel.is_cancelled() {
                 return Err(Error::new(codes::core::CANCELLED, "the build was cancelled"));
             }
             return Err(spm::build_failure(&em.diagnostics(), &lines.tail(), em.log_path()));
         }
-        let _ = out;
         Ok(())
     }
 
