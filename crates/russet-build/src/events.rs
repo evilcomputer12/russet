@@ -161,18 +161,35 @@ pub enum BuildEvent {
     },
 }
 
-/// The structured `JobEventKind` for `e`. Until W2's F1 contract adds the §9.2 fields to `JobEventKind`, the
-/// variants carry no data and the details travel through the `ProgressSink` half and the JSONL log.
-pub fn to_job_event(e: &BuildEvent) -> JobEventKind {
-    match e {
-        BuildEvent::Stage { .. } => JobEventKind::Stage {},
-        BuildEvent::Task { .. } => JobEventKind::Task {},
-        BuildEvent::Diagnostic { .. } => JobEventKind::Diagnostic {},
-        BuildEvent::Log { .. } => JobEventKind::Log {},
-        BuildEvent::Progress { .. } => JobEventKind::Progress {},
-        BuildEvent::Artifact { .. } => JobEventKind::Artifact {},
-        BuildEvent::Warning { .. } => JobEventKind::Warning {},
-    }
+/// The `warning` codes (`russetCode`) the build plane emits. ARCHITECTURE §13.3 registers `build.warn.lint`; the
+/// others are a requested contract change (W5's report), listed here so they stay in one place.
+pub mod warn {
+    /// A lint finding that is not an error (build §4.7).
+    pub const LINT: &str = "build.warn.lint";
+    /// The backend changed (`.dynamic` products build with `native`).
+    pub const BACKEND: &str = "build.warn.backend";
+    /// DT* stamping under `xcode-compat`, or the diagnosis-only `RUSSET_LINK_SDK_VERSION = deployment`.
+    pub const METADATA: &str = "build.warn.metadata";
+    /// Resources that were not compiled or not built.
+    pub const RESOURCES: &str = "build.warn.resources";
+    /// An Info.plist value of the project replaced by an enforced one.
+    pub const INFO_PLIST: &str = "build.warn.infoPlist";
+    /// No dSYM (no `dsymutil` in the SDK bundle).
+    pub const DSYM: &str = "build.warn.dsym";
+    /// The executable is not stripped (no LLVM ≥ 23 `llvm-strip`).
+    pub const STRIP: &str = "build.warn.strip";
+
+    /// Every code above.
+    pub const ALL: &[&str] = &[LINT, BACKEND, METADATA, RESOURCES, INFO_PLIST, DSYM, STRIP];
+}
+
+/// The structured `JobEventKind` of `e`, converted through the §9.2 wire form: [`BuildEvent`] serializes with the
+/// wire names and `JobEventKind` deserializes them, ignoring fields it does not have. Against W1's F0 enum, whose
+/// variants carry no fields, only the kind survives (the details reach the caller through the `ProgressSink` half
+/// and the JSONL log); against W2's F1 enum, which has the §9.2 fields, every field arrives. One conversion serves
+/// both, so the F1 merge needs no change here. `None` only if a kind were missing from `JobEventKind`.
+pub fn to_job_event(e: &BuildEvent) -> Option<JobEventKind> {
+    serde_json::to_value(e).ok().and_then(|v| serde_json::from_value(v).ok())
 }
 
 /// RFC 3339 UTC with milliseconds.
@@ -262,7 +279,9 @@ impl<'a> Emitter<'a> {
             }
             _ => {}
         }
-        self.sink.emit(to_job_event(&e));
+        if let Some(kind) = to_job_event(&e) {
+            self.sink.emit(kind);
+        }
     }
 
     /// Shorthand for a `stage` event.
@@ -379,6 +398,58 @@ mod tests {
             serde_json::to_value(&w).ok().and_then(|v| v.get("russetCode").cloned()),
             Some("build.warn.lint".into())
         );
+    }
+
+    /// One event of every kind the build plane emits.
+    fn every_kind() -> Vec<BuildEvent> {
+        vec![
+            BuildEvent::Stage { stage: Stage::Compile, state: StageState::Started },
+            BuildEvent::Task {
+                task_id: "swift-build".into(),
+                title: "swift build".into(),
+                tool: Some("swift".into()),
+                state: TaskState::Finished,
+                duration_ms: Some(12),
+            },
+            BuildEvent::Diagnostic {
+                diagnostic: Diagnostic {
+                    severity: Severity::Warning,
+                    message: "unused".into(),
+                    file: Some("/p/a.swift".into()),
+                    line: Some(3),
+                    column: Some(7),
+                    tool: Some("swiftc".into()),
+                    code: None,
+                },
+            },
+            BuildEvent::Log { stream: LogStream::Stderr, line: "x".into() },
+            BuildEvent::Progress { done: Some(1), total: Some(2), message: Some("Compiling".into()) },
+            BuildEvent::Artifact { artifact_kind: ArtifactKind::Dsym, path: "/p/A.app.dSYM".into() },
+            BuildEvent::Warning { russet_code: warn::LINT.into(), message: "m".into(), hint: Some("h".into()) },
+        ]
+    }
+
+    /// Every build event becomes a `JobEventKind` of the same kind. Against the F0 enum (no fields yet) only the kind
+    /// survives; against W2's F1 enum the round trip is lossless.
+    #[test]
+    fn job_events_keep_the_kind_and_carry_every_field_the_enum_has() {
+        for e in every_kind() {
+            let wire = serde_json::to_value(&e).unwrap_or_default();
+            let kind = to_job_event(&e).unwrap_or_else(|| panic!("{wire} is not a JobEventKind"));
+            let back = serde_json::to_value(&kind).unwrap_or_default();
+            assert_eq!(back["kind"], wire["kind"]);
+            let fields = back.as_object().map_or(0, serde_json::Map::len);
+            assert!(fields == 1 || back == wire, "a lossy conversion: {back} from {wire}");
+        }
+    }
+
+    #[test]
+    fn warning_codes_are_in_the_build_family() {
+        assert!(warn::ALL.iter().all(|c| c.starts_with("build.warn.")));
+        let mut sorted = warn::ALL.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), warn::ALL.len());
     }
 
     #[test]

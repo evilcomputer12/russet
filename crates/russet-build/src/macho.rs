@@ -61,21 +61,27 @@ pub fn tool_name(tool: u32) -> String {
 }
 
 fn macho_error(e: russet_macho::MachOError) -> Error {
-    Error::new(codes::core::IO, format!("Mach-O: {e}")).caused_by(e)
+    Error::new(codes::core::IO, format!("Mach-O: {e}"))
+        .with_hint("The file is damaged or not a Mach-O image; rebuild it (`russet build --clean`).")
+        .caused_by(e)
+}
+
+/// The name of a slice's architecture. W6's russet-macho adds `Arch::Other { cputype, cpusubtype }` (armv7,
+/// arm64_32, …); the catch-all arm names it and keeps this match compiling against both the F0 enum and W6's.
+fn arch_name(arch: russet_macho::Arch) -> String {
+    match arch {
+        russet_macho::Arch::Arm64 => "arm64".to_owned(),
+        russet_macho::Arch::Arm64e => "arm64e".to_owned(),
+        russet_macho::Arch::X86_64 => "x86_64".to_owned(),
+        #[allow(unreachable_patterns)]
+        other => format!("{other:?}"),
+    }
 }
 
 impl MachOTool for RussetMachO {
     fn summary(&self, bytes: &[u8]) -> Result<MachOSummary> {
         let m = russet_macho::MachO::parse(bytes).map_err(macho_error)?;
-        let archs = m
-            .slices()
-            .iter()
-            .map(|s| match s.arch {
-                russet_macho::Arch::Arm64 => "arm64".to_owned(),
-                russet_macho::Arch::Arm64e => "arm64e".to_owned(),
-                russet_macho::Arch::X86_64 => "x86_64".to_owned(),
-            })
-            .collect();
+        let archs = m.slices().iter().map(|s| arch_name(s.arch)).collect();
         let bv = m.build_version();
         Ok(MachOSummary {
             archs,
@@ -126,5 +132,12 @@ mod tests {
     fn tool_names() {
         assert_eq!(tool_name(4), "lld");
         assert_eq!(tool_name(9), "tool9");
+    }
+
+    #[test]
+    fn arch_names() {
+        assert_eq!(arch_name(russet_macho::Arch::Arm64), "arm64");
+        assert_eq!(arch_name(russet_macho::Arch::Arm64e), "arm64e");
+        assert_eq!(arch_name(russet_macho::Arch::X86_64), "x86_64");
     }
 }
