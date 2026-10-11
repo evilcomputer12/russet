@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Owner review (QA §7; PLAN W8, QA-04). In the private phase GitHub cannot enforce it (Free plan); the lead's merge
+# step checks it. Later lines win.
+
+*                                   @evilcomputer12
+
+# Secrets, agent policy and signing (ARCHITECTURE §11, §12)
+/crates/russet-secrets/             @evilcomputer12
+/crates/russet-mcp/src/policy*      @evilcomputer12
+/crates/russet-sign/                @evilcomputer12
+/crates/russet-account/             @evilcomputer12
+
+# CI, upload allowlist, licences, notices, packaging
+/.github/                           @evilcomputer12
+/LICENSES/                          @evilcomputer12
+/NOTICE.md                          @evilcomputer12
+/REUSE.toml                         @evilcomputer12
+/deny.toml                          @evilcomputer12
+/packaging/                         @evilcomputer12
+
+# The guards and their allowlists (provenance roots, private-track term digests, synthetic test values, uploads)
+/xtask/src/guard.rs                 @evilcomputer12
+/.github/synthetic-secrets.toml     @evilcomputer12
+/.github/upload-safe.toml           @evilcomputer12

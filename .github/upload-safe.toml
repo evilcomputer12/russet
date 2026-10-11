@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# The upload-safe allowlist (QA §4.1; ARCHITECTURE §19; PLAN W8): the only Mach-O files CI may upload are the
+# RussetProbe outputs of apple-release.yml, Russet's own Apple-hardware release of its fixture app (W23, Wave 4).
+# `cargo xtask guard --artifacts DIR --upload-allowlist .github/upload-safe.toml --workflow W --job J` admits a
+# file only when every reason it was flagged is Mach-O magic and its path relative to DIR matches an entry of
+# workflow W and job J. Every other Apple format, every other workflow and every other job stays blocked.
+# Changing this file is a review item for the owner (.github/CODEOWNERS).
+
+schema = 1
+
+[[allow]]
+workflow = "apple-release.yml"
+# W23 names the job; keep this id in step with apple-release.yml when it lands.
+job = "release"
+# Globs relative to the uploaded directory; `**/` also matches no directory at all.
+paths = [
+    "**/RussetProbe.app/RussetProbe",
+    "**/RussetProbe.app.dSYM/Contents/Resources/DWARF/RussetProbe",
+]
+reason = "Russet's own fixture app, built and signed on Apple hardware for TestFlight (G5); 0BSD sources"

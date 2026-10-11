@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Russet contributors
+//
+// russet/1 against the testkit's fake daemon (src/fake_daemon.rs): a request before the handshake (-32002),
+// initialize with a capture, an unknown method (-32601), a server request (ui.confirm) answered by the client,
+// and a long request cancelled after its first $/progress (-32800 with core.cancelled). The format is described
+// in src/transcript.rs.
+{"transcript": 1, "name": "fake-daemon", "timeoutMs": 5000, "ignore": ["$/progress"]}
+{"send": {"jsonrpc": "2.0", "id": 1, "method": "daemon.ping", "params": {}}}
+{"expect": {"id": 1, "error": {"code": -32002}}}
+{"send": {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {"protocol": {"major": 1, "minor": 0}, "client": {"kind": "test", "name": "transcript", "version": "0.1.0", "pid": 1}}}}
+{"expect": {"jsonrpc": "2.0", "id": 2, "result": {"protocol": {"major": 1, "minor": 0}, "connectionId": "$capture:conn", "server": {"name": "$type:string"}}, "error": "$absent"}}
+{"send": {"jsonrpc": "2.0", "id": 3, "method": "test.echo", "params": {"connection": "${conn}", "note": "on ${conn}"}}}
+{"expect": {"id": 3, "result": {"connection": "${conn}", "note": "$prefix:on c-"}}}
+{"send": {"jsonrpc": "2.0", "id": 4, "method": "russet.noSuchMethod", "params": {}}}
+{"expect": {"id": 4, "error": {"code": -32601}}}
+{"comment": "ui.confirm is a server-to-client request (ARCHITECTURE §9.3); its id is captured and echoed"}
+{"send": {"jsonrpc": "2.0", "id": 5, "method": "test.confirm", "params": {"title": "Install?"}}}
+{"expect": {"method": "ui.confirm", "id": "$capture:confirm", "params": {"title": "Install?", "requestedBy": {"kind": "test"}}}}
+{"send": {"jsonrpc": "2.0", "id": "${confirm}", "result": {"confirmed": true}}}
+{"expect": {"id": 5, "result": {"confirmed": true}}}
+{"send": {"jsonrpc": "2.0", "id": 6, "method": "test.slow", "params": {"progressToken": "p-1"}}}
+{"expect": {"method": "$/progress", "params": {"token": "p-1", "value": {"kind": "begin"}}}}
+{"send": {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 6}}}
+{"expect": {"id": 6, "error": {"code": -32800, "data": {"russetCode": "core.cancelled"}}}}

@@ -2,6 +2,10 @@
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # typos (QA-01, run by `cargo xtask guard typos`, W8).
+#
+# Every entry below was reviewed: it is Apple, iOS, protocol or tooling vocabulary that typos would "fix" into a
+# different word. Prefer the narrowest form: `extend-identifiers` (exact, case-sensitive) for one identifier,
+# `extend-words` (case-insensitive) only for a real word of the domain. Never add an English misspelling here.
 
 [files]
 extend-exclude = [
@@ -12,6 +16,8 @@ extend-exclude = [
     "extension/src/generated/**",
     "pins/**",
     "*.rdt.jsonl.zst",
+    # npm lock files are generated (the testkit's Node interop harness).
+    "package-lock.json",
 ]
 
 [default]
@@ -20,6 +26,8 @@ extend-ignore-re = [
     "\\b[0-9A-Fa-f]{8,}\\b",
     # Apple build numbers such as 27A266a or 24A437.
     "\\b[0-9]{2}[A-Z][0-9]{3,4}[a-z]?\\b",
+    # dyld's own spelling, quoted verbatim in error messages: "mis-aligned LINKEDIT string pool".
+    "mis-aligned LINKEDIT",
 ]
 
 [default.extend-words]
@@ -27,3 +35,28 @@ extend-ignore-re = [
 ba = "ba"
 inout = "inout"
 ser = "ser"
+# Unique Device Identifier (UDID, Udid, udid): the iPhone's identity everywhere in the device plane, never "uuid".
+udid = "udid"
+# usbmuxd's host identifier: `ReadBUID`, lockdown's `SystemBUID`, idevice's `pair(host_id, buid, name)`.
+buid = "buid"
+# Apple's App Store Connect error-code prefix (ITMS-90xxx) and the `itms-services:` URL scheme.
+itms = "itms"
+# StikDebug, the iOS JIT enabler project (reference only, ARCHITECTURE §19).
+stik = "stik"
+# TCP retransmission timeout (jktcp's adapter: MSS, RTO).
+rto = "rto"
+
+[default.extend-identifiers]
+# Apple Neural Engine; Arm's Scalable Matrix Extension (macOS-on-x86 research notes).
+ANE = "ANE"
+SME = "SME"
+# The GrandSlam SRP password-derivation protocols `s2k` and `s2k_fo`.
+s2k_fo = "s2k_fo"
+# The flate2 crate.
+flate2 = "flate2"
+# PNG images, plural.
+PNGs = "PNGs"
+# ELF dynamic-section tag (relocations with addends).
+DT_RELA = "DT_RELA"
+# The ACP SDK's newline-delimited JSON stream constructor.
+ndJsonStream = "ndJsonStream"
