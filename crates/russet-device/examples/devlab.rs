@@ -13,7 +13,8 @@
 //! … -- signal <pid> <sig> | install <app|ipa> | uninstall <bundle>
 //! … -- forward (--service NAME | --tunnel-port N | --usbmux-port N) [--bind tcp:ADDR|unix:PATH] [--secs N]
 //! … -- logs [--pid N] [--bundle B] [--secs N] | tail [--pid N] [--bundle B] [--lines N]
-//! … -- bench-sessions N | bench-afc MiB | ddi-mount <dir> [--force]
+//! … -- bench-sessions N [--gap-ms N] | bench-afc MiB | ddi-mount <dir> [--force] | watch [--secs N]
+//! … -- follow-relaunch <bundle> | cryptexd-installed [--shape]
 //! ```
 
 #![allow(clippy::print_stdout)]
@@ -177,6 +178,25 @@ async fn run() -> russet_core::Result<()> {
                 c.ticket_bytes,
                 &c.image_sha384[..16]
             );
+        }
+        "watch" => {
+            // Device events with timestamps (DEV-02: restart usbmuxd meanwhile; the device must be re-listed within 5 s).
+            let secs = num(&args, "--secs", 60u64);
+            let mut rx = mgr.events();
+            let until = tokio::time::Instant::now() + Duration::from_secs(secs);
+            println!("[{}] watching {secs} s; {} device(s) now", stamp(), mgr.devices().len());
+            loop {
+                let ev = tokio::select! {
+                    _ = tokio::time::sleep_until(until) => break,
+                    ev = rx.recv() => ev,
+                };
+                match ev {
+                    Ok(russet_device::DeviceEvent::Added(s)) => println!("[{}] added {}", stamp(), s.udid.redacted()),
+                    Ok(russet_device::DeviceEvent::Removed(u)) => println!("[{}] removed {}", stamp(), u.redacted()),
+                    Ok(russet_device::DeviceEvent::Changed(_)) => {}
+                    Err(_) => {}
+                }
+            }
         }
         "follow-relaunch" => {
             // device.md §6.7: a bundle's log stream follows a relaunch. Subscribes by bundle id, then launches the app
