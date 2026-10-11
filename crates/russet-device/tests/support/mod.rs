@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -55,6 +55,11 @@ pub struct FakeConnector {
     pub value_calls: AtomicUsize,
     /// Every facade API called, in order.
     pub calls: Mutex<Vec<String>>,
+    /// While set, RSD services other than `test.echo` fail with `device.locked` (a locked iPhone).
+    pub locked: AtomicBool,
+    /// While set, the connector answers like russet-testkit's scripted backend before it adopted the device
+    /// plane's catalog: `lockdown.get_value {udid?, key?, domain?}` only, `device.serviceNotImplemented` for the rest.
+    pub qa_catalog_only: AtomicBool,
 }
 
 impl FakeConnector {
@@ -66,6 +71,8 @@ impl FakeConnector {
             events_rx: Mutex::new(Some(rx)),
             value_calls: AtomicUsize::new(0),
             calls: Mutex::new(Vec::new()),
+            locked: AtomicBool::new(false),
+            qa_catalog_only: AtomicBool::new(false),
         })
     }
 
@@ -120,6 +127,9 @@ impl ServiceConnector for FakeConnector {
         self.device(udid.as_str())?;
         match name {
             "test.echo" => Ok(echo_stream()),
+            _ if self.locked.load(Ordering::SeqCst) => {
+                Err(Error::new(codes::device::LOCKED, "the iPhone is locked (fake)"))
+            }
             _ => Err(Error::new(codes::device::SERVICE_UNAVAILABLE, format!("fake has no RSD service {name}"))),
         }
     }
@@ -137,6 +147,26 @@ impl ServiceConnector for FakeConnector {
     async fn call(&self, call: FacadeCall) -> Result<serde_json::Value> {
         self.calls.lock().expect("lock").push(call.api.clone());
         let udid = call.args.get("udid").and_then(|u| u.as_str()).unwrap_or_default().to_owned();
+        if self.qa_catalog_only.load(Ordering::SeqCst) {
+            // The shape of russet-testkit's `lockdown_value` (W8, scripted.rs): the whole domain without `key`.
+            if call.api != facade::LOCKDOWN_GET_VALUE {
+                return Err(Error::new(
+                    codes::device::SERVICE_NOT_IMPLEMENTED,
+                    format!("the scenario scripts no answer for {}", call.api),
+                ));
+            }
+            let d = self.device(&udid)?;
+            let all = json!({"UniqueDeviceID": d.udid, "DeviceName": "Test iPhone", "ProductType": d.product_type,
+                             "ProductVersion": d.os_version, "BuildVersion": "24A437", "DeviceClass": "iPhone",
+                             "ChipID": d.chip_id, "CPUArchitecture": "arm64e"});
+            return match call.args.get("key").and_then(|k| k.as_str()) {
+                None => Ok(all),
+                Some(k) => all
+                    .get(k)
+                    .cloned()
+                    .ok_or_else(|| Error::new(codes::device::PROTOCOL, format!("lockdown has no value {k}"))),
+            };
+        }
         match call.api.as_str() {
             facade::MUX_LIST => {
                 let list: Vec<_> = self

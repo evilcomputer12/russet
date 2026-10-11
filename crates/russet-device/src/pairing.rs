@@ -55,15 +55,28 @@ pub fn identity_from_values(values: &Map<String, Value>) -> Identity {
     }
 }
 
+/// Lockdown values through `lockdown.values`, or through `lockdown.get_value` (the whole domain, then the wanted
+/// keys) when the connector does not answer the former (russet-testkit's scripted backend, QA §3.5.2).
 async fn values(h: &DeviceHandle, keys: &[&str], domain: Option<&str>, session: bool) -> Result<Map<String, Value>> {
-    let v = h
-        .conn()
-        .call(FacadeCall::new(
-            facade::LOCKDOWN_VALUES,
-            json!({ "udid": h.udid().as_str(), "keys": keys, "domain": domain, "session": session }),
-        ))
-        .await?;
-    Ok(v.get("values").and_then(|v| v.as_object()).cloned().unwrap_or_default())
+    let call = FacadeCall::new(
+        facade::LOCKDOWN_VALUES,
+        json!({ "udid": h.udid().as_str(), "keys": keys, "domain": domain, "session": session }),
+    );
+    match h.conn().call(call).await {
+        Ok(v) => Ok(v.get("values").and_then(|v| v.as_object()).cloned().unwrap_or_default()),
+        Err(e) if crate::io::unanswered(&e) => {
+            let all = h
+                .conn()
+                .call(FacadeCall::new(
+                    facade::LOCKDOWN_GET_VALUE,
+                    json!({ "udid": h.udid().as_str(), "domain": domain }),
+                ))
+                .await?;
+            let all = all.as_object().cloned().unwrap_or_default();
+            Ok(keys.iter().filter_map(|k| all.get(*k).map(|v| ((*k).to_owned(), v.clone()))).collect())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 impl DeviceHandle {
@@ -103,12 +116,31 @@ impl DeviceHandle {
         Ok(())
     }
 
-    /// Records that an operation reported the device locked (or that a launch succeeded).
+    /// The lock hint (device.md F9): `yes` after an operation reported "Locked", `no` after the next successful
+    /// launch, `unknown` before either (iOS 27 cannot be asked).
+    pub fn lock_hint(&self) -> Tri {
+        self.actor.cached().locked
+    }
+
+    /// Records that an operation reported the device locked (or that a launch succeeded). Summaries carry the hint
+    /// inside `readiness`; when no client read readiness yet, a "locked" report reads it once in the background, so
+    /// `device.list` and `device.changed` show the hint.
     pub(crate) fn set_locked(&self, locked: Tri) {
-        let before = self.actor.cached().locked;
-        if before != locked {
+        let before = self.actor.cached();
+        if before.locked != locked {
             self.actor.update(|c| c.locked = locked);
             self.changed();
+            if locked == Tri::Yes
+                && before.readiness.is_none()
+                && let Ok(rt) = tokio::runtime::Handle::try_current()
+            {
+                let h = self.clone();
+                rt.spawn(async move {
+                    if let Err(e) = h.readiness(true).await {
+                        tracing::debug!(error = %e.message(), "readiness after a lock report failed");
+                    }
+                });
+            }
         }
     }
 
@@ -146,12 +178,29 @@ impl DeviceHandle {
         amfi.reveal_developer_mode_option_in_ui().await.map_err(|e| from_idevice(e, "revealing Developer Mode"))
     }
 
-    /// The pairing state (`pairing.status`).
+    /// The pairing state (`pairing.status`). A connector that does not answer it is asked for a lockdown value
+    /// instead: an answer means paired, `device.notPaired`/`device.untrusted` mean not.
     pub async fn pairing_status(&self) -> Result<PairingStatus> {
-        let v =
-            self.conn().call(FacadeCall::new(facade::PAIRING_STATUS, json!({ "udid": self.udid().as_str() }))).await?;
-        serde_json::from_value(v)
-            .map_err(|e| device_error(codes::device::PROTOCOL, format!("pairing.status: unexpected result: {e}")))
+        let udid = json!({ "udid": self.udid().as_str() });
+        match self.conn().call(FacadeCall::new(facade::PAIRING_STATUS, udid.clone())).await {
+            Ok(v) => serde_json::from_value(v)
+                .map_err(|e| device_error(codes::device::PROTOCOL, format!("pairing.status: unexpected result: {e}"))),
+            Err(e) if crate::io::unanswered(&e) => {
+                let probe = json!({ "udid": self.udid().as_str(), "key": "ProductVersion" });
+                match self.conn().call(FacadeCall::new(facade::LOCKDOWN_GET_VALUE, probe)).await {
+                    Ok(_) => Ok(PairingStatus { record_found: true, paired: true, error: None }),
+                    Err(e) if e.code() == codes::device::NOT_PAIRED || e.code() == codes::device::UNTRUSTED => {
+                        Ok(PairingStatus {
+                            record_found: e.code() == codes::device::UNTRUSTED,
+                            paired: false,
+                            error: Some(e.code().as_str().to_owned()),
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// `device.pair`: validates an existing record, else runs the Trust flow (device.md §6.2). Reports

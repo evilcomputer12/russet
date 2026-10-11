@@ -76,11 +76,15 @@ pub mod facade {
 
     /// `mux.list`: `{}` → `MuxRecord[]`, every device the mux reports.
     pub const MUX_LIST: &str = "mux.list";
-    /// `mux.ping`: `{}` → `{endpoint, devices}`; doctor's `usbmux.available` (live backend only).
+    /// `mux.ping`: `{}` → `{endpoint, devices}`; doctor's `device.mux` (live backend only).
     pub const MUX_PING: &str = "mux.ping";
     /// `lockdown.values`: `{udid, keys: string[], domain?, session: bool}` → `{values: {key: json}}`. Keys the
     /// device does not answer are omitted; data values are lowercase hex strings.
     pub const LOCKDOWN_VALUES: &str = "lockdown.values";
+    /// `lockdown.get_value`: `{udid?, key?, domain?}` → the value of `key`, or the domain's whole dictionary without
+    /// `key` (QA §3.5.2's recorded call; russet-testkit's scripted connector answers it from the scenario). The
+    /// device plane asks [`LOCKDOWN_VALUES`] first and falls back to this when a connector does not answer that.
+    pub const LOCKDOWN_GET_VALUE: &str = "lockdown.get_value";
     /// `pairing.status`: `{udid}` → [`PairingStatus`].
     pub const PAIRING_STATUS: &str = "pairing.status";
     /// `pairing.pair`: `{udid, hostName?, timeoutMs?}` → `{status: paired | pending | denied | locked}`. Waits for
@@ -135,6 +139,13 @@ pub mod facade {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub mss: Option<u64>,
     }
+}
+
+/// Whether a facade call failed only because the connector does not answer that API (`device.serviceNotImplemented`,
+/// 3013): a connector that implements an older or smaller catalog. The device plane then uses a fallback where one
+/// exists (`lockdown.get_value` for `lockdown.values`, a lockdown probe for `pairing.status`).
+pub fn unanswered(e: &russet_core::Error) -> bool {
+    e.code() == codes::device::SERVICE_NOT_IMPLEMENTED
 }
 
 /// The real connector: usbmuxd (or AMDS), lockdown, CoreDeviceProxy and the jktcp tunnel.

@@ -376,6 +376,31 @@ async fn unix_forwards_are_private_and_named_after_the_lease() {
     assert!(!path.exists());
 }
 
+/// Lane D's scripted backend (russet-testkit, W8) answers QA §3.5's `lockdown.get_value`, not this crate's
+/// `lockdown.values`/`pairing.status`/`tunnel.status`/`mux.list`: the device plane still lists the device with its
+/// identity, reads readiness and selects it.
+#[tokio::test]
+async fn a_connector_with_only_lockdown_get_value_still_drives_the_device_plane() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let conn = FakeConnector::new(vec![]);
+    conn.qa_catalog_only.store(true, Ordering::SeqCst);
+    let m = DeviceManager::start(config(tmp.path()), conn.clone() as Arc<dyn ServiceConnector>).await.expect("start");
+    let mut rx = m.events();
+    conn.attach(FakeDevice::iphone12(UDID_A));
+    next_event(&mut rx).await;
+    let list = rpc::device_list(&m).await.expect("device.list");
+    let json = serde_json::to_value(&list.devices[0]).expect("json");
+    assert_eq!(json["state"], "ready", "{json}");
+    assert_eq!(json["productType"], "iPhone13,2");
+    assert_eq!(json["osVersion"], "27.0");
+    assert_eq!(json["codeSigningMonitor"], "txm");
+    let h = m.get(&DeviceSelector::Only).expect("the only device is usable");
+    let r = h.readiness(true).await.expect("readiness through the fallbacks");
+    assert!(r.paired);
+    let calls = conn.calls.lock().expect("calls").clone();
+    assert!(calls.iter().any(|c| c == "lockdown.get_value"), "{calls:?}");
+}
+
 /// Canary (PLAN §0 DoD: no secrets in logs): device errors never carry a UDID, only its redacted form.
 #[tokio::test]
 async fn errors_never_carry_a_udid() {

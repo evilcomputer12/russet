@@ -101,6 +101,16 @@ struct ValuesArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct GetValueArgs {
+    udid: String,
+    #[serde(default)]
+    key: Option<String>,
+    #[serde(default)]
+    domain: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PairArgs {
     udid: String,
     #[serde(default)]
@@ -311,6 +321,23 @@ impl LiveConnector {
         Ok(serde_json::json!({ "values": values }))
     }
 
+    /// `lockdown.get_value`: with a session when the pair record works (else the public values), one key or the
+    /// whole domain.
+    async fn lockdown_get_value(&self, a: GetValueArgs) -> Result<serde_json::Value> {
+        let udid = Udid(a.udid);
+        let provider = self.provider(&udid).await?;
+        let mut lockdown = match self.lockdown(&provider, true).await {
+            Ok(l) => l,
+            Err(e) if e.code() == codes::device::NOT_PAIRED || e.code() == codes::device::UNTRUSTED => {
+                self.lockdown(&provider, false).await?
+            }
+            Err(e) => return Err(e),
+        };
+        let what = format!("lockdown GetValue {}", a.key.as_deref().unwrap_or("(all)"));
+        let v = lockdown.get_value(a.key.as_deref(), a.domain.as_deref()).await.map_err(|e| from_idevice(e, &what))?;
+        Ok(plist_to_json(&v))
+    }
+
     async fn pairing_status(&self, udid: &Udid) -> Result<PairingStatus> {
         let provider = self.provider(udid).await?;
         let pairing = match provider.pairing_file().await {
@@ -457,6 +484,7 @@ impl ServiceConnector for LiveConnector {
                 Ok(serde_json::json!({ "endpoint": self.endpoint.describe(), "devices": list.len() }))
             }
             facade::LOCKDOWN_VALUES => self.lockdown_values(args(&call)?).await,
+            facade::LOCKDOWN_GET_VALUE => self.lockdown_get_value(args(&call)?).await,
             facade::PAIRING_STATUS => {
                 let a: UdidArgs = args(&call)?;
                 Ok(serde_json::to_value(self.pairing_status(&Udid(a.udid)).await?).unwrap_or_default())
