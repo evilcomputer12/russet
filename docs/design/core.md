@@ -495,6 +495,16 @@ pub fn registry() -> &'static [MethodInfo];  // used for capabilities, MCP tools
 
 ### 5.4 `russet-config`
 
+> **As implemented (W3, 2026-10-11):** `ConfigService` (ARCHITECTURE §5.3) wraps these functions: `load`, `global`,
+> `global_loaded`, `effective`, `project`, `mcp_policy`, `provision_policy`, `agents(client, project)`, `lookup`
+> (`config.get`, with `files`), `set`/`unset`, `schema`, `editor`, `subscribe`. Files are re-read when their stamp
+> changes; an invalid file never stops the daemon (`global()` falls back to the defaults; `effective()` and doctor
+> report the error with `path:line:col`). `ConfigEditor::set` coerces the value to the schema's type (`"2"` → `2`)
+> and validates the whole file before `save`, which writes atomically (new `config.toml` files are 0600). Every
+> file of ARCHITECTURE §14 has a typed model and a schema (`schemas/config/*.schema.json`, checked by
+> `crates/russet-config/tests/schemas.rs`). `[agents]` narrows per file: `russet.local.toml` cannot widen
+> `russet.toml` either. `RUSSET_DEVICE` → `run.device` and `RUSSET_LOG` → `daemon.log-filter` are the env layer.
+
 ```rust
 pub fn find_project_root(start: &Path) -> Result<Option<PathBuf>>;     // walks up to the nearest russet.toml
 pub fn load_global(dirs: &RussetDirs) -> Result<Loaded<GlobalConfig>>;
@@ -518,6 +528,12 @@ Errors report the file, line and column. Spans come from `toml_edit` and key pat
 
 ### 5.5 `russet-secrets`
 
+> **As implemented (W3, 2026-10-11):** the ARCHITECTURE §5.3 API (`SecretId {kind, name}`, `SecretBytes`,
+> `put/get/delete/list/backend`) plus `SecretStore::status()` (an async probe with a default) and
+> `BackendInfo.keyring_entry`. Backends: `SealedStore` with `KeyringKeySource` or `PassphraseKeySource`,
+> `EnvStore` (read-only CI variables), `MemoryStore` (tests); `redact` holds the field-name and JWT/PEM/Bearer
+> helpers. See §9.6 for the on-disk layout.
+
 ```rust
 pub struct SecretRef(String);   // stable id, e.g. "asc/team-main", "appleid/me@example.com", "cert/dev-ABCDE12345"
 pub enum SecretKind { AscPrivateKey, AppleIdSession, AnisetteState, SigningKey, Token }
@@ -536,6 +552,12 @@ pub fn open_default(dirs: &RussetDirs, cfg: &SecretsConfig) -> Result<Arc<dyn Se
 ```
 
 ### 5.6 `russet-toolchain`
+
+> **As implemented (W3, 2026-10-11):** `Requirement` is `{version, flavor}` (F2 refinement; `flavor` carries
+> `[toolchain] linker` and `[debug] lldb`), `Provenance` gains `Uv`, `gc(dry_run)` returns a `GcReport`, and
+> `Toolchains::{new, load, subscribe, resolve_build_env, set_min_free_space}` exist; `probe_all` lists every
+> candidate (a rejected system LLD too) in the ARCHITECTURE §16.1 order. Probes run through an `Exec` seam with a
+> cache in `cache/toolchain-probes.json` keyed by path, mtime, size, arguments and env.
 
 ```rust
 pub enum Component { Swift, DarwinSdk, Linker, Lldb, LldbDap, LibPython, Xtool, Flutter, GenSnapshotIos, Llvm }
@@ -572,6 +594,12 @@ impl PinManifest {
 ```
 
 ### 5.7 `russet-doctor`
+
+> **As implemented (W3, 2026-10-11):** `Check` also has `fix_kind()` (`None | Auto | Command(cmd) | Manual`);
+> `CheckCx` carries the directories, the daemon's device backend, the usbmux address, `min-free-space` and typed
+> `extensions` through which russetd hands checks its services (L2 crates cannot implement `Check`, [D 100]);
+> `russet_doctor::async_trait` is re-exported for implementors. `Registry::run` runs checks concurrently with a
+> 60 s timeout each and reports them in registration order.
 
 ```rust
 pub enum Status { Pass, Warn, Fail, Skip }
@@ -1206,6 +1234,16 @@ Sources: the XDG Base Directory spec [S 3] and the Windows Known Folders.
 
 ### 9.6 Secrets
 
+> **As implemented (W3, 2026-10-11):** the master key is stored base64-encoded as the keyring entry's password
+> (no binary-secret quirks). `data/secrets/` (0700, files 0600) holds `<sha256(id)>.sealed` (magic `RSSEAL01`,
+> version, 24-byte nonce, XChaCha20-Poly1305 ciphertext; AAD `russet-secret\0 id \0 kind \0 version`),
+> `index.json` (names, labels, sizes, dates), `master.check` (a sealed constant: a wrong passphrase or a replaced
+> keyring entry is refused with `secrets.locked` before anything is overwritten), `store.json` (the sealing backend,
+> which `auto` keeps) and `master.salt`. For a new store `auto` takes the keyring when a session bus exists, else
+> the passphrase store when `RUSSET_SECRETS_PASSPHRASE` is set. Nothing touches the keyring at open; keyring-core
+> runs on blocking threads on first use. CI ids: `asc-key/<RUSSET_ASC_KEY_ID>`, `signing-key/ci`,
+> `signing-key/ci.password`.
+
 **What counts as a secret:**
 - ASC `.p8` private keys;
 - Apple ID session tokens (GSA) and anisette provisioning state;
@@ -1247,6 +1285,14 @@ Sources: the XDG Base Directory spec [S 3] and the Windows Known Folders.
 | gen_snapshot (iOS target) | Russet CI builds per Flutter tag (build doc) | Same | Dart revision embedded |
 
 ### 10.2 Pin manifest
+
+> **As implemented (W3, 2026-10-11; [D 87]):** Wave 1's `pins/stable.toml` holds the Xcode 27 row and the
+> `python-shared` (3.12.15, release 20261009) and `darwin-tools` (1.1.0) artifacts for `linux-x86_64` and
+> `linux-aarch64` (`url`, `size`, `sha256`, `format`). `cargo xtask pins` reads the release metadata with
+> `gh api`, hashes each asset as it streams (cross-checked with GitHub's published digest), and signs with a
+> minisign-compatible CLI (`minisign` or `rsign`) and the development key `~/.config/russet-dev/minisign.key`
+> (`--init-dev-key`; public half `pins/dev-minisign.pub`). Debug builds trust the dev key; release builds trust only
+> W26's keys (none yet).
 
 `pins/stable.toml` is generated by `cargo xtask pins` from the upstream APIs:
 - swift.org `api/v1/install/releases.json` [S 13];
@@ -1353,6 +1399,11 @@ Without that env, `lldb-dap` fails at load time: `libpython3.12.so.1.0: cannot o
 
 ### 10.5 Installation
 
+> **As implemented (W3, 2026-10-11):** Wave 1 installs `python-shared` and `darwin-tools` only. The archive root
+> is component-specific (PBS wraps its files in `python/`; darwin-tools ships `bin/` at the top); entries that
+> leave the tree (absolute paths, `..`, links pointing outside) fail with `toolchain.verifyFailed`. Each install
+> writes `.russet-install.json`; `RUSSET_OFFLINE=1` refuses non-loopback URLs.
+
 1. **Free space:** `ensure_space(data volume, size × 2.2, min-free-space)`. Compressed plus extracted size, plus slack.
 2. **Download** to `cache/downloads/<sha256>.part` with HTTP Range resume. Verify size, then sha256. Then verify the signature where upstream signs: PGP for swift.org (rPGP, with swift.org's keys pinned in the manifest); minisign for Russet-built artifacts.
 3. **Extract** to `data/toolchains/.staging-<rand>/`, then rename atomically to `data/toolchains/<component>/<version>/`. There are no symlinks on Windows: selection lives in `data/toolchains/selected.json`, not in a `current` link.
@@ -1377,6 +1428,14 @@ Without that env, `lldb-dap` fails at load time: `libpython3.12.so.1.0: cannot o
 ---
 
 ## 11. `russet doctor`
+
+> **As implemented (W3, 2026-10-11):** russet-doctor's host checks are `host.os`, `host.disk` (warn below 4× the
+> reserve), `host.memory`, `host.wsl`, `dirs.private` (auto fix) and `usbmux.available`; russetd's
+> `handlers/doctor.rs` holds `config.global` (also validates the policy files), `config.project`,
+> `secrets.backend`, `toolchain.swift`, `toolchain.sdk`, `toolchain.linker` (auto fix: install darwin-tools),
+> `toolchain.lldb`/`toolchain.lldb-dap` (auto fix: install python-shared) and `toolchain.xtool` (`skip` when
+> absent). `daemon.reachable` belongs to W2's `daemon::checks`. Each check's JSON adds `detail?` and
+> `fix?: {kind: auto, applied} | {kind: command, command} | {kind: manual}`; `--category` filters by category.
 
 `russet doctor [--json] [--fix] [--online] [--strict] [--check ID]… [--device D] [--project P]`
 
