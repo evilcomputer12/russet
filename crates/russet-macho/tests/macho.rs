@@ -7,7 +7,7 @@
 
 use russet_macho::consts::*;
 use russet_macho::fixture::{MachOBuilder, fat};
-use russet_macho::{Arch, CodeSignature, HashType, MachO, MachOError, Version};
+use russet_macho::{Arch, CodeSignature, Cpu, HashType, MachO, MachOError, Version};
 
 fn strings_of(bytes: &[u8]) -> Vec<String> {
     // Resolves every symbol name through LC_SYMTAB, to prove the string table is still addressable.
@@ -69,10 +69,33 @@ fn parses_a_dylib_and_a_fat_file() {
     assert!(m.is_fat());
     assert_eq!(m.slices().iter().map(|s| s.arch).collect::<Vec<_>>(), vec![Arch::X86_64, Arch::Arm64]);
     // The single-valued accessors describe the arm64 slice even when it is not first.
-    assert_eq!(m.primary().arch, Arch::Arm64);
+    assert_eq!(m.primary().arch(), Some(Arch::Arm64));
     assert_eq!(m.build_version().unwrap().platform, PLATFORM_IOS);
     assert_eq!(m.slice_bytes(&both, 1).unwrap(), &dylib[..]);
     assert!(russet_macho::is_macho(&both));
+}
+
+/// A slice of a CPU that `Arch` does not name (an old armv7 slice in a vendored framework) is parsed and listed by
+/// `cpu_slices`, while `slices` keeps to the three `Arch` CPUs, so matching on `Arch` stays exhaustive (F0).
+#[test]
+fn other_cpus_are_listed_apart_from_the_arch_slices() {
+    let armv7 = Cpu { cputype: CPU_TYPE_ARM, cpusubtype: 9 };
+    let old = MachOBuilder::dylib("@rpath/Old.framework/Old").cpu(armv7).build();
+    let arm64 = MachOBuilder::dylib("@rpath/Old.framework/Old").build();
+    let both = fat(&[old.clone(), arm64.clone()]);
+    let m = MachO::parse(&both).unwrap();
+    assert_eq!(m.slices().iter().map(|s| s.arch).collect::<Vec<_>>(), vec![Arch::Arm64]);
+    assert_eq!(m.cpu_slices().iter().map(|s| s.cpu.name()).collect::<Vec<_>>(), vec!["armv7", "arm64"]);
+    assert_eq!(m.images().len(), 2);
+    assert_eq!(m.images()[0].arch(), None);
+    assert_eq!(m.primary().arch(), Some(Arch::Arm64), "arm64 is primary although it is second");
+    assert_eq!(m.slice_bytes(&both, 0).unwrap(), &old[..], "slice_bytes indexes cpu_slices, like images");
+    assert_eq!(russet_macho::thin_bytes(&both, Arch::Arm64).unwrap(), arm64);
+    // A thin file of another CPU parses, with no Arch slice.
+    let m = MachO::parse(&old).unwrap();
+    assert!(m.slices().is_empty());
+    assert_eq!(m.cpu_slices()[0].cpu, armv7);
+    assert!(matches!(russet_macho::thin_bytes(&old, Arch::Arm64), Err(MachOError::NotFound(_))));
 }
 
 #[test]

@@ -10,7 +10,7 @@
 //! `LC_ENCRYPTION_INFO_64`. apple-codesign can sign it, so signer tests run on it.
 
 use crate::consts::*;
-use crate::{Arch, Version};
+use crate::{Arch, Cpu, Version};
 
 const PAGE: u64 = 0x4000;
 const TEXT_SECTION_OFFSET: u64 = 0x1000;
@@ -18,7 +18,7 @@ const TEXT_SECTION_OFFSET: u64 = 0x1000;
 /// Builds one thin image.
 #[derive(Debug, Clone)]
 pub struct MachOBuilder {
-    arch: Arch,
+    cpu: Cpu,
     filetype: u32,
     platform: u32,
     minos: Version,
@@ -38,7 +38,7 @@ impl MachOBuilder {
     /// An iOS arm64 executable (`MH_EXECUTE`), minos 17.0, sdk 27.0.
     pub fn executable() -> Self {
         Self {
-            arch: Arch::Arm64,
+            cpu: Cpu::from(Arch::Arm64),
             filetype: MH_EXECUTE,
             platform: PLATFORM_IOS,
             minos: Version::new(17, 0, 0),
@@ -66,7 +66,13 @@ impl MachOBuilder {
     }
 
     pub fn arch(mut self, arch: Arch) -> Self {
-        self.arch = arch;
+        self.cpu = arch.into();
+        self
+    }
+
+    /// Any CPU type and subtype, including those [`Arch`] does not name (the header stays 64-bit).
+    pub fn cpu(mut self, cpu: Cpu) -> Self {
+        self.cpu = cpu;
         self
     }
 
@@ -226,8 +232,8 @@ impl MachOBuilder {
         let flags = if exec { 0x0020_0085 } else { 0x0010_0085 }; // NOUNDEFS|DYLDLINK|TWOLEVEL + PIE / APP_EXT_SAFE
         out.extend_from_slice(&words(&[
             MH_MAGIC_64,
-            self.arch.cputype(),
-            self.arch.cpusubtype(),
+            self.cpu.cputype,
+            self.cpu.cpusubtype,
             self.filetype,
             cmds.len() as u32,
             sizeofcmds as u32,

@@ -102,28 +102,20 @@ impl FromStr for Version {
     }
 }
 
-/// CPU architecture of a slice.
+/// CPU architecture of a slice: the three ARCHITECTURE §5.3 names (F0). Slices of any other CPU (`armv7`,
+/// `arm64_32`, `i386`, …) are described by [`Cpu`] and listed by [`MachO::cpu_slices`], so matching on `Arch`
+/// stays exhaustive with these three arms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Arch {
     Arm64,
     Arm64e,
     X86_64,
-    /// Anything else (`armv7`, `arm64_32`, `i386`, …), with its raw CPU type and subtype.
-    Other {
-        cputype: u32,
-        cpusubtype: u32,
-    },
 }
 
 impl Arch {
-    /// Classifies a CPU type and subtype.
-    pub fn from_cpu(cputype: u32, cpusubtype: u32) -> Self {
-        match (cputype, cpusubtype & CPU_SUBTYPE_MASK) {
-            (CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64E) => Self::Arm64e,
-            (CPU_TYPE_ARM64, _) => Self::Arm64,
-            (CPU_TYPE_X86_64, _) => Self::X86_64,
-            _ => Self::Other { cputype, cpusubtype },
-        }
+    /// Classifies a CPU type and subtype; `None` for a CPU that is none of the three.
+    pub fn from_cpu(cputype: u32, cpusubtype: u32) -> Option<Self> {
+        Cpu { cputype, cpusubtype }.arch()
     }
 
     /// The CPU type.
@@ -131,7 +123,6 @@ impl Arch {
         match self {
             Self::Arm64 | Self::Arm64e => CPU_TYPE_ARM64,
             Self::X86_64 => CPU_TYPE_X86_64,
-            Self::Other { cputype, .. } => cputype,
         }
     }
 
@@ -141,22 +132,68 @@ impl Arch {
             Self::Arm64 => CPU_SUBTYPE_ARM64_ALL,
             Self::Arm64e => CPU_SUBTYPE_ARM64E,
             Self::X86_64 => CPU_SUBTYPE_X86_64_ALL,
-            Self::Other { cpusubtype, .. } => cpusubtype,
         }
     }
 
-    /// `arm64`, `arm64e`, `x86_64`, or `cpu-<type>-<subtype>`.
-    pub fn name(self) -> String {
+    /// `arm64`, `arm64e` or `x86_64`.
+    pub fn name(self) -> &'static str {
         match self {
-            Self::Arm64 => "arm64".into(),
-            Self::Arm64e => "arm64e".into(),
-            Self::X86_64 => "x86_64".into(),
-            Self::Other { cputype, cpusubtype } => format!("cpu-{cputype:#x}-{cpusubtype:#x}"),
+            Self::Arm64 => "arm64",
+            Self::Arm64e => "arm64e",
+            Self::X86_64 => "x86_64",
         }
     }
 }
 
 impl fmt::Display for Arch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// A CPU type and subtype as a Mach-O or fat header records them: any CPU, including those [`Arch`] does not
+/// name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Cpu {
+    pub cputype: u32,
+    pub cpusubtype: u32,
+}
+
+impl Cpu {
+    /// The [`Arch`] of this CPU, when it is one of the three.
+    pub fn arch(self) -> Option<Arch> {
+        match (self.cputype, self.cpusubtype & CPU_SUBTYPE_MASK) {
+            (CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64E) => Some(Arch::Arm64e),
+            (CPU_TYPE_ARM64, _) => Some(Arch::Arm64),
+            (CPU_TYPE_X86_64, _) => Some(Arch::X86_64),
+            _ => None,
+        }
+    }
+
+    /// `arm64`, `arm64e`, `x86_64`, the usual names of a few others (`armv7`, `armv7s`, `arm64_32`, `i386`), or
+    /// `cpu-<type>-<subtype>`.
+    pub fn name(self) -> String {
+        if let Some(a) = self.arch() {
+            return a.name().to_owned();
+        }
+        match (self.cputype, self.cpusubtype & CPU_SUBTYPE_MASK) {
+            (CPU_TYPE_ARM, 9) => "armv7".into(),
+            (CPU_TYPE_ARM, 11) => "armv7s".into(),
+            (CPU_TYPE_ARM, 12) => "armv7k".into(),
+            (CPU_TYPE_ARM64_32, _) => "arm64_32".into(),
+            (CPU_TYPE_X86, _) => "i386".into(),
+            (t, s) => format!("cpu-{t:#x}-{s:#x}"),
+        }
+    }
+}
+
+impl From<Arch> for Cpu {
+    fn from(a: Arch) -> Self {
+        Self { cputype: a.cputype(), cpusubtype: a.cpusubtype() }
+    }
+}
+
+impl fmt::Display for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.name())
     }
@@ -175,10 +212,19 @@ impl FromStr for Arch {
     }
 }
 
-/// One architecture slice of a thin or fat file.
+/// One architecture slice of a thin or fat file, for the CPUs [`Arch`] names ([`MachO::slices`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slice {
     pub arch: Arch,
+    /// Offset of the slice in the file (0 for a thin file).
+    pub offset: u64,
+    pub size: u64,
+}
+
+/// One slice of any CPU ([`MachO::cpu_slices`]); index `i` describes [`MachO::images`]`[i]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CpuSlice {
+    pub cpu: Cpu,
     /// Offset of the slice in the file (0 for a thin file).
     pub offset: u64,
     pub size: u64,
@@ -237,7 +283,8 @@ pub struct Segment {
 /// One parsed thin image (the whole file, or one slice of a fat file).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Image {
-    pub arch: Arch,
+    /// The header's CPU type and subtype ([`Image::arch`] classifies it).
+    pub cpu: Cpu,
     pub is_64: bool,
     /// `MH_EXECUTE`, `MH_DYLIB`, …
     pub filetype: u32,
@@ -263,6 +310,11 @@ pub struct Image {
 }
 
 impl Image {
+    /// The image's [`Arch`], when its CPU is one of the three.
+    pub fn arch(&self) -> Option<Arch> {
+        self.cpu.arch()
+    }
+
     /// Whether this is an `MH_EXECUTE` (an app or app-extension main binary).
     pub fn is_executable(&self) -> bool {
         self.filetype == MH_EXECUTE
@@ -309,7 +361,10 @@ fn alignment_of(off: u64) -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachO {
     fat: bool,
+    /// The slices of the CPUs [`Arch`] names.
     slices: Vec<Slice>,
+    /// Every slice, in file order; parallel to `images`.
+    cpu_slices: Vec<CpuSlice>,
     images: Vec<Image>,
     primary: usize,
 }
@@ -322,8 +377,21 @@ impl MachO {
             return parse_fat(bytes, magic_be == FAT_MAGIC_64);
         }
         let image = parse_image(bytes)?;
-        let slice = Slice { arch: image.arch, offset: 0, size: bytes.len() as u64 };
-        Ok(Self { fat: false, slices: vec![slice], images: vec![image], primary: 0 })
+        let cpu_slice = CpuSlice { cpu: image.cpu, offset: 0, size: bytes.len() as u64 };
+        Ok(Self::assemble(false, vec![cpu_slice], vec![image]))
+    }
+
+    fn assemble(fat: bool, cpu_slices: Vec<CpuSlice>, images: Vec<Image>) -> Self {
+        let slices = cpu_slices
+            .iter()
+            .filter_map(|s| Some(Slice { arch: s.cpu.arch()?, offset: s.offset, size: s.size }))
+            .collect();
+        let primary = images
+            .iter()
+            .position(|i| i.arch() == Some(Arch::Arm64))
+            .or_else(|| images.iter().position(|i| i.arch() == Some(Arch::Arm64e)))
+            .unwrap_or(0);
+        Self { fat, slices, cpu_slices, images, primary }
     }
 
     /// Reads and parses a file.
@@ -336,8 +404,15 @@ impl MachO {
         self.fat
     }
 
+    /// The slices of the CPUs [`Arch`] names (arm64, arm64e, x86_64), in file order. [`Self::cpu_slices`] lists
+    /// every slice.
     pub fn slices(&self) -> &[Slice] {
         &self.slices
+    }
+
+    /// Every slice, whatever its CPU, in file order; index `i` is [`Self::images`]`[i]`.
+    pub fn cpu_slices(&self) -> &[CpuSlice] {
+        &self.cpu_slices
     }
 
     /// Every parsed slice, in file order.
@@ -350,9 +425,10 @@ impl MachO {
         &self.images[self.primary]
     }
 
-    /// The bytes of slice `index` inside `file` (the data this view was parsed from).
+    /// The bytes of slice `index` of [`Self::cpu_slices`] (and [`Self::images`]) inside `file`, the data this
+    /// view was parsed from.
     pub fn slice_bytes<'a>(&self, file: &'a [u8], index: usize) -> Option<&'a [u8]> {
-        let s = self.slices.get(index)?;
+        let s = self.cpu_slices.get(index)?;
         let start = usize::try_from(s.offset).ok()?;
         let end = start.checked_add(usize::try_from(s.size).ok()?)?;
         file.get(start..end)
@@ -440,21 +516,16 @@ fn parse_fat(bytes: &[u8], is64: bool) -> Result<MachO, MachOError> {
         };
         let data = bytes_u64(bytes, offset, size, "fat slice")?;
         let image = parse_image(data)?;
-        if image.arch.cputype() != cputype {
+        if image.cpu.cputype != cputype {
             return Err(MachOError::Malformed(format!(
                 "fat entry {i} says CPU {cputype:#x} but its slice is {}",
-                image.arch
+                image.cpu
             )));
         }
-        slices.push(Slice { arch: Arch::from_cpu(cputype, cpusubtype), offset, size });
+        slices.push(CpuSlice { cpu: Cpu { cputype, cpusubtype }, offset, size });
         images.push(image);
     }
-    let primary = slices
-        .iter()
-        .position(|s| s.arch == Arch::Arm64)
-        .or_else(|| slices.iter().position(|s| s.arch == Arch::Arm64e))
-        .unwrap_or(0);
-    Ok(MachO { fat: true, slices, images, primary })
+    Ok(MachO::assemble(true, slices, images))
 }
 
 fn bytes_u64<'a>(b: &'a [u8], off: u64, len: u64, what: &str) -> Result<&'a [u8], MachOError> {
@@ -507,7 +578,7 @@ fn parse_image(b: &[u8]) -> Result<Image, MachOError> {
     let cputype = u32_le(b, 4)?;
     let cpusubtype = u32_le(b, 8)?;
     let mut img = Image {
-        arch: Arch::from_cpu(cputype, cpusubtype),
+        cpu: Cpu { cputype, cpusubtype },
         is_64: h.is_64,
         filetype: u32_le(b, 12)?,
         flags: u32_le(b, 24)?,
@@ -685,11 +756,29 @@ mod tests {
 
     #[test]
     fn arch_classification() {
-        assert_eq!(Arch::from_cpu(CPU_TYPE_ARM64, 0), Arch::Arm64);
-        assert_eq!(Arch::from_cpu(CPU_TYPE_ARM64, 0x8000_0002), Arch::Arm64e);
-        assert_eq!(Arch::from_cpu(CPU_TYPE_X86_64, 3), Arch::X86_64);
-        assert_eq!(Arch::from_cpu(CPU_TYPE_ARM, 9), Arch::Other { cputype: 12, cpusubtype: 9 });
+        assert_eq!(Arch::from_cpu(CPU_TYPE_ARM64, 0), Some(Arch::Arm64));
+        assert_eq!(Arch::from_cpu(CPU_TYPE_ARM64, 0x8000_0002), Some(Arch::Arm64e));
+        assert_eq!(Arch::from_cpu(CPU_TYPE_X86_64, 3), Some(Arch::X86_64));
+        assert_eq!(Arch::from_cpu(CPU_TYPE_ARM, 9), None);
+        let armv7 = Cpu { cputype: CPU_TYPE_ARM, cpusubtype: 9 };
+        assert_eq!((armv7.arch(), armv7.name()), (None, "armv7".to_owned()));
+        assert_eq!(Cpu { cputype: 0x99, cpusubtype: 1 }.to_string(), "cpu-0x99-0x1");
+        assert_eq!(Cpu::from(Arch::Arm64e).arch(), Some(Arch::Arm64e));
         assert_eq!("arm64e".parse::<Arch>().unwrap(), Arch::Arm64e);
+        assert_eq!(Arch::X86_64.to_string(), "x86_64");
+    }
+
+    /// `Arch` keeps exactly the three F0 variants: the build plane matches it exhaustively (ARCHITECTURE §5.3).
+    #[test]
+    fn arch_keeps_the_f0_variants() {
+        let name = |a: Arch| match a {
+            Arch::Arm64 => "arm64",
+            Arch::Arm64e => "arm64e",
+            Arch::X86_64 => "x86_64",
+        };
+        for a in [Arch::Arm64, Arch::Arm64e, Arch::X86_64] {
+            assert_eq!(name(a), a.name());
+        }
     }
 
     #[test]

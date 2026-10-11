@@ -175,7 +175,7 @@ fn check_macho(data: &[u8], rel: &str, findings: &mut Vec<LintFinding>) {
                 "L-SIG-006",
                 Severity::Error,
                 Some(rel.into()),
-                format!("malformed code signature ({}): {err}", img.arch),
+                format!("malformed code signature ({}): {err}", img.cpu),
             ));
             continue;
         }
@@ -184,7 +184,7 @@ fn check_macho(data: &[u8], rel: &str, findings: &mut Vec<LintFinding>) {
                 "L-SIG-000",
                 Severity::Error,
                 Some(rel.into()),
-                format!("the {} slice is not signed", img.arch),
+                format!("the {} slice is not signed", img.cpu),
             ));
             continue;
         };
@@ -198,7 +198,7 @@ fn check_macho(data: &[u8], rel: &str, findings: &mut Vec<LintFinding>) {
                         Some(rel.into()),
                         format!(
                             "{} code page hash mismatch at page {} ({} directory)",
-                            img.arch,
+                            img.cpu,
                             bad[0],
                             cd.hash_type.name()
                         ),

@@ -90,7 +90,7 @@ fn describe(data: &[u8], path: &str, bundle_id: Option<&str>) -> Vec<SignatureIn
             SignatureInfo {
                 path: path.to_owned(),
                 bundle_id: bundle_id.map(str::to_owned),
-                arch: img.arch.name(),
+                arch: img.cpu.name(),
                 filetype: filetype_name(img.filetype).to_owned(),
                 signed: sig.is_some(),
                 identifier: sig.and_then(CodeSignature::identifier).map(str::to_owned),

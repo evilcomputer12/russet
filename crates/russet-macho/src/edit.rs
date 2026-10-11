@@ -64,9 +64,9 @@ pub fn thin(path: &Path, arch: Arch) -> Result<(), MachOError> {
 pub fn thin_bytes(data: &[u8], arch: Arch) -> Result<Vec<u8>, MachOError> {
     let m = MachO::parse(data)?;
     let i = m
-        .slices()
+        .cpu_slices()
         .iter()
-        .position(|s| s.arch == arch)
+        .position(|s| s.cpu.arch() == Some(arch))
         .ok_or_else(|| MachOError::NotFound(format!("architecture {arch}")))?;
     let slice = m.slice_bytes(data, i).ok_or_else(|| MachOError::Malformed("slice outside the file".into()))?;
     Ok(slice.to_vec())

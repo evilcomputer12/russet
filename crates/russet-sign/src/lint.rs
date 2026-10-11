@@ -59,8 +59,8 @@ pub(crate) fn lint(app: &AppBundle, profile: LintProfile, ipa_root: Option<&Path
         for item in &b.code {
             let rel = rel_of(item.path());
             let Ok(m) = MachO::open(&b.root.join(item.path())) else { continue };
-            if m.is_fat() || m.slices().iter().any(|s| s.arch != Arch::Arm64) {
-                let arches: Vec<String> = m.slices().iter().map(|s| s.arch.name()).collect();
+            if m.is_fat() || m.cpu_slices().iter().any(|s| s.cpu.arch() != Some(Arch::Arm64)) {
+                let arches: Vec<String> = m.cpu_slices().iter().map(|s| s.cpu.name()).collect();
                 out.push(LintFinding::new(
                     "L-MACHO-004",
                     Severity::Error,
