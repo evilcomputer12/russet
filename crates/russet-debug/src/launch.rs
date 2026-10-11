@@ -100,12 +100,18 @@ pub type ExitWatch = Pin<Box<dyn Future<Output = ProcessExit> + Send>>;
 /// The app's stdout and stderr (CoreDevice: one PTY stream with `\r\n` line ends).
 pub type StdioStream = Box<dyn AsyncRead + Send + Unpin>;
 
+/// Console lines the device plane already split into entries (`source: stdout`).
+pub type ConsoleEntries = tokio::sync::mpsc::Receiver<russet_protocol::common::LogEntry>;
+
 /// A launched process.
 pub struct Launched {
     pub pid: u32,
     /// The executable's path on the device, when the launch reported it.
     pub executable: Option<String>,
+    /// Raw stdio bytes, split into lines here.
     pub stdio: Option<StdioStream>,
+    /// Or console lines as entries, when the device plane splits them itself.
+    pub entries: Option<ConsoleEntries>,
     pub channel: Option<LaunchChannel>,
     pub exit: Option<ExitWatch>,
     /// The strategy that was used.
@@ -118,6 +124,7 @@ impl fmt::Debug for Launched {
             .field("pid", &self.pid)
             .field("executable", &self.executable)
             .field("stdio", &self.stdio.is_some())
+            .field("entries", &self.entries.is_some())
             .field("channel", &self.channel.is_some())
             .field("exit", &self.exit.is_some())
             .field("strategy", &self.strategy)
@@ -128,7 +135,15 @@ impl fmt::Debug for Launched {
 impl Launched {
     /// A process with only a pid.
     pub fn pid_only(pid: u32) -> Self {
-        Self { pid, executable: None, stdio: None, channel: None, exit: None, strategy: LaunchStrategy::Auto }
+        Self {
+            pid,
+            executable: None,
+            stdio: None,
+            entries: None,
+            channel: None,
+            exit: None,
+            strategy: LaunchStrategy::Auto,
+        }
     }
 
     /// The app bundle directory on the device (the executable's parent).

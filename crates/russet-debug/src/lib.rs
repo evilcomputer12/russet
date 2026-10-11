@@ -680,7 +680,7 @@ impl DebugService {
         process: Option<String>,
     ) -> Option<tokio::sync::oneshot::Receiver<()>> {
         let pid = launched.pid;
-        let done = launched.stdio.take().map(|stdio| {
+        let mut done = launched.stdio.take().map(|stdio| {
             let (tx, rx) = tokio::sync::oneshot::channel();
             let view = h.logs();
             let process = process.clone();
@@ -690,6 +690,17 @@ impl DebugService {
             });
             rx
         });
+        if let Some(mut entries) = launched.entries.take() {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let view = h.logs();
+            tokio::spawn(async move {
+                while let Some(e) = entries.recv().await {
+                    view.push(e);
+                }
+                let _ = tx.send(());
+            });
+            done = done.or(Some(rx));
+        }
         match self.dev.os_log(udid, pid).await {
             Ok(Some(mut rx)) => {
                 let view = h.logs();
