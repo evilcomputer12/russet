@@ -5425,6 +5425,9 @@ dependencies = [
  "russet-plist",
  "russet-toolchain",
  "russet-xar",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "tokio-util",
 ]
 
