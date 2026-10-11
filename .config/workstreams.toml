@@ -4,8 +4,9 @@
 # The machine-readable copy of PLAN §3 (who owns which paths) and ARCHITECTURE §5.1–§5.2 (the layer of every
 # workspace package, binaries included, and the layering rules). Read by `cargo xtask check-layers` and
 # `cargo xtask check-paths --ws WNN`. Paths are repository-relative globs (`*` stays inside one directory, `**`
-# crosses directories, `{a,b}` alternates). Within a wave, owned paths are disjoint; across waves a path changes
-# owner after the earlier card merged (PLAN §3). Lead-owned after W1 merges.
+# crosses directories, `{a,b}` alternates). Within a wave, owned paths are disjoint (`cargo test -p xtask` checks
+# it), except between a card and the card it is `after` (a sequential handover inside the wave, PLAN §2); across
+# waves a path changes owner after the earlier card merged (PLAN §3). Lead-owned after W1 merges.
 
 schema = 1
 
@@ -25,6 +26,11 @@ lead-only = [
     "xtask/Cargo.toml",
     "docs/ARCHITECTURE.md",
 ]
+
+[generated]
+# PLAN §0 rule 2: regenerate (`cargo xtask schema`; cargo writes Cargo.lock) and commit, never hand-merge. Every card
+# that changes their inputs commits them, so check-paths reports them as notes, never as warnings.
+paths = ["Cargo.lock", "schemas/**", "extension/src/generated/**", "docs/reference/**"]
 
 [layers]
 # ARCHITECTURE §5.1 "Layer" column; binaries (russet-tool, russet-adi-host, russet-cli's `russet`) included.
@@ -281,6 +287,7 @@ except = [
 title = "Vertical-slice integration and lab smoke (lane A)"
 wave = "1"
 lane = "A"
+after = "W4" # takes docs/lab/queue.md over from W4 (PLAN §3); W9 starts after W2–W8 merged
 owns = [
     "demo/m1-russet.sh",
     "tests/lab/**",
@@ -338,7 +345,8 @@ lane = "D"
 owns = [
     "crates/russet-{macho,sign,asc,account}/**",
     "crates/russet-ship/src/{lib.rs,archive.rs,ipa.rs,dsym.rs}",
-    "crates/russetd/src/handlers/{account,identity,portal,provision,sign,asc,ship}.rs",
+    "crates/russetd/src/handlers/{account,identity,portal,provision,sign,asc,ship}.rs", # handlers/ship.rs: the ship.archive and ship.ipa rows only
+    "crates/russet-protocol/src/ship.rs", # the ship.archive and ship.ipa rows only (W23 owns the file in Wave 4)
     "crates/russetd/tests/{account,identity,portal,provision,sign,asc,ship}_*.rs",
     "crates/russet-protocol/src/{account,identity,portal,provision,sign,asc}.rs",
     "crates/russet-protocol/tests/{account,identity,portal,provision,sign,asc}_*.rs",
@@ -395,7 +403,7 @@ except = [
 [ws.W16]
 title = "Build II: dynamic products, lints, russet-tool, golden/oracle, Apple-hardware smoke"
 wave = "2"
-lane = "D"
+lane = "D+B"
 owns = [
     "crates/russet-{build,plist,ipa,tool,golden,oracle,sdk}/**",
     "corpus/**",
@@ -416,13 +424,12 @@ except = [
     "crates/russet-build/src/stack/{flutter,xcode,rn,maui}/**",
     "crates/russet-build/src/resources/**",
     "crates/russet-build/src/platform/windows/**",
-    "crates/russet-tool/src/{actool,ibtool,xcstringstool}.rs",
 ]
 
 [ws.W16b]
 title = "Apple containers and native SDK/DDI import"
 wave = "2"
-lane = "B"
+lane = "D+B"
 owns = [
     "crates/russet-xar/**",
     "crates/russet-sdk/src/import/**",
@@ -458,6 +465,7 @@ owns = [
 ]
 except = [
     "crates/russet-build/src/stack/flutter/aot.rs",
+    "crates/russet-cli/tests/flutter_run_*.rs", # W18's
 ]
 
 [ws.W18]
@@ -522,7 +530,7 @@ owns = [
 [ws.W21]
 title = "Resource compilers (lane B oracle)"
 wave = "3"
-lane = "B"
+lane = "D+B"
 owns = [
     "crates/russet-{car,assets,xcstrings,ib}/**",
     "crates/russet-tool/src/{actool,ibtool,xcstringstool}.rs",
@@ -618,7 +626,7 @@ owns = [
 [ws.W21b]
 title = "Storyboard compiler I: NIBArchive and launch storyboards (B21a)"
 wave = "4"
-lane = "B"
+lane = "D+B"
 owns = [
     "crates/russet-ib/src/{nib,compile}/**",
     "crates/russet-tool/src/ibtool.rs",
@@ -656,11 +664,16 @@ owns = [
     "crates/**/src/**/windows*.rs",
     "docs/windows/**",
 ]
+except = [
+    "crates/russet-build/src/platform/windows/**", # W27b
+    "crates/russet-sdk/src/import/windows/**", # W27b
+    "crates/russet-anisette/src/windows/**", # W27c
+]
 
 [ws.W27b]
 title = "Windows build plane, SDK and DDI import"
 wave = "5"
-lane = "A"
+lane = "A+D"
 owns = [
     "crates/russet-build/src/platform/windows/**",
     "crates/russet-sdk/src/import/windows/**",
@@ -670,7 +683,7 @@ owns = [
 [ws.W27c]
 title = "Windows packaging, IDE and anisette"
 wave = "5"
-lane = "D"
+lane = "D+A"
 owns = [
     "packaging/windows/**",
     "crates/russet-anisette/src/windows/**",
@@ -679,7 +692,7 @@ owns = [
 [ws.W28b]
 title = "Storyboard compiler II: main storyboards and XIBs (B21b)"
 wave = "6"
-lane = "B"
+lane = "D+B"
 owns = [
     "crates/russet-ib/**",
     "corpus/ib/**",
@@ -689,16 +702,16 @@ owns = [
 [ws.W28]
 title = "Xcode projects, CocoaPods, russet test"
 wave = "6"
-lane = "D"
+lane = "D+B"
 owns = [
     "crates/russet-{xcodeproj,pif,xctest}/**",
     "tools/russet-swb/**",
     "crates/russet-build/src/stack/xcode/**",
     "corpus/pif/**",
-    "crates/russetd/src/handlers/test.rs",
-    "crates/russetd/tests/test_*.rs",
-    "crates/russet-protocol/src/test.rs",
-    "crates/russet-protocol/tests/test_*.rs",
+    "crates/russetd/src/handlers/{test,xcode,xctest}.rs",
+    "crates/russetd/tests/{test,xcode,xctest}_*.rs",
+    "crates/russet-protocol/src/{test,xcode,xctest}.rs",
+    "crates/russet-protocol/tests/{test,xcode,xctest}_*.rs",
     "crates/russet-cli/src/cmd/{xcode,test}.rs",
     "crates/russet-cli/tests/{xcode,test}_*.rs",
     "crates/russet-core/src/error/codes/{xcode,xctest}.rs",
@@ -707,7 +720,8 @@ owns = [
 [ws.W28c]
 title = "Storyboard compiler III: tables, collections, traits (B21c) and NetNewsWire"
 wave = "6"
-lane = "B"
+lane = "D+B"
+after = "W28b" # takes crates/russet-ib/**, corpus/ib/** and the IB harness over once W28b merges (PLAN §9.3)
 owns = [
     "crates/russet-ib/**",
     "corpus/ib/**",
@@ -717,7 +731,7 @@ owns = [
 [ws.W29]
 title = "React Native / Expo adapter and .NET MAUI study"
 wave = "6"
-lane = "D"
+lane = "D+C"
 owns = [
     "crates/russet-build/src/stack/{rn,maui}/**",
     "docs/design/maui-feasibility.md",

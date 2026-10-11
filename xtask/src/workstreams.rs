@@ -17,6 +17,9 @@ use serde::Deserialize;
 pub struct Workstreams {
     pub schema: u32,
     pub seams: Seams,
+    /// Generated files: regenerate, never hand-merge (PLAN §0 rule 2).
+    #[serde(default)]
+    pub generated: Generated,
     /// Package name → layer (`F`, `L0`–`L4`, `dev`).
     pub layers: BTreeMap<String, String>,
     pub layer_rules: LayerRules,
@@ -29,6 +32,14 @@ pub struct Workstreams {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Seams {
     pub lead_only: Vec<String>,
+}
+
+/// Generated files (PLAN §0 rule 2): every card that changes their inputs regenerates and commits them, so
+/// `check-paths` reports them as notes, never as warnings.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Generated {
+    pub paths: Vec<String>,
 }
 
 /// Layering rules beyond the layer table (ARCHITECTURE §5.2).
@@ -67,6 +78,10 @@ pub struct Workstream {
     pub owns: Vec<String>,
     #[serde(default)]
     pub except: Vec<String>,
+    /// A card of the same wave that must merge before this one starts: a sequential handover (PLAN §2, §3), so
+    /// the two may own the same paths. Within a wave, every other pair of cards owns disjoint paths.
+    #[serde(default)]
+    pub after: Option<String>,
 }
 
 /// The repository root, found at run time: the nearest ancestor of the current directory whose `Cargo.toml`
@@ -113,6 +128,18 @@ pub fn parse(text: &str) -> Result<Workstreams> {
             matches!(layer.as_str(), "F" | "L0" | "L1" | "L2" | "L3" | "L4" | "dev"),
             "package {pkg} has unknown layer {layer}"
         );
+    }
+    for (id, card) in &ws.ws {
+        if let Some(before) = &card.after {
+            let other = ws.ws.get(before).with_context(|| format!("{id}: after = {before:?} is not a card"))?;
+            anyhow::ensure!(
+                other.wave == card.wave,
+                "{id}: after = {before:?} is in wave {}, not {}",
+                other.wave,
+                card.wave
+            );
+            anyhow::ensure!(before != id, "{id}: after names itself");
+        }
     }
     Ok(ws)
 }
