@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Seam file: lead-only after W1 merges (PLAN §0 rule 2).
+[package]
+name = "russetd"
+description = "Russet L4: the per-user daemon (lifecycle, ctx, handlers, pipelines, permissions, approvals, jobs, leases, subscriptions, web endpoint, audit)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+russet-account.workspace = true
+russet-agent-config.workspace = true
+russet-anisette.workspace = true
+russet-asc.workspace = true
+russet-build.workspace = true
+russet-config.workspace = true
+russet-core.workspace = true
+russet-debug.workspace = true
+russet-device.workspace = true
+russet-doctor.workspace = true
+russet-gsa.workspace = true
+russet-ipc.workspace = true
+russet-mcp.workspace = true
+russet-protocol.workspace = true
+russet-sdk.workspace = true
+russet-secrets.workspace = true
+russet-ship.workspace = true
+russet-sign.workspace = true
+russet-toolchain.workspace = true
+russet-xctest.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tokio-util.workspace = true

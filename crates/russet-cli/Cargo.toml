@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Seam file: lead-only after W1 merges (PLAN §0 rule 2).
+[package]
+name = "russet-cli"
+description = "Russet L4: the multi-call `russet` binary (CLI, daemon, MCP bridge, flutter custom device)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "russet"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anstream.workspace = true
+clap.workspace = true
+indicatif.workspace = true
+russet-agent-config.workspace = true
+russet-core.workspace = true
+russet-ipc.workspace = true
+russet-mcp.workspace = true
+russet-protocol.workspace = true
+russetd.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
