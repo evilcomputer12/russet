@@ -108,6 +108,12 @@ pub(crate) fn verify_app(app: &AppBundle, o: &VerifyOptions) -> Result<VerifyRep
         let exe_rel = base(exe.strip_prefix(&b.root).unwrap_or(&exe));
         let data = std::fs::read(&exe).map_err(|e| io_error("cannot read", &exe, e))?;
         let Ok(m) = MachO::parse(&data) else {
+            findings.push(LintFinding::new(
+                "L-SIG-000",
+                Severity::Error,
+                Some(exe_rel.clone()),
+                "the main executable is not a Mach-O file",
+            ));
             bundles.push(record);
             continue;
         };

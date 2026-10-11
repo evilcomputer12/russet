@@ -32,6 +32,8 @@ pub use client::{
 };
 pub use jwt::{AscKey, Issuer, b64url_decode, unverified_claims};
 pub use token::{BEARER_LIFETIME, REFRESH_MARGIN, ScopeEntry, SystemClock, TokenFactory};
+/// The URL type of [`JwtAuth::new`] and [`Auth::base_url`].
+pub use url::Url;
 
 /// The public App Store Connect API root.
 pub const DEFAULT_BASE_URL: &str = "https://api.appstoreconnect.apple.com/";
