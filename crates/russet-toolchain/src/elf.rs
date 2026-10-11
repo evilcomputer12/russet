@@ -137,12 +137,10 @@ mod tests {
 
     #[test]
     fn non_elf_files_are_rejected() {
-        let dir = std::env::temp_dir().join(format!("russet-elf-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("dir");
-        let f = dir.join("not-elf");
+        let dir = tempfile::tempdir().expect("dir");
+        let f = dir.path().join("not-elf");
         std::fs::write(&f, vec![0u8; 128]).expect("write");
         assert_eq!(needed_libraries(&f).map_err(|e| e.kind()).err(), Some(io::ErrorKind::InvalidData));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A minimal ELF64 LE file: the header, `phdrs` program headers at offset 64, then `tail`.
@@ -173,10 +171,9 @@ mod tests {
 
     #[test]
     fn damaged_files_are_errors_never_panics_or_huge_reads() {
-        let dir = std::env::temp_dir().join(format!("russet-elf-damaged-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("dir");
+        let dir = tempfile::tempdir().expect("dir");
         let check = |name: &str, bytes: Vec<u8>| {
-            let f = dir.join(name);
+            let f = dir.path().join(name);
             std::fs::write(&f, bytes).expect("write");
             needed_libraries(&f)
         };
@@ -203,6 +200,5 @@ mod tests {
         let phdrs = [[PT_LOAD.into(), 0, 0, 4096], [PT_DYNAMIC.into(), dyn_at, 0, 64]];
         let needed = check("good", elf(56, &phdrs, &tail)).expect("parses");
         assert_eq!(needed, ["libpython3.12.so.1.0"]);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
