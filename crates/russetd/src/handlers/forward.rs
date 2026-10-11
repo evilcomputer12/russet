@@ -1,19 +1,43 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! `forward` handlers (§8.2). Owner: W4.
+//! `forward` handlers (§8.2, §10.4). Owner: W4.
 //!
-//! F0 stub (W1): every method answers `core.notImplemented` (1005) until its owner replaces the handler.
+//! A forward is a `forward` lease: it lives until `forward.close` or until its owner is gone (+ `lease-grace`).
 
-use russet_ipc::Router;
+use russet_core::Result;
+use russet_device::rpc;
+use russet_ipc::{RequestCtx, Router};
 use russet_protocol::forward as p;
 
-use super::not_implemented;
+use super::device::{caller, manager, owner_gone};
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
-    r.request::<p::ForwardOpen, _, _>(not_implemented::<p::ForwardOpen>);
-    r.request::<p::ForwardClose, _, _>(not_implemented::<p::ForwardClose>);
-    r.request::<p::ForwardList, _, _>(not_implemented::<p::ForwardList>);
+    r.request::<p::ForwardOpen, _, _>(forward_open);
+    r.request::<p::ForwardClose, _, _>(forward_close);
+    r.request::<p::ForwardList, _, _>(forward_list);
+}
+
+async fn forward_open(cx: DaemonCtx, rq: RequestCtx, p: p::ForwardOpenParams) -> Result<p::ForwardOpenResult> {
+    let m = manager(&cx).await?;
+    let (result, handle) = rpc::forward_open(&m, &caller(&rq), p).await?;
+    let (peer, grace) = (rq.peer.clone(), m.config().lease_grace);
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = owner_gone(&peer, grace) => {}
+            _ = handle.closed() => {}
+        }
+        drop(handle);
+    });
+    Ok(result)
+}
+
+async fn forward_close(cx: DaemonCtx, _rq: RequestCtx, p: p::ForwardCloseParams) -> Result<p::ForwardCloseResult> {
+    rpc::forward_close(manager(&cx).await?.as_ref(), p)
+}
+
+async fn forward_list(cx: DaemonCtx, _rq: RequestCtx, _p: p::ForwardListParams) -> Result<p::ForwardListResult> {
+    Ok(rpc::forward_list(manager(&cx).await?.as_ref()))
 }
