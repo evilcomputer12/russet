@@ -337,6 +337,7 @@ impl SessionHandle {
         });
         if changed {
             let _ = self.inner.events.send(SessionEvent::State(s));
+            self.persist();
         }
     }
 
