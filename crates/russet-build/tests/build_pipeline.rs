@@ -263,7 +263,7 @@ async fn a_non_project_directory_is_project_not_found() {
 async fn a_typo_in_russet_toml_reports_file_and_line() {
     let w = world();
     let toml = w.project.join("russet.toml");
-    let text = std::fs::read_to_string(&toml).unwrap().replace("display-name", "dispaly-name");
+    let text = std::fs::read_to_string(&toml).unwrap().replace("display-name", "display-names");
     std::fs::write(&toml, text).unwrap();
     let err = w.builder.build(BuildRequest::new(&w.project), &NullSink, CancellationToken::new()).await.unwrap_err();
     assert_eq!(err.code(), codes::config::UNKNOWN_KEY);

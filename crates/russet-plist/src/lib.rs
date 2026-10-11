@@ -174,17 +174,10 @@ mod tests {
 
     #[test]
     fn base64_matches_rfc4648_vectors() {
-        let cases: [(&[u8], &str); 7] = [
-            (b"", ""),
-            (b"f", "Zg=="),
-            (b"fo", "Zm8="),
-            (b"foo", "Zm9v"),
-            (b"foob", "Zm9vYg=="),
-            (b"fooba", "Zm9vYmE="),
-            (b"foobar", "Zm9vYmFy"),
-        ];
-        for (input, expected) in cases {
-            assert_eq!(base64(input), expected);
+        // RFC 4648 §10: the prefixes of "foobar".
+        let expected = ["", "Zg==", "Zm8=", "Zm9v", "Zm9vYg==", "Zm9vYmE=", "Zm9vYmFy"];
+        for (len, want) in expected.iter().enumerate() {
+            assert_eq!(base64(&b"foobar"[..len]), *want);
         }
     }
 
