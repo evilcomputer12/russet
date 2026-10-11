@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-core"
+description = "Russet L0: errors and codes, ids, directories, processes, progress sinks, rpc traits"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# TypeScript bindings for the wire types re-exported by russet-protocol (core §4.2).
+ts = ["dep:ts-rs"]
+
+[dependencies]
+async-trait.workspace = true
+fs4.workspace = true
+process-wrap = { workspace = true, features = ["tokio1", "job-object", "process-group", "process-session", "kill-on-drop"] }
+schemars.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tokio-util.workspace = true
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
+url.workspace = true
