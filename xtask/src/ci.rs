@@ -12,14 +12,18 @@
 //!   `-D warnings` and `cargo deny check` with advisories (network).
 //! - `ci --profile windows`: build and the unit tests (L1) of every crate but xtask (a running xtask.exe cannot
 //!   be relinked on Windows).
-//! - `ci --quick`: fmt, plus clippy and the unit tests of the crates changed against `--base`.
+//! - `ci --quick`: fmt, plus clippy and the unit tests of the crates changed against `--base` (`--lib` for the
+//!   packages with a library, `--bins` for those with binaries, such as xtask).
+//! - `--changed-since REV` (CI passes the push or pull-request base): when every file changed since `REV` is
+//!   documentation ([`DOCS_ONLY`]), the Rust build, lint, test and deny steps are skipped (QA §4.1: docs-only
+//!   changes skip the Rust jobs); the guards, check-layers, check-paths and schema drift still run.
 //!
 //! A missing optional tool (cargo-nextest, cargo-deny, and the guard's reuse, typos, gitleaks, zizmor) never
 //! stops a local run: the step is skipped or falls back, and the summary names what is missing and how to
 //! install it. `--require-tools` (CI) turns a missing tool into a failure. Every wrapper also runs the weekly
 //! target-slot sweep when it is due ([`crate::sweep::sweep_if_due`]). Owner: W8.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
@@ -64,6 +68,9 @@ pub struct Args {
     /// The base of the guard's commit check (default: the merge base with main); CI passes the pushed range
     #[arg(long, value_name = "REF")]
     pub guard_base: Option<String>,
+    /// Skip the Rust build, lint, test and deny steps when every file changed since REV is documentation
+    #[arg(long, value_name = "REV")]
+    pub changed_since: Option<String>,
     /// Stop at the first failing step
     #[arg(long)]
     pub fail_fast: bool,
@@ -134,6 +141,46 @@ pub struct Step {
 
 fn step(name: &'static str, action: Action) -> Step {
     Step { name, action, env: Vec::new() }
+}
+
+impl Step {
+    /// Whether a docs-only change skips this step: everything that builds, lints or tests Rust, and deny (its
+    /// inputs are Cargo.lock and deny.toml). The guards read documentation too, check-layers and check-paths read
+    /// the configuration, and schema drift compares `docs/reference/`, so they always run.
+    pub fn is_rust(&self) -> bool {
+        matches!(self.action, Action::Cargo(_) | Action::Tests { .. } | Action::Deny(_))
+    }
+}
+
+/// Paths that never feed a Rust build, lint or test (`--changed-since`; QA §4.1). Generated reference pages under
+/// `docs/reference/` are documentation too: the schema-drift step, which always runs, checks them.
+pub const DOCS_ONLY: &[&str] = &[
+    "**/*.md",
+    "docs/**",
+    "LICENSES/**",
+    ".github/ISSUE_TEMPLATE/**",
+    ".github/CODEOWNERS",
+    ".github/pull_request_template.md",
+];
+
+/// Whether every path in `changed` is documentation. An empty change set is not: nothing to compare means a
+/// full run.
+pub fn docs_only(changed: &BTreeSet<String>) -> bool {
+    let mut b = globset::GlobSetBuilder::new();
+    for g in DOCS_ONLY {
+        b.add(globset::Glob::new(g).expect("DOCS_ONLY globs are valid"));
+    }
+    let set = b.build().expect("DOCS_ONLY globs build");
+    !changed.is_empty() && changed.iter().all(|f| set.is_match(f))
+}
+
+/// The test targets of a package that `--quick` runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Targets {
+    /// A library target (lib, rlib, proc-macro, …): `--lib`.
+    pub lib: bool,
+    /// Binary targets: `--bins` (xtask, russet-cli's `russet`, russet-tool, russet-adi-host).
+    pub bins: bool,
 }
 
 fn cargo(args: &[&str]) -> Action {
@@ -207,20 +254,35 @@ pub fn plan(profile: Profile) -> Vec<Step> {
     steps
 }
 
-/// The steps of `--quick` for the changed packages.
-pub fn quick_plan(changed: &BTreeSet<String>) -> Vec<Step> {
+/// The steps of `--quick` for the changed packages. The unit tests are `--lib` for packages with a library and
+/// `--bins` for packages with binaries: cargo refuses `--lib` when no selected package has a library (xtask
+/// alone), and silently skips a bin-only package when another one has a library.
+pub fn quick_plan(changed: &BTreeMap<String, Targets>) -> Vec<Step> {
     let mut steps = vec![step("disk-guard", Action::DiskGuard), step("fmt", cargo(&["fmt", "--all", "--", "--check"]))];
     if changed.is_empty() {
         return steps;
     }
     let mut clippy = strings(&["clippy", "--all-targets", "--locked"]);
-    let mut tests = strings(&["--lib", "--locked"]);
-    for p in changed {
+    for p in changed.keys() {
         clippy.extend(["-p".to_string(), p.clone()]);
-        tests.extend(["-p".to_string(), p.clone()]);
     }
     clippy.extend(strings(&["--", "-D", "warnings"]));
     steps.push(step("clippy", Action::Cargo(clippy)));
+    let testable: Vec<(&String, &Targets)> = changed.iter().filter(|(_, t)| t.lib || t.bins).collect();
+    if testable.is_empty() {
+        return steps;
+    }
+    let mut tests = Vec::new();
+    if testable.iter().any(|(_, t)| t.lib) {
+        tests.push("--lib".to_string());
+    }
+    if testable.iter().any(|(_, t)| t.bins) {
+        tests.push("--bins".to_string());
+    }
+    tests.push("--locked".to_string());
+    for (p, _) in testable {
+        tests.extend(["-p".to_string(), p.clone()]);
+    }
     steps.push(step("test", Action::Tests { nextest: tests.clone(), fallback: tests }));
     steps
 }
@@ -232,7 +294,7 @@ pub fn run(args: Args) -> Result<()> {
         let shown = if changed.is_empty() {
             "none".to_string()
         } else {
-            changed.iter().cloned().collect::<Vec<_>>().join(", ")
+            changed.keys().cloned().collect::<Vec<_>>().join(", ")
         };
         println!("ci --quick: packages changed against {}: {shown}", args.base);
         ("ci --quick".to_string(), quick_plan(&changed))
@@ -240,16 +302,35 @@ pub fn run(args: Args) -> Result<()> {
         (format!("ci --profile {}", profile_name(args.profile)), plan(args.profile))
     };
     let steps: Vec<Step> = steps.into_iter().filter(|s| !args.skip.iter().any(|k| k == s.name)).collect();
+    // QA §4.1: a documentation-only change skips the Rust steps.
+    let docs_skip = match &args.changed_since {
+        Some(rev) => {
+            let changed = changed_files(&root, rev);
+            let skip = docs_only(&changed);
+            println!(
+                "ci: {} file(s) changed since {rev}{}",
+                changed.len(),
+                if skip { ": documentation only, so the Rust steps are skipped (QA §4.1)" } else { "" }
+            );
+            skip.then(|| format!("documentation-only change since {rev}"))
+        }
+        None => None,
+    };
     if args.dry_run {
         println!("{title}: {} step(s)", steps.len());
         for (i, s) in steps.iter().enumerate() {
-            println!("  {:>2}. {:<20} {}", i + 1, s.name, describe(&s.action));
+            let note = if docs_skip.is_some() && s.is_rust() { "  [skipped: docs only]" } else { "" };
+            println!("  {:>2}. {:<20} {}{note}", i + 1, s.name, describe(&s.action));
         }
         return Ok(());
     }
     let mut results: Vec<(&'static str, Outcome, Duration)> = Vec::new();
     let mut missing: BTreeSet<String> = BTreeSet::new();
     for (i, s) in steps.iter().enumerate() {
+        if let Some(why) = docs_skip.as_ref().filter(|_| s.is_rust()) {
+            results.push((s.name, Outcome::Skipped(why.clone()), Duration::ZERO));
+            continue;
+        }
         println!("\n==> [{}/{}] {}: {}", i + 1, steps.len(), s.name, describe(&s.action));
         let start = Instant::now();
         let outcome = run_step(&root, s, &args, &mut missing);
@@ -422,7 +503,7 @@ fn preflight() -> Result<String> {
 }
 
 /// Whether this runs on a CI runner (`CI` set to anything but `false`/`0`, as GitHub Actions sets it).
-fn on_ci() -> bool {
+pub fn on_ci() -> bool {
     std::env::var("CI").is_ok_and(|v| !v.is_empty() && v != "false" && v != "0")
 }
 
@@ -523,8 +604,9 @@ fn git_ok(root: &Path, args: &[&str]) -> bool {
     Command::new("git").arg("-C").arg(root).args(args).output().is_ok_and(|o| o.status.success())
 }
 
-/// Workspace packages with a file changed against `base` (committed, uncommitted or untracked).
-fn changed_packages(root: &Path, base: &str) -> Result<BTreeSet<String>> {
+/// Files changed against `base`: committed since the merge base, uncommitted, or untracked and not ignored. A
+/// base that does not resolve yields only the uncommitted files.
+fn changed_files(root: &Path, base: &str) -> BTreeSet<String> {
     let mut files = BTreeSet::new();
     if let Some(mb) = git_stdout(root, &["merge-base", base, "HEAD"]) {
         let range = format!("{}..HEAD", mb.trim());
@@ -537,27 +619,42 @@ fn changed_packages(root: &Path, base: &str) -> Result<BTreeSet<String>> {
             .lines()
             .map(str::to_owned),
     );
+    files
+}
+
+/// Workspace packages with a file changed against `base`, and their test targets.
+fn changed_packages(root: &Path, base: &str) -> Result<BTreeMap<String, Targets>> {
+    let files = changed_files(root, base);
     let metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path(root.join("Cargo.toml"))
         .no_deps()
         .exec()
         .context("cargo metadata")?;
-    let mut dirs: Vec<(PathBuf, String)> = metadata
+    let mut dirs: Vec<(PathBuf, String, Targets)> = metadata
         .workspace_packages()
         .iter()
         .filter_map(|p| {
             let dir = p.manifest_path.parent()?.as_std_path();
             let rel = dir.strip_prefix(root).ok()?.to_path_buf();
-            Some((rel, p.name.to_string()))
+            Some((rel, p.name.to_string(), targets_of(p)))
         })
         .collect();
     // The longest directory wins (a package nested in another package's directory).
-    dirs.sort_by_key(|(d, _)| std::cmp::Reverse(d.components().count()));
+    dirs.sort_by_key(|(d, _, _)| std::cmp::Reverse(d.components().count()));
     Ok(files
         .iter()
-        .filter_map(|f| dirs.iter().find(|(d, _)| !d.as_os_str().is_empty() && Path::new(f).starts_with(d)))
-        .map(|(_, name)| name.clone())
+        .filter_map(|f| dirs.iter().find(|(d, _, _)| !d.as_os_str().is_empty() && Path::new(f).starts_with(d)))
+        .map(|(_, name, t)| (name.clone(), *t))
         .collect())
+}
+
+/// Whether a package has a library and binaries, from its cargo metadata targets.
+fn targets_of(p: &cargo_metadata::Package) -> Targets {
+    let kinds = |pred: &dyn Fn(&str) -> bool| p.targets.iter().any(|t| t.kind.iter().any(|k| pred(&k.to_string())));
+    Targets {
+        lib: kinds(&|k| matches!(k, "lib" | "rlib" | "dylib" | "cdylib" | "staticlib" | "proc-macro")),
+        bins: kinds(&|k| k == "bin"),
+    }
 }
 
 #[cfg(test)]
@@ -607,17 +704,64 @@ mod tests {
         for p in [Profile::Pr, Profile::Full, Profile::Windows] {
             assert_eq!(plan(p)[0].action, Action::DiskGuard);
         }
-        assert_eq!(quick_plan(&BTreeSet::new())[0].action, Action::DiskGuard);
+        assert_eq!(quick_plan(&BTreeMap::new())[0].action, Action::DiskGuard);
+    }
+
+    fn test_args(q: &[Step]) -> Vec<String> {
+        match &q.iter().find(|s| s.name == "test").expect("test step").action {
+            Action::Tests { nextest, .. } => nextest.clone(),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
     fn the_quick_plan_targets_changed_packages() {
-        assert_eq!(names(&quick_plan(&BTreeSet::new())), ["disk-guard", "fmt"]);
-        let changed: BTreeSet<String> = ["russet-testkit".to_string(), "xtask".to_string()].into();
+        assert_eq!(names(&quick_plan(&BTreeMap::new())), ["disk-guard", "fmt"]);
+        let lib = Targets { lib: true, bins: false };
+        let bin = Targets { lib: false, bins: true };
+        let changed: BTreeMap<String, Targets> =
+            [("russet-testkit".to_string(), lib), ("xtask".to_string(), bin)].into();
         let q = quick_plan(&changed);
         assert_eq!(names(&q), ["disk-guard", "fmt", "clippy", "test"]);
         let clippy = describe(&q[2].action);
         assert!(clippy.contains("-p russet-testkit") && clippy.contains("-p xtask"), "{clippy}");
+        // xtask's unit tests live in its binary: --bins runs them next to the testkit's --lib.
+        assert_eq!(test_args(&q), strings(&["--lib", "--bins", "--locked", "-p", "russet-testkit", "-p", "xtask"]));
+        // A binary-only package alone gets no --lib, which cargo would refuse.
+        let only_xtask: BTreeMap<String, Targets> = [("xtask".to_string(), bin)].into();
+        assert_eq!(test_args(&quick_plan(&only_xtask)), strings(&["--bins", "--locked", "-p", "xtask"]));
+        let only_lib: BTreeMap<String, Targets> = [("russet-core".to_string(), lib)].into();
+        assert_eq!(test_args(&quick_plan(&only_lib)), strings(&["--lib", "--locked", "-p", "russet-core"]));
+    }
+
+    #[test]
+    fn package_targets_come_from_cargo_metadata() {
+        let metadata = cargo_metadata::MetadataCommand::new()
+            .manifest_path(workstreams::repo_root().join("Cargo.toml"))
+            .no_deps()
+            .exec()
+            .expect("metadata");
+        let of = |name: &str| {
+            targets_of(metadata.workspace_packages().into_iter().find(|p| p.name.as_str() == name).expect(name))
+        };
+        assert_eq!(of("xtask"), Targets { lib: false, bins: true });
+        assert_eq!(of("russet-testkit"), Targets { lib: true, bins: false });
+        assert_eq!(of("russet-cli"), Targets { lib: true, bins: true });
+    }
+
+    #[test]
+    fn documentation_only_changes_skip_the_rust_steps() {
+        let set = |files: &[&str]| files.iter().map(|f| f.to_string()).collect::<BTreeSet<String>>();
+        assert!(docs_only(&set(&["docs/PLAN.md", "README.md", "crates/russet-core/README.md", "docs/design/x.svg"])));
+        assert!(docs_only(&set(&["LICENSES/MIT.txt", ".github/ISSUE_TEMPLATE/bug_report.yml", ".github/CODEOWNERS"])));
+        assert!(!docs_only(&set(&["docs/PLAN.md", "crates/russet-core/src/lib.rs"])));
+        assert!(!docs_only(&set(&["Cargo.lock"])));
+        assert!(!docs_only(&set(&[".github/workflows/ci.yml"])), "a workflow change gets a full run");
+        assert!(!docs_only(&set(&["typos.toml"])));
+        assert!(!docs_only(&BTreeSet::new()), "no change means a full run");
+        // The skipped steps are exactly the cargo ones; guards, layers, paths and schema drift always run.
+        let skipped: Vec<&str> = plan(Profile::Pr).iter().filter(|s| s.is_rust()).map(|s| s.name).collect();
+        assert_eq!(skipped, ["fmt", "clippy", "test", "deny"]);
     }
 
     #[test]
@@ -631,6 +775,7 @@ mod tests {
             .exec()
             .expect("metadata");
         let members: BTreeSet<String> = metadata.workspace_packages().iter().map(|p| p.name.to_string()).collect();
-        assert!(changed.is_subset(&members), "{changed:?}");
+        let names: BTreeSet<String> = changed.keys().cloned().collect();
+        assert!(names.is_subset(&members), "{changed:?}");
     }
 }
