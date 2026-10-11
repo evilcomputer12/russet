@@ -1,18 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! `sdk.*`: SDK registry and the native SDK/DDI importer (ARCHITECTURE §16.3). Owner: W3.
+//! `sdk.*`: SDK registry and the native SDK/DDI importer (ARCHITECTURE §16.3). Owner: W3 (`sdk.list`); W16b
+//! (`sdk.import`, `sdk.remove`); W33 (`sdk.deviceSupport.*`, deferred).
 //!
-//! F0 stub (W1): every name of ARCHITECTURE §8.1 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
-//! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+//! The import, remove and Device Support DTOs are still placeholders ([`Unspecified`]); their owners replace
+//! each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize, JsonSchema, TS` (camelCase; the
+//! wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+pub use crate::toolchain::SdkInfo;
 use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
 
-/// Params of `sdk.list`: `{} → {sdks: SdkInfo[]}`.
-pub type SdkListParams = Unspecified;
-/// Result of `sdk.list`.
-pub type SdkListResult = Unspecified;
+/// Params of `sdk.list`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SdkListParams {}
+
+/// Result of `sdk.list`: Russet's imports first, then xtool bundles read in place.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SdkListResult {
+    pub sdks: Vec<SdkInfo>,
+}
+
 crate::rpc_method!(
     /// `sdk.list` (class `read`). W3 (Wave 1).
     SdkList,
