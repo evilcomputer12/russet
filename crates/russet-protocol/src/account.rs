@@ -261,6 +261,11 @@ crate::rpc_notification!(
     AccountEventParams
 );
 
+/// The `secrets`-class methods of this namespace that are local-file imports: from a non-interactive `cli`
+/// connection the permission engine asks a plain `ui.confirm` (which `--yes` pre-confirms) instead of refusing
+/// for want of a TTY (ARCHITECTURE §7.5 [D 85]). `secrets.set {fromFile}` is the third such import (W3).
+pub const LOCAL_FILE_IMPORTS: &[&str] = &[AccountImportXtool::INFO.name, AccountAddAscKey::INFO.name];
+
 /// Methods the daemon serves in this namespace.
 pub const METHODS: &[MethodInfo] = &[
     AccountList::INFO,
@@ -279,3 +284,29 @@ pub const METHODS: &[MethodInfo] = &[
 pub const NOTIFICATIONS: &[NotificationInfo] = &[AccountEvent::INFO];
 /// Requests the daemon sends to clients in this namespace.
 pub const CLIENT_METHODS: &[MethodInfo] = &[];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Confirm, Permission};
+
+    #[test]
+    fn the_local_file_imports_are_plain_secrets_methods() {
+        assert_eq!(LOCAL_FILE_IMPORTS, ["account.importXtool", "account.addAscKey"]);
+        for name in LOCAL_FILE_IMPORTS {
+            let m = METHODS.iter().find(|m| m.name == *name).copied();
+            assert!(m.is_some_and(|m| m.permission == Permission::Secrets && m.confirm == Confirm::Plain), "{name}");
+        }
+    }
+
+    #[test]
+    fn import_results_are_camel_case() {
+        let v = serde_json::to_value(AccountImportXtoolResult {
+            accounts: Vec::new(),
+            identities: Vec::new(),
+            warnings: vec!["chmod 600".into()],
+            dry_run: true,
+        });
+        assert!(v.is_ok_and(|v| v["dryRun"] == true && v["warnings"][0] == "chmod 600"));
+    }
+}
