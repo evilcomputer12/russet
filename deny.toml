@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# cargo-deny 0.20 (core §18; ARCHITECTURE §16.6, §19). Gate: `cargo deny check licenses bans sources`; the
+# advisories check joins once W8 wires the advisory database into CI.
+
+[graph]
+# Every platform Russet ships on (core §15), so Windows-only dependencies are checked too.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+all-features = false
+
+[advisories]
+# W16b adds RUSTSEC-2023-0071 here with its reason: `rsa` is verify-only in russet-xar (ARCHITECTURE §5.1).
+ignore = []
+
+[licenses]
+# ARCHITECTURE §19. LGPL and anything else only as a per-crate exception after a written review [D 48].
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "MPL-2.0",
+    "GPL-3.0-or-later",
+]
+confidence-threshold = 0.93
+# The allowlist is binding policy (ARCHITECTURE §19), not tuned to today's graph.
+unused-allowed-license = "allow"
+# Per-crate exceptions after a written review [D 48]. Review by W1 (2026-10-11), for the lead's sign-off at merge:
+# - BlueOak-1.0.0 (Blue Oak Model License 1.0.0): an OSI-approved permissive licence (copyright and patent grant;
+#   keep the notice), compatible with GPL-3.0-or-later. minicbor is a hard dependency of apple-codesign 0.29.0
+#   (ARCHITECTURE §16.7), so russet-sign cannot avoid it.
+# - CDLA-Permissive-2.0: a permissive data licence for Mozilla's CA root list (no copyleft; keep the agreement text),
+#   compatible with GPL-3.0-or-later. webpki-roots comes in through idevice's `tss` feature (DDI personalization),
+#   reqwest and tokio-tungstenite. W26's notices (cargo-about) list both licences.
+exceptions = [
+    { crate = "minicbor", allow = ["BlueOak-1.0.0"] },
+    { crate = "minicbor-derive", allow = ["BlueOak-1.0.0"] },
+    { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+]
+
+[licenses.private]
+# The workspace crates are `publish = false` and carry GPL-3.0-or-later or MIT headers (REUSE).
+ignore = true
+
+[bans]
+multiple-versions = "warn" # two reqwest majors are accepted (apple-codesign pulls 0.12; ARCHITECTURE §16.6)
+wildcards = "allow"
+deny = [
+    { crate = "aws-lc-sys", reason = "one rustls provider: ring (ARCHITECTURE §16.6 [D 21])" },
+    { crate = "aws-lc-rs", reason = "one rustls provider: ring (ARCHITECTURE §16.6 [D 21])" },
+    { crate = "openssl", reason = "banned to keep cross-builds simple (ARCHITECTURE §16.6)" },
+    { crate = "openssl-sys", reason = "banned to keep cross-builds simple (ARCHITECTURE §16.6)" },
+    { crate = "native-tls", reason = "banned: rustls with ring only (ARCHITECTURE §16.6)" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The reviewed idevice fork rev joins here with the root [patch.crates-io] (ARCHITECTURE §16.7 [D 22]).
+allow-git = []
