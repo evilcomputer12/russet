@@ -2,6 +2,23 @@
 
 Decisions agreed with the project owner. Newest first.
 
+## 2026-10-11: Owner answers (ARCHITECTURE §21)
+
+- **Q33.** Approved for the device lane:
+  - one iPhone reboot plus a DDI replacement during W9 (DC-28);
+  - later, a second reboot or a forced re-mount (DC-29).
+
+  The Apple-origin iOS DDI (27A266a) was copied read-only from the owner's Mac to
+  `~/russet-lab/ddi/27A266a/iOS` on 2026-10-11. It stays out of git.
+- **Q34.** Before going public at G1:
+  - the private track's details live only in the private repository's decision log;
+  - this repository is published from a fresh, squashed history.
+- **Q6.** Stay on GitHub Free with no payment method, so CI can never cost money. Go
+  public at G1.
+- **Q27.** The owner will re-download `Xcode_27.0.xip` when W16b asks for it, and keep it
+  until the Linux and Windows import tests pass.
+- **Q28.** The TXM premise in "Test devices" is corrected (see that entry).
+
 ## 2026-10-11: Accounts, CI and test devices
 
 - **Developer account changes (Wave 2).** Russet may register one bundle ID (for example
@@ -23,27 +40,13 @@ Decisions agreed with the project owner. Newest first.
 - **xtool credential files** were locked down to 0600 (2026-10-11). Run
   `xtool auth logout` once Russet's own provisioning works.
 
-## 2026-10-11: Simulator and virtual iPhone
+## 2026-10-11: Simulator
 
 - **Device mirror** serves as the simulator replacement in the first build: the real iPhone
   appears live in the IDE with input and hot reload.
-- **Virtual iPhone (parallel track).** Boot real iOS in QEMU (TCG) on x86 by emulating
-  Apple's *virtual* iPhone platform (VPHONE600AP from the Private Cloud Compute research
-  firmware, as used by vphone-cli). We are not emulating a physical iPhone model.
-  - Developed in a separate **private** repository (`russet-vphone`). It may later ship
-    as a separately distributed, opt-in module after a legal review, because firmware
-    patching carries anti-circumvention risk. Users would supply their own firmware;
-    Apple files are never redistributed.
-  - Scope: proceed through go/no-go gates. A headless virtual iPhone (install, debug,
-    tests, automation, no home screen) is still worth shipping if the GPU work fails.
-  - GPU bridge: LGPL-3.0 Reims may be linked into private builds. Public builds must run
-    it as a separate process, because parts of QEMU are GPL-2.0-only.
-  - It runs alongside the core build and does not block it.
 - **Rejected:** running Apple's iOS Simulator natively on Linux or Windows. The iOS 27
   simulator runtime is arm64-only and needs the macOS kernel, macOS frameworks and Metal.
-- **Mac reference VM.** The owner enabled research guests on the Mac (2026-10-11) so that
-  vphone-cli can run a reference virtual iPhone for reverse engineering. Ask the owner
-  before deleting anything on the Mac.
+- **Virtual iPhone:** a separate private track; it never blocks this repository.
 
 ## 2026-10-10: Project foundations
 
