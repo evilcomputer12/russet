@@ -1,23 +1,26 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! gdb-remote client for debugserver (ARCHITECTURE §5.3 `russet-gdbremote`, RD §17.1): codec, stop-reply
-//! parser, the async [`GdbClient`] and interposer hooks. It has no device knowledge, so it can go upstream.
+//! gdb-remote client for debugserver (ARCHITECTURE §5.3 `russet-gdbremote`, RD §17.1): the [`codec`], the
+//! [`stop`]-reply parser, the async [`GdbClient`], the [`interpose`] relay with hooks and the [`arm64`]
+//! helpers. It has no device knowledge, so it can go upstream.
 //!
-//! Layer F (MIT OR Apache-2.0). F0 stub (W1); W7 fills the bodies (RD-01).
-
-// F0 stubs: parameters of `todo!()` bodies are unused until the owner fills them.
-#![allow(unused_variables)]
+//! Layer F (MIT OR Apache-2.0). Owner: W7 (RD-01).
 
 // Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
 const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
 
-use std::collections::BTreeMap;
-use std::marker::PhantomData;
-use std::time::Duration;
+pub mod arm64;
+pub mod client;
+pub mod codec;
+pub mod interpose;
+pub mod stop;
 
-use bytes::Bytes;
-use tokio::io::{AsyncRead, AsyncWrite};
+pub use client::{
+    ClientStats, GdbClient, HandshakeOptions, ImageInfo, MemoryRegion, ProcessInfo, RawSession, RegisterInfo,
+    ResumeAction, SegmentInfo, ServerInfo, SharedCacheInfo, check_ok, memory_write_packet,
+};
+pub use stop::{MachException, StopEvent, StopReply, parse_stop, parse_stop_raw};
 
 /// Errors of the gdb-remote client.
 #[derive(Debug, thiserror::Error)]
@@ -26,7 +29,7 @@ pub enum GdbError {
     Io(#[from] std::io::Error),
     #[error("protocol error: {0}")]
     Protocol(String),
-    #[error("remote error E{code:02x}")]
+    #[error("remote error E{code:02x}{}", message.as_deref().map(|m| format!(": {m}")).unwrap_or_default())]
     Remote { code: u8, message: Option<String> },
     #[error("timed out waiting for {0}")]
     Timeout(&'static str),
@@ -34,130 +37,47 @@ pub enum GdbError {
     Unsupported(&'static str),
     #[error("disconnected")]
     Disconnected,
+    /// The process exited (or was killed) where a stop was expected.
+    #[error("the process exited (code {code:?}, signal {signal:?})")]
+    Exited { code: Option<u8>, signal: Option<u8> },
 }
 
-/// Handshake options.
-#[derive(Debug, Clone, Default)]
-pub struct HandshakeOptions {
-    /// Ask for `QStartNoAckMode`.
-    pub no_ack: bool,
-    /// Per-packet timeout during the handshake; `None` uses the client default.
-    pub timeout: Option<Duration>,
+/// Parses an error reply: `Exx`, `Exx;<hex message>` (after `QEnableErrorStrings`) or `E.<text>`.
+pub fn remote_error(reply: &[u8]) -> GdbError {
+    let rest = reply.strip_prefix(b"E").unwrap_or(reply);
+    if let Some(text) = rest.strip_prefix(b".") {
+        return GdbError::Remote { code: 0, message: Some(String::from_utf8_lossy(text).into_owned()) };
+    }
+    let (digits, message) = match rest.iter().position(|&b| b == b';') {
+        Some(i) => (&rest[..i], Some(&rest[i + 1..])),
+        None => (rest, None),
+    };
+    let code = codec::parse_hex_u64(digits).map(|v| (v & 0xff) as u8).unwrap_or(0);
+    let message = message.map(|m| match codec::hex_decode(m) {
+        Some(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        None => String::from_utf8_lossy(m).into_owned(),
+    });
+    GdbError::Remote { code, message }
 }
 
-/// What the server reported during the handshake.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ServerInfo {
-    pub packet_size: usize,
-    pub compressions: Vec<String>,
-    pub page_size: u64,
-    pub os_version: Option<String>,
-    pub ostype: Option<String>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// How to resume the inferior.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResumeAction {
-    ContinueAll,
-    ContinueWithSignal { tid: u64, signal: u8 },
-    Step { tid: u64 },
-    Raw(String),
-}
-
-/// A Mach exception carried in a stop reply.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MachException {
-    pub metype: u32,
-    pub medata: Vec<u64>,
-}
-
-/// A parsed `T`/`S` stop reply.
-#[derive(Debug, Clone, PartialEq)]
-pub struct StopReply {
-    pub signal: u8,
-    pub thread: Option<u64>,
-    /// `breakpoint`, `signal`, `exception`, `trace`, …
-    pub reason: Option<String>,
-    /// Expedited registers, keyed by debugserver register number.
-    pub regs: BTreeMap<u32, u64>,
-    pub threads: Vec<u64>,
-    pub thread_pcs: Vec<u64>,
-    pub mach_exception: Option<MachException>,
-    pub jstopinfo: Option<serde_json::Value>,
-    pub raw: Bytes,
-}
-
-/// What [`GdbClient::wait_stop`] returns.
-#[derive(Debug, Clone, PartialEq)]
-pub enum StopEvent {
-    Stopped(StopReply),
-    Exited { code: u8 },
-    Terminated { signal: u8 },
-    Output(Vec<u8>),
-}
-
-/// One loaded image (`jGetLoadedDynamicLibrariesInfos`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImageInfo {
-    pub load_address: u64,
-    pub path: String,
-    pub uuid: Option<String>,
-}
-
-/// An async gdb-remote client over any byte stream.
-#[derive(Debug)]
-pub struct GdbClient<S> {
-    _stream: PhantomData<fn() -> S>,
-}
-
-impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> GdbClient<S> {
-    pub async fn handshake(stream: S, opts: HandshakeOptions) -> Result<(Self, ServerInfo), GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn request(&mut self, payload: &[u8]) -> Result<Bytes, GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    /// Writes all packets in one syscall, then collects one reply per packet, in order.
-    pub async fn pipeline(&mut self, payloads: &[Vec<u8>]) -> Result<Vec<Bytes>, GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn attach(&mut self, pid: u32) -> Result<StopReply, GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    /// Resumes without waiting for the next stop.
-    pub async fn resume(&mut self, action: ResumeAction) -> Result<(), GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn wait_stop(&mut self) -> Result<StopEvent, GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn interrupt(&mut self) -> Result<StopReply, GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn read_memory(&mut self, addr: u64, len: usize) -> Result<Vec<u8>, GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn write_memory(&mut self, addr: u64, data: &[u8]) -> Result<(), GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    /// `Z0`.
-    pub async fn set_breakpoint(&mut self, addr: u64, kind: u8) -> Result<(), GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    /// `z0`.
-    pub async fn remove_breakpoint(&mut self, addr: u64, kind: u8) -> Result<(), GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn write_register(&mut self, tid: u64, reg: u32, value: u64) -> Result<(), GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn loaded_images(&mut self) -> Result<Vec<ImageInfo>, GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn detach(self) -> Result<(), GdbError> {
-        todo!("W7 (RD-01)")
-    }
-    pub async fn kill(self) -> Result<Option<StopEvent>, GdbError> {
-        todo!("W7 (RD-01)")
+    #[test]
+    fn error_replies() {
+        assert!(matches!(remote_error(b"E08"), GdbError::Remote { code: 8, message: None }));
+        let msg = format!("E16;{}", codec::hex_encode(b"russet broker already attached pid 932"));
+        match remote_error(msg.as_bytes()) {
+            GdbError::Remote { code: 0x16, message: Some(m) } => {
+                assert_eq!(m, "russet broker already attached pid 932")
+            }
+            other => panic!("{other:?}"),
+        }
+        match remote_error(b"E.operation not permitted") {
+            GdbError::Remote { code: 0, message: Some(m) } => assert_eq!(m, "operation not permitted"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(remote_error(b"E09").to_string(), "remote error E09");
     }
 }

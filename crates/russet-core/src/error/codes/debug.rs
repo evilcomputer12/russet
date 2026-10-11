@@ -43,6 +43,9 @@ pub const SESSION_NOT_FOUND: ErrorCode = ErrorCode::new(6014, "debug.sessionNotF
 pub const OVERLAY_UNAVAILABLE: ErrorCode = ErrorCode::new(6015, "debug.overlayUnavailable", 9);
 /// 6016 `debug.jitPageMissed`: A crash at a page that was announced but not touched, or in an executable region never announced: a servicer bug; `details {region, page, pc, faultAddress}`.
 pub const JIT_PAGE_MISSED: ErrorCode = ErrorCode::new(6016, "debug.jitPageMissed", 9);
+/// 6017 `debug.batchTimeout`: `russet debug --batch` did not stop and finish its commands within `--timeout`
+/// (W7; `details {stopped, timeoutSecs, result}`).
+pub const BATCH_TIMEOUT: ErrorCode = ErrorCode::new(6017, "debug.batchTimeout", 9);
 
 /// Every code of this family, in number order.
 pub const ALL: &[ErrorCode] = &[
@@ -63,4 +66,5 @@ pub const ALL: &[ErrorCode] = &[
     SESSION_NOT_FOUND,
     OVERLAY_UNAVAILABLE,
     JIT_PAGE_MISSED,
+    BATCH_TIMEOUT,
 ];

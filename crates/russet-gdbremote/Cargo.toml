@@ -16,7 +16,11 @@ workspace = true
 
 [dependencies]
 bytes.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["io-util"] }
+tokio = { workspace = true, features = ["io-util", "time", "macros"] }
 tokio-util = { workspace = true, features = ["codec"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "time", "macros", "rt", "rt-multi-thread", "sync"] }

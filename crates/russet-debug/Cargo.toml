@@ -15,11 +15,25 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
+bytes.workspace = true
 russet-build.workspace = true
 russet-core.workspace = true
 russet-device.workspace = true
 russet-doctor.workspace = true
 russet-gdbremote.workspace = true
+russet-protocol.workspace = true
 russet-toolchain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
 symbolic = { workspace = true, features = ["demangle"] }
-tokio = { workspace = true, features = ["sync"] }
+time = { workspace = true, features = ["formatting", "parsing"] }
+tokio = { workspace = true, features = ["sync", "net", "io-util", "time", "rt", "macros", "fs", "process"] }
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+russet-testkit.workspace = true
+tokio = { workspace = true, features = ["sync", "net", "io-util", "time", "rt", "rt-multi-thread", "macros", "fs", "process"] }

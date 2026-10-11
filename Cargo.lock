@@ -5477,14 +5477,25 @@ dependencies = [
 name = "russet-debug"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "russet-build",
  "russet-core",
  "russet-device",
  "russet-doctor",
  "russet-gdbremote",
+ "russet-protocol",
+ "russet-testkit",
  "russet-toolchain",
+ "serde",
+ "serde_json",
+ "sha1 0.10.7",
+ "sha2 0.11.0",
  "symbolic",
+ "time",
  "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -5531,6 +5542,7 @@ name = "russet-gdbremote"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
