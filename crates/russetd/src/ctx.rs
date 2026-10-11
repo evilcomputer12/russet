@@ -401,7 +401,12 @@ impl fmt::Debug for DeviceSlot {
 }
 
 /// russet-debug reaches the device plane through the slot, which starts the manager on first use [D 83].
-impl russet_debug::DeviceServices for DeviceSlot {}
+#[russet_debug::async_trait]
+impl russet_debug::DeviceServices for DeviceSlot {
+    async fn manager(&self) -> Result<Arc<russet_device::DeviceManager>> {
+        DeviceSlot::manager(self).await
+    }
+}
 
 impl DeviceSlot {
     /// A slot for `backend` with the given live-device lock state; the device plane reads its configuration and
