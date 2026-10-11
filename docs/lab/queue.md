@@ -2,7 +2,7 @@
 
 The queue of device checks (PLAN §2, §11). Any workstream appends a check; the current lane-A workstream runs the
 queue in batches (at least once per working day while a wave is active) and records the redacted results. Owner:
-W4 in Wave 1, then W9 (PLAN §3), which may move the result notes below into `docs/lab/results/<date>-DC-nn.md`.
+W4 in Wave 1, then W9 (PLAN §3). Results from W9 on are in `docs/lab/results/<date>-DC-nn.md`.
 
 **Filing a check:** id `DC-nn` (PLAN §11), requester, the exact commands or script, the expected result, the commit
 to test. **Results** never contain UDIDs, ECIDs, serial numbers, team IDs, Apple IDs, device names or the issuer
@@ -24,8 +24,11 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
 | DC-01 | W4 | passed (W4, 2026-10-11, second run: 8/8 HIL tests) | `e3e7e71` |
 | DC-01 open items | W4 | queued: need the owner, root, or W5/W6 artifacts (below) | the then-current W4/W9 commit |
 | DC-04 D1, D2 | W7 | passed (W4, 2026-10-11) | recorded in `0534d24`; run on W4's working tree before its first commit |
-| DC-04 D3 | W7 | queued for W9 | W7's broker |
-| DC-28 | W4 | queued for W9 (owner-approved reboot, Q33) | W4's mount path as of `e3e7e71` + W9's `tests/lab/dc28-ddi.sh` |
+| DC-04 D3 | W7 | passed (W9, 2026-10-11): [results](results/2026-10-11-DC-04.md) | `3ad83bd` |
+| DC-28 | W4 | passed (W9, 2026-10-11, after the approved reboot and a forced replacement): [results](results/2026-10-11-DC-28.md) | `a5ea275` |
+| DC-02 | W5 | passed (W9, 2026-10-11): [results](results/2026-10-11-DC-02.md) | `3ad83bd` |
+| DC-03 | W6 | passed (W9, 2026-10-11): [results](results/2026-10-11-DC-03.md) | `3ad83bd` |
+| DC-05 | W9 | passed 3/3 (W9, 2026-10-11): [results](results/2026-10-11-DC-05.md) | `3ad83bd` |
 
 ---
 
@@ -126,9 +129,13 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
     new appservice connection; the stdio stream keeps working after the launch channel closed (2035 console lines
     after the SIGCONT). A running app keeps running. So a broker may attach after the launch channel closed, and the
     daemon does not need to keep the channel open for the app's sake (it keeps it anyway, ARCHITECTURE §17.1).
-- **D3, broker sync `process connect` stops at a breakpoint:** queued for W9 (needs W7's broker).
+- **D3, broker sync `process connect` stops at a breakpoint:** passed in W9 (2026-10-11); see
+  [results/2026-10-11-DC-04.md](results/2026-10-11-DC-04.md).
 
 ## DC-28: DDI provenance and reboot (W4; run in W9)
+
+**Passed in W9 on 2026-10-11**: [results/2026-10-11-DC-28.md](results/2026-10-11-DC-28.md). The section below is the
+request as W4 filed it.
 
 - **Requester:** W4 (PLAN §4.4, §11; ARCHITECTURE [D 62, D 82, D 89]). **Runs in:** W9, after the owner-approved
   reboot (decisions.md Q33: approved for W9).

@@ -23,7 +23,7 @@ use russet_testkit::{SpawnedDaemon, TempHome, Transcript};
 use serde_json::json;
 
 #[test]
-#[ignore = "needs W4's DeviceManager behind W2's daemon; W9 enables it after W4 merges (PLAN W8, ARCHITECTURE §3.3 item 7)"]
+#[ignore = "blocked: a spawned daemon cannot run the scripted backend until the lead moves ScriptedConnector where russetd may use it (testkit README); W9 ran it on 2026-10-11: device.list answers core.notImplemented"]
 fn a_scripted_lane_d_daemon_never_connects_to_the_usbmuxd_tripwire() {
     let home = TempHome::builder().tripwire().build().expect("home");
     let daemon = SpawnedDaemon::spawn(&home, &russet_bin().expect("russet binary"), &[]).expect("daemon");

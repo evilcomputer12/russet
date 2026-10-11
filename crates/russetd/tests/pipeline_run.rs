@@ -105,6 +105,8 @@ impl ProjectBuilder for FakeBuilder {
             bundle_id: "dev.russet.test.probe".into(),
             profile: "debug".into(),
             sdk_path: Some(PathBuf::from("/sdk/iPhoneOS27.0.sdk")),
+            project: spec.project.clone(),
+            get_task_allow: Some(true),
         })
     }
 }

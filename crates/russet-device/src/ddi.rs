@@ -539,6 +539,19 @@ impl DeviceHandle {
         })?;
         p.report(Some("personalizing with Apple (TSS)"), Some(20));
         let im4m = self.personalize(&assets).await?;
+        if status.mounted && force {
+            // A persistent DDI cryptex survives reboots, and cryptexd refuses to install over it ("cryptex already
+            // exists", com.apple.security.cryptex 17): uninstall it first. Personalized before, so a TSS failure
+            // never leaves the device without a DDI.
+            p.report(Some("removing the mounted DDI cryptex"), Some(40));
+            for old in self.installed_cryptexes().await?.into_iter().filter(|c| c.identifier == DDI_CRYPTEX) {
+                self.cryptexd()
+                    .await?
+                    .uninstall(&old.identifier, Some(&old.version))
+                    .await
+                    .map_err(|e| from_idevice(e, "cryptexd uninstall"))?;
+            }
+        }
         p.report(Some("installing the cryptex"), Some(50));
         install_cryptex(self.conn().rsd_service(self.udid(), service::CRYPTEXD).await?, &assets, im4m)
             .await

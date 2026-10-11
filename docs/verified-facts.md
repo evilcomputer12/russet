@@ -8,6 +8,28 @@ Test rig:
 - iPhone: iPhone 12 (iPhone13,2, A14), iOS 27.0 (24A437), connected over USB.
 - Mac, used as an oracle only: MacBook Air M1, macOS 27.0.1 (26A434), Xcode 27.0 (27A266a).
 
+## 2026-10-11: Wave-1 exit gate on the rig with Russet's own code (W9)
+
+Lane A, `RUSSET_HOME=~/russet-lab/home-A`, branch `ws/w09-slice` (`3ad83bd`); details in
+[lab/results/](lab/results/).
+- **`russet debug` stops at the RussetProbe breakpoint with Russet code only**, 3 runs in a row
+  (`cargo xtask lab exit-script --runs 3`, DC-05): xtool, pymobiledevice3 and go-ios off `PATH` for the CLI and the
+  daemon, `fallback.pymobiledevice3 = off`. Build → offline profile → sign → install-if-changed → suspended
+  CoreDevice launch → gdb-remote broker → Swift LLDB with a Python-free script: breakpoint at
+  `ContentView.swift:13` in `ContentView.body.getter` in 27.0-27.5 s, `probeValue = 42`, the app still running
+  detached 5 s later, 154 consecutive heartbeat lines in 15 s, zero account mutations, `doctor` 0 failures.
+- The lab smoke suite (E2E-01, 02, 03, 04, 06, 14; `cargo xtask lab smoke`) passed 6/6.
+- **A persistent DDI cryptex survives a reboot.** After the owner-approved reboot the mirror's 27A5228h
+  (`27.1.5228.8`, installed by pymobiledevice3) was still mounted. cryptexd refuses to install a DDI cryptex over
+  it (`com.apple.security.cryptex` 17, "cryptex already exists"); `uninstall` of `com.apple.MobileAsset.DDI` by
+  identifier and version, then `install`, replaced it with the Apple-origin 27A266a copy (cryptex version
+  `27.1.266.1`), mounted by idevice alone (DC-28).
+- **LLDB without device support** reads libobjc and the shared cache from process memory ("could not find the
+  on-disk shared cache"); from LLDB start to the breakpoint took about 11 s. Re-planning provisioning against App
+  Store Connect took 8-51 s per run, so the pipeline now uses a matching cached profile offline.
+- After the reboot the phone re-enumerated on USB after about 45 s and was paired, with the tunnel up, at the first
+  poll (whether it was unlocked in between was not observed).
+
 ## 2026-10-11: Review round 2 checks (no device commands; the Mac read-only)
 
 - **LLDB batch mode is synchronous.** With Swift 6.4's LLDB 21.0.0 on this box (env from uv's PBS 3.12.15),

@@ -200,6 +200,7 @@ async fn run_app(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     if detach {
         cx.reporter.result(&serde_json::json!({
             "sessionId": session_id, "pid": started.pid, "bundleId": started.bundle_id,
+            "installed": started.installed,
         }));
         return Ok(ExitCode::SUCCESS);
     }
