@@ -1,0 +1,367 @@
+{
+  "$defs": {
+    "ByteSize": {
+      "description": "A size such as \"5GiB\", \"512MiB\", \"20GB\" or \"1024\" (bytes).",
+      "pattern": "^[0-9]+ ?(B|KiB|MiB|GiB|TiB|kB|KB|MB|GB|TB)?$",
+      "type": "string"
+    },
+    "DaemonSection": {
+      "additionalProperties": false,
+      "description": "`[daemon]`.",
+      "properties": {
+        "build-nice": {
+          "default": 10,
+          "format": "int32",
+          "maximum": 19,
+          "minimum": -20,
+          "type": "integer"
+        },
+        "idle-timeout": {
+          "$ref": "#/$defs/Duration",
+          "default": "30m",
+          "description": "`\"0\"` never idles out."
+        },
+        "listen-tcp": {
+          "default": "",
+          "description": "WSL split mode only, for example `127.0.0.1:0`; empty = off.",
+          "type": "string"
+        },
+        "log-filter": {
+          "default": "info",
+          "description": "A tracing filter, for example `info` or `info,russetd=debug`.",
+          "type": "string"
+        },
+        "log-retention-days": {
+          "default": 7,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max-build-jobs": {
+          "default": 1,
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max-parallel-jobs": {
+          "default": 4,
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "DdiSection": {
+      "additionalProperties": false,
+      "description": "`[device.ddi]` [D 62, D 82]: `ensure_ddi` tries `order` and stops at the first source that mounts.",
+      "properties": {
+        "allow-mirror": {
+          "default": false,
+          "description": "`pmd3-cache` and `pmd3-auto-mount` are mirror content; allowed only after the consent text.",
+          "type": "boolean"
+        },
+        "dir": {
+          "default": "",
+          "description": "A DDI root holding `Restore/` and `version.plist` (a copy of a Mac's\n`/Library/Developer/DeveloperDiskImages/iOS_DDI`), or a directory that holds `BuildManifest.plist`.",
+          "type": "string"
+        },
+        "order": {
+          "default": [
+            "dir",
+            "imported"
+          ],
+          "items": {
+            "$ref": "#/$defs/DdiSourceKind"
+          },
+          "type": "array"
+        },
+        "ticket-cache": {
+          "default": false,
+          "description": "Cache the Cryptex1 IM4M per (ECID, ddiBuild, nonce), mode 0600, for offline remounts.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "DdiSourceKind": {
+      "description": "`[device.ddi] order` entries.",
+      "enum": [
+        "dir",
+        "imported",
+        "pmd3-cache",
+        "pmd3-auto-mount"
+      ],
+      "type": "string"
+    },
+    "DeviceSection": {
+      "additionalProperties": false,
+      "description": "`[device]`.",
+      "properties": {
+        "ddi": {
+          "$ref": "#/$defs/DdiSection",
+          "default": {
+            "allow-mirror": false,
+            "dir": "",
+            "order": [
+              "dir",
+              "imported"
+            ],
+            "ticket-cache": false
+          }
+        },
+        "keep-warm": {
+          "$ref": "#/$defs/Duration",
+          "default": "10m"
+        },
+        "lease-grace": {
+          "$ref": "#/$defs/Duration",
+          "default": "2s"
+        },
+        "mux": {
+          "default": "auto",
+          "description": "`auto`, `usbmuxd:<path>`, `amds` or `netmuxd:<addr>`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "DevicesSection": {
+      "additionalProperties": false,
+      "description": "`[devices]`.",
+      "properties": {
+        "aliases": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Alias → UDID.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Duration": {
+      "description": "A duration such as \"30m\", \"2s\", \"1h30m\", \"500ms\" or \"0\".",
+      "pattern": "^(0|([0-9]+(ms|s|m|h|d))+)$",
+      "type": "string"
+    },
+    "FallbackSection": {
+      "additionalProperties": false,
+      "description": "`[fallback]`.",
+      "properties": {
+        "pymobiledevice3": {
+          "default": "auto",
+          "description": "`auto`, `off` or the path of a `pymobiledevice3` executable.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "McpHttpSection": {
+      "additionalProperties": false,
+      "description": "`[mcp.http]`: the opt-in MCP HTTP endpoint (ARCHITECTURE §6.6, §11.2).",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "expose-docker": {
+          "default": false,
+          "type": "boolean"
+        },
+        "listen": {
+          "default": "127.0.0.1:43117",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "McpSection": {
+      "additionalProperties": false,
+      "description": "`[mcp]`.",
+      "properties": {
+        "http": {
+          "$ref": "#/$defs/McpHttpSection",
+          "default": {
+            "enabled": false,
+            "expose-docker": false,
+            "listen": "127.0.0.1:43117"
+          }
+        }
+      },
+      "type": "object"
+    },
+    "PrivacySection": {
+      "additionalProperties": false,
+      "description": "`[privacy]`.",
+      "properties": {
+        "telemetry": {
+          "$ref": "#/$defs/Telemetry",
+          "default": "off",
+          "description": "Russet has no telemetry; the key only documents that."
+        }
+      },
+      "type": "object"
+    },
+    "StorageSection": {
+      "additionalProperties": false,
+      "description": "`[storage]`.",
+      "properties": {
+        "min-free-space": {
+          "$ref": "#/$defs/ByteSize",
+          "default": "5GiB",
+          "description": "Checked before every download, import, symbol fetch or cache growth (ARCHITECTURE §6.7)."
+        },
+        "symbol-quota": {
+          "$ref": "#/$defs/ByteSize",
+          "default": "20GiB"
+        }
+      },
+      "type": "object"
+    },
+    "Telemetry": {
+      "description": "`[privacy] telemetry`: always `off`.",
+      "enum": [
+        "off"
+      ],
+      "type": "string"
+    },
+    "UpdateChannel": {
+      "description": "`[update] channel`.",
+      "enum": [
+        "stable",
+        "beta"
+      ],
+      "type": "string"
+    },
+    "UpdateCheck": {
+      "description": "`[update] check`.",
+      "enum": [
+        "notify",
+        "off"
+      ],
+      "type": "string"
+    },
+    "UpdateSection": {
+      "additionalProperties": false,
+      "description": "`[update]`.",
+      "properties": {
+        "channel": {
+          "$ref": "#/$defs/UpdateChannel",
+          "default": "stable"
+        },
+        "check": {
+          "$ref": "#/$defs/UpdateCheck",
+          "default": "notify"
+        }
+      },
+      "type": "object"
+    },
+    "WebSection": {
+      "additionalProperties": false,
+      "description": "`[web]`.",
+      "properties": {
+        "listen": {
+          "default": "127.0.0.1:0",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://russet.dev/schemas/config/global.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Russet's global configuration (ARCHITECTURE §14.3).",
+  "properties": {
+    "daemon": {
+      "$ref": "#/$defs/DaemonSection",
+      "default": {
+        "build-nice": 10,
+        "idle-timeout": "30m",
+        "listen-tcp": "",
+        "log-filter": "info",
+        "log-retention-days": 7,
+        "max-build-jobs": 1,
+        "max-parallel-jobs": 4
+      }
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceSection",
+      "default": {
+        "ddi": {
+          "allow-mirror": false,
+          "dir": "",
+          "order": [
+            "dir",
+            "imported"
+          ],
+          "ticket-cache": false
+        },
+        "keep-warm": "10m",
+        "lease-grace": "2s",
+        "mux": "auto"
+      }
+    },
+    "devices": {
+      "$ref": "#/$defs/DevicesSection",
+      "default": {
+        "aliases": {}
+      }
+    },
+    "fallback": {
+      "$ref": "#/$defs/FallbackSection",
+      "default": {
+        "pymobiledevice3": "auto"
+      }
+    },
+    "mcp": {
+      "$ref": "#/$defs/McpSection",
+      "default": {
+        "http": {
+          "enabled": false,
+          "expose-docker": false,
+          "listen": "127.0.0.1:43117"
+        }
+      }
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacySection",
+      "default": {
+        "telemetry": "off"
+      }
+    },
+    "schema": {
+      "description": "The file-format version; only `1` exists.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "storage": {
+      "$ref": "#/$defs/StorageSection",
+      "default": {
+        "min-free-space": "5GiB",
+        "symbol-quota": "20GiB"
+      }
+    },
+    "update": {
+      "$ref": "#/$defs/UpdateSection",
+      "default": {
+        "channel": "stable",
+        "check": "notify"
+      }
+    },
+    "web": {
+      "$ref": "#/$defs/WebSection",
+      "default": {
+        "listen": "127.0.0.1:0"
+      }
+    }
+  },
+  "title": "config.toml",
+  "type": "object"
+}

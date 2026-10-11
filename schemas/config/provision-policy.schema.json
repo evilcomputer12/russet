@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "PolicyAction": {
+      "description": "What a provisioning step needs: nothing (`auto`), a confirmation once per machine and team (`ask-once`),\na confirmation every time (`ask`), or a typed confirmation (`typed`). Ordered from least to most strict.",
+      "enum": [
+        "auto",
+        "ask-once",
+        "ask",
+        "typed"
+      ],
+      "type": "string"
+    },
+    "ProvisionRules": {
+      "additionalProperties": false,
+      "description": "One team tier's rules.",
+      "properties": {
+        "create-certificate": {
+          "$ref": "#/$defs/PolicyAction"
+        },
+        "delete-foreign-profile": {
+          "$ref": "#/$defs/PolicyAction"
+        },
+        "disable-capability": {
+          "$ref": "#/$defs/PolicyAction"
+        },
+        "enable-capability": {
+          "$ref": "#/$defs/PolicyAction"
+        },
+        "register-bundle-id": {
+          "$ref": "#/$defs/PolicyAction"
+        },
+        "register-device": {
+          "$ref": "#/$defs/PolicyAction"
+        },
+        "revoke-certificate": {
+          "$ref": "#/$defs/PolicyAction"
+        },
+        "russet-profiles": {
+          "$ref": "#/$defs/PolicyAction"
+        }
+      },
+      "required": [
+        "register-device",
+        "register-bundle-id",
+        "enable-capability",
+        "russet-profiles",
+        "create-certificate",
+        "revoke-certificate",
+        "disable-capability",
+        "delete-foreign-profile"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://russet.dev/schemas/config/provision-policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Auto-approval rules for Apple-side provisioning changes (ARCHITECTURE §14.5).",
+  "properties": {
+    "free": {
+      "$ref": "#/$defs/ProvisionRules",
+      "default": {
+        "create-certificate": "ask",
+        "delete-foreign-profile": "typed",
+        "disable-capability": "typed",
+        "enable-capability": "auto",
+        "register-bundle-id": "ask",
+        "register-device": "ask",
+        "revoke-certificate": "typed",
+        "russet-profiles": "auto"
+      }
+    },
+    "paid": {
+      "$ref": "#/$defs/ProvisionRules",
+      "default": {
+        "create-certificate": "ask-once",
+        "delete-foreign-profile": "typed",
+        "disable-capability": "typed",
+        "enable-capability": "auto",
+        "register-bundle-id": "auto",
+        "register-device": "auto",
+        "revoke-certificate": "typed",
+        "russet-profiles": "auto"
+      }
+    },
+    "schema": {
+      "description": "The file-format version; only `1` exists.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "provision-policy.toml",
+  "type": "object"
+}
