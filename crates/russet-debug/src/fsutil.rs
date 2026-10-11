@@ -34,8 +34,11 @@ pub fn private_dir(dir: &Path) -> io::Result<()> {
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let dir = path.parent().ok_or_else(|| io::Error::other("no parent directory"))?;
     std::fs::create_dir_all(dir)?;
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    // Unique per write, so two writers of the same file never share a temporary.
+    let tmp = dir.join(format!(".{name}.{}.{n}.tmp", std::process::id()));
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)
 }

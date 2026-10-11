@@ -40,8 +40,24 @@ pub(crate) struct ProcessRef {
 }
 
 impl ProcessRef {
-    async fn kill(&self) -> Result<()> {
+    pub(crate) async fn kill(&self) -> Result<()> {
         self.dev.signal(&self.udid, self.pid, SIGKILL).await
+    }
+}
+
+/// Kills what a control holds, ignoring errors (the session is already over).
+pub(crate) async fn stop_control(control: Control) {
+    match control {
+        Control::Broker { handle, process } => {
+            let _ = handle.terminate(TerminateMode::Kill).await;
+            if handle.state() == BrokerState::Detached {
+                let _ = process.kill().await;
+            }
+        }
+        Control::Process(process) => {
+            let _ = process.kill().await;
+        }
+        Control::None => {}
     }
 }
 
@@ -273,7 +289,17 @@ impl SessionHandle {
         if how == TerminateMode::Kill {
             self.inner.kill_requested.store(true, Ordering::SeqCst);
         }
-        let control = std::mem::replace(&mut *self.inner.control.lock().await, Control::None);
+        let control = {
+            let mut slot = self.inner.control.lock().await;
+            let control = std::mem::replace(&mut *slot, Control::None);
+            if matches!(control, Control::None) {
+                // Not launched yet: the session ends now, under the lock, so the launch's `set_control` sees the
+                // end and stops the app it started.
+                self.end_untracked();
+                return Ok(());
+            }
+            control
+        };
         match control {
             Control::Broker { handle, process } => {
                 handle.terminate(how).await?;
@@ -296,7 +322,7 @@ impl SessionHandle {
                 }
                 TerminateMode::Detach => self.end_untracked(),
             },
-            Control::None => self.end_untracked(),
+            Control::None => {}
         }
         Ok(())
     }
@@ -348,20 +374,29 @@ impl SessionHandle {
     }
 
     pub(crate) fn set_state(&self, s: SessionState) {
-        if self.is_ended() {
-            return;
-        }
-        let changed = self.inner.state.send_if_modified(|cur| {
-            if *cur == s {
-                false
-            } else {
-                *cur = s.clone();
-                true
+        let mut previous = None;
+        let changed = {
+            // Under the `ended` lock, so a concurrent end() can never be overwritten.
+            let ended = lock(&self.inner.ended);
+            if ended.is_some() {
+                return;
             }
-        });
+            self.inner.state.send_if_modified(|cur| {
+                if *cur == s {
+                    false
+                } else {
+                    previous = Some(std::mem::replace(cur, s.clone()));
+                    true
+                }
+            })
+        };
         if changed {
-            let _ = self.inner.events.send(SessionEvent::State(s));
-            self.persist();
+            let _ = self.inner.events.send(SessionEvent::State(s.clone()));
+            // Stepping toggles running and stopped many times; the files only need the milestones.
+            let toggle = |x: &SessionState| matches!(x, SessionState::Running | SessionState::Stopped);
+            if !(toggle(&s) && previous.as_ref().is_some_and(toggle)) {
+                self.persist();
+            }
         }
     }
 
@@ -385,8 +420,22 @@ impl SessionHandle {
         }
     }
 
-    pub(crate) async fn set_control(&self, c: Control) {
-        *self.inner.control.lock().await = c;
+    /// Stores how to stop the session; hands the control back when the session already ended (a stop that raced
+    /// the launch), so the caller stops the process it just started.
+    pub(crate) async fn set_control(&self, c: Control) -> std::result::Result<(), Control> {
+        let mut slot = self.inner.control.lock().await;
+        if self.is_ended() {
+            return Err(c);
+        }
+        *slot = c;
+        Ok(())
+    }
+
+    /// Stops whatever the session controls without touching its state (after a failed preparation, which ends
+    /// the session as `failed` first).
+    pub(crate) async fn abort(&self) {
+        let control = std::mem::replace(&mut *self.inner.control.lock().await, Control::None);
+        stop_control(control).await;
     }
 
     pub(crate) fn keep_alive(&self, thing: Box<dyn std::any::Any + Send>) {
@@ -434,8 +483,8 @@ impl SessionHandle {
                 return;
             }
             *ended = Some(Ended { at: logs::now_rfc3339(), exit: exit.clone() });
+            self.inner.state.send_replace(state.clone());
         }
-        self.inner.state.send_replace(state.clone());
         let _ = self.inner.events.send(SessionEvent::State(state.clone()));
         let _ = self.inner.events.send(SessionEvent::Ended { state: state.wire(), exit });
         lock(&self.inner.keep).clear();
@@ -520,7 +569,8 @@ fn update_registry(path: &Path, s: &SessionSummary) {
     }
 }
 
-/// Keeps the newest `keep` session directories.
+/// Keeps the newest `keep` session directories. A session that has not ended (its `session.json` has no
+/// `endedAt`) is kept unless it is older than a week (a daemon crash can leave such a record behind).
 fn rotate(sessions: &Path, keep: usize) {
     let Ok(rd) = std::fs::read_dir(sessions) else { return };
     let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = rd
@@ -532,9 +582,22 @@ fn rotate(sessions: &Path, keep: usize) {
         return;
     }
     dirs.sort();
-    let excess = dirs.len() - keep;
-    for (_, d) in dirs.into_iter().take(excess) {
+    let mut excess = dirs.len() - keep;
+    let week = Duration::from_secs(7 * 24 * 3600);
+    for (modified, d) in dirs {
+        if excess == 0 {
+            break;
+        }
+        let live = std::fs::read(d.join("session.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .is_some_and(|v| v.get("endedAt").is_some_and(serde_json::Value::is_null));
+        let recent = modified.elapsed().is_ok_and(|age| age < week);
+        if live && recent {
+            continue;
+        }
         let _ = std::fs::remove_dir_all(d);
+        excess -= 1;
     }
 }
 
@@ -668,10 +731,13 @@ mod tests {
             let _ = std::fs::create_dir_all(dir.join(format!("ses_{i}")));
             std::thread::sleep(Duration::from_millis(5));
         }
+        // ses_1 is live: it stays even though it is old.
+        let _ = std::fs::write(dir.join("ses_1/session.json"), br#"{"endedAt": null}"#);
         rotate(&dir, 3);
         let left = std::fs::read_dir(&dir).map(|r| r.count()).unwrap_or(0);
         assert_eq!(left, 3);
-        assert!(dir.join("ses_4").exists() && !dir.join("ses_0").exists());
+        assert!(dir.join("ses_4").exists() && dir.join("ses_1").exists());
+        assert!(!dir.join("ses_0").exists() && !dir.join("ses_2").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

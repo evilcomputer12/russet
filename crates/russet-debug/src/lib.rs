@@ -444,6 +444,7 @@ impl DebugService {
             Ok(()) => Ok(h),
             Err(e) => {
                 h.end(SessionState::Failed, None);
+                h.abort().await;
                 Err(e)
             }
         }
@@ -457,8 +458,11 @@ impl DebugService {
         spec.strategy = r.launch;
         let mut launched = self.dev.launch(&udid, &spec).await?;
         h.set_pid(launched.pid);
-        h.set_control(Control::Process(ProcessRef { dev: self.devices(), udid: udid.clone(), pid: launched.pid }))
-            .await;
+        let process = ProcessRef { dev: self.devices(), udid: udid.clone(), pid: launched.pid };
+        if let Err(control) = h.set_control(Control::Process(process)).await {
+            session::stop_control(control).await;
+            return Err(stopped_while_launching());
+        }
         let stdio_done = self.pump_output(h, &udid, &mut launched, r.process_name.clone()).await;
         if let Some(channel) = launched.channel.take() {
             h.keep_alive(Box::new(channel));
@@ -475,6 +479,8 @@ impl DebugService {
             Ok(p) => Ok(p),
             Err(e) => {
                 h.end(SessionState::Failed, None);
+                // Whatever already runs (the broker, the suspended app) must not outlive the failure.
+                h.abort().await;
                 Err(e)
             }
         }
@@ -494,6 +500,12 @@ impl DebugService {
         let cleanup = |dev: Arc<dyn DeviceServices>, udid: Udid| async move {
             let _ = dev.signal(&udid, pid, 9).await;
         };
+        // A stop that arrived during the launch: no attach for an app that is about to be killed. (A later one is
+        // caught when the broker becomes the session's control.)
+        if h.is_ended() {
+            cleanup(self.devices(), udid.clone()).await;
+            return Err(stopped_while_launching());
+        }
         let stdio_done = self.pump_output(h, &udid, &mut launched, r.run.process_name.clone()).await;
         h.set_state(SessionState::Attaching);
         let stream = match self.dev.connect_debugserver(&udid).await {
@@ -533,7 +545,10 @@ impl DebugService {
                 let url = handle.lldb_url();
                 follow_broker(h.clone(), handle.subscribe(), self.devices(), udid.clone(), pid);
                 let process = ProcessRef { dev: self.devices(), udid: udid.clone(), pid };
-                h.set_control(Control::Broker { handle, process }).await;
+                if let Err(control) = h.set_control(Control::Broker { handle, process }).await {
+                    session::stop_control(control).await;
+                    return Err(stopped_while_launching());
+                }
                 (endpoint, url)
             }
             AttachMode::LegacyAsync => {
@@ -551,7 +566,11 @@ impl DebugService {
                     h.keep_alive(Box::new(channel));
                 }
                 h.keep_alive(Box::new(fwd));
-                h.set_control(Control::Process(ProcessRef { dev: self.devices(), udid: udid.clone(), pid })).await;
+                let process = ProcessRef { dev: self.devices(), udid: udid.clone(), pid };
+                if let Err(control) = h.set_control(Control::Process(process)).await {
+                    session::stop_control(control).await;
+                    return Err(stopped_while_launching());
+                }
                 (endpoint, url)
             }
         };
@@ -723,6 +742,11 @@ impl DebugService {
     }
 }
 
+/// A stop (`run.stop`, the owner leaving) arrived while the session was still launching.
+fn stopped_while_launching() -> Error {
+    Error::new(codes::core::CANCELLED, "the session was stopped while it launched")
+}
+
 /// Ends the session when the device reports the exit, or (without an exit notice) when stdout ends.
 fn watch_exit(
     h: SessionHandle,
@@ -771,8 +795,8 @@ fn follow_broker(
                 BrokerEvent::Stopped { .. } => h.set_state(SessionState::Stopped),
                 BrokerEvent::DebuggerDetached | BrokerEvent::DebuggerLost(broker::LostPolicy::Detach) => {
                     // Switch the control first: a stop that sees `debugger: detached` must reach the process.
-                    h.set_control(Control::Process(ProcessRef { dev: Arc::clone(&dev), udid: udid.clone(), pid }))
-                        .await;
+                    let process = ProcessRef { dev: Arc::clone(&dev), udid: udid.clone(), pid };
+                    let _ = h.set_control(Control::Process(process)).await;
                     h.set_debugger(DebuggerState::Detached);
                     h.set_state(SessionState::Running);
                     let signals = h.take_exit_signals();

@@ -219,3 +219,95 @@ async fn after_a_detach_the_end_of_stdout_ends_the_session() {
     let (entries, _) = s.logs().query(None, None, &Default::default());
     assert!(entries.iter().any(|e| e.message == "last line"));
 }
+
+/// A device whose launch finishes only when the test lets it.
+struct SlowLaunchDevice {
+    gate: tokio::sync::Notify,
+    signals: Mutex<Vec<(u32, i32)>>,
+}
+
+#[async_trait]
+impl DeviceServices for SlowLaunchDevice {
+    async fn resolve(&self, _sel: &DeviceSelector) -> Result<Udid> {
+        Ok(Udid("u".into()))
+    }
+
+    async fn launch(&self, _udid: &Udid, _spec: &LaunchSpec) -> Result<Launched> {
+        self.gate.notified().await;
+        Ok(Launched::pid_only(77))
+    }
+
+    async fn connect_debugserver(&self, _udid: &Udid) -> Result<BoxStream> {
+        unreachable!("not debugged")
+    }
+
+    async fn signal(&self, _udid: &Udid, pid: u32, sig: i32) -> Result<()> {
+        self.signals.lock().unwrap().push((pid, sig));
+        Ok(())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_during_the_launch_kills_the_app_and_cancels_the_start() {
+    let dev = Arc::new(SlowLaunchDevice { gate: tokio::sync::Notify::new(), signals: Mutex::new(Vec::new()) });
+    let svc = Arc::new(DebugService::new(dev.clone(), DebugConfig::default()));
+    let mut created = svc.watch_new();
+    let run = tokio::spawn({
+        let svc = Arc::clone(&svc);
+        async move { svc.run(RunRequest::new(DeviceSelector::Only, "dev.russet.test.probe")).await }
+    });
+    let s = created.recv().await.unwrap();
+    let st = s.wait_for(Duration::from_secs(5), |st| *st == SessionState::Launching).await;
+    assert_eq!(st, SessionState::Launching);
+    // `run.stop` while the device still launches: the session ends at once...
+    s.terminate(TerminateMode::Kill).await.unwrap();
+    assert!(s.is_ended());
+    // ...and the launch, finding it ended, kills the app it just started instead of tracking it.
+    dev.gate.notify_one();
+    let e = run.await.unwrap().unwrap_err();
+    assert_eq!(e.code(), russet_core::error::codes::core::CANCELLED);
+    assert_eq!(dev.signals.lock().unwrap().as_slice(), &[(77, 9)]);
+    assert_eq!(s.summary().state, WireSessionState::Exited);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_after_the_broker_serves_kills_the_app_and_closes_the_endpoint() {
+    let dir = common::scratch("session-abort");
+    // The script root is a file, so writing attach.lldb fails after the broker already serves.
+    let root = dir.join("not-a-directory");
+    std::fs::write(&root, b"").unwrap();
+    let dev = fake_device(932);
+    let svc = DebugService::new(dev.clone(), DebugConfig { runtime_dir: dir.join("run"), ..DebugConfig::default() });
+    let mut r = request(SessionLease::Detached);
+    r.script_root = Some(root);
+    let e = svc.prepare_debug(r).await.unwrap_err();
+    assert_eq!(e.code(), russet_core::error::codes::core::IO);
+    let summaries = svc.sessions();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].state, WireSessionState::Failed);
+    // The broker killed the suspended app through debugserver; the device was not asked to.
+    assert!(dev.fake.wait_for(Duration::from_secs(5), |r| r.attach_count == 1 && r.killed));
+    assert!(dev.signals.lock().unwrap().is_empty());
+    // Nothing listens for a debugger any more.
+    let sock = russet_debug::broker::socket_path(&dir.join("run"), summaries[0].session_id.as_str(), "gdb.sock");
+    assert!(common::eventually(Duration::from_secs(5), || !sock.exists()).await, "{} remains", sock.display());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_during_a_suspended_launch_kills_the_app_before_any_attach() {
+    let dev = Arc::new(SlowLaunchDevice { gate: tokio::sync::Notify::new(), signals: Mutex::new(Vec::new()) });
+    let svc = Arc::new(DebugService::new(dev.clone(), DebugConfig::default()));
+    let mut created = svc.watch_new();
+    let prepare = tokio::spawn({
+        let svc = Arc::clone(&svc);
+        async move { svc.prepare_debug(request(SessionLease::Owned)).await.map(|_| ()) }
+    });
+    let s = created.recv().await.unwrap();
+    s.wait_for(Duration::from_secs(5), |st| *st == SessionState::Launching).await;
+    s.terminate(TerminateMode::Kill).await.unwrap();
+    dev.gate.notify_one();
+    // The device's debugserver is never asked for (SlowLaunchDevice panics if it is).
+    let e = prepare.await.unwrap().unwrap_err();
+    assert_eq!(e.code(), russet_core::error::codes::core::CANCELLED);
+    assert_eq!(dev.signals.lock().unwrap().as_slice(), &[(77, 9)]);
+}
