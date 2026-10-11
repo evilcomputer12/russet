@@ -26,9 +26,11 @@ russet-protocol.workspace = true
 russet-toolchain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
 symbolic = { workspace = true, features = ["demangle"] }
 time = { workspace = true, features = ["formatting", "parsing"] }
-tokio = { workspace = true, features = ["sync", "net", "io-util", "time", "rt", "macros", "fs"] }
+tokio = { workspace = true, features = ["sync", "net", "io-util", "time", "rt", "macros", "fs", "process"] }
 tokio-util.workspace = true
 tracing.workspace = true
 

@@ -160,6 +160,137 @@ fn text_section(addr: u64, size: u64, offset: u32) -> Vec<u8> {
     s
 }
 
+/// A code directory for [`signed_test_macho`]: its hash type and the bytes that stand for its hash slots (the
+/// testkit has no hash functions; readers of the CDHash hash the whole directory, whatever its slots hold).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestCodeDirectory {
+    pub hash_type: u8,
+    pub slots: Vec<u8>,
+}
+
+impl TestCodeDirectory {
+    pub fn new(hash_type: u8, slots: &[u8]) -> Self {
+        Self { hash_type, slots: slots.to_vec() }
+    }
+}
+
+/// A signed test file and the exact code-directory blobs inside it, in slot order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedTestMachO {
+    pub bytes: Vec<u8>,
+    pub code_directories: Vec<Vec<u8>>,
+}
+
+const LC_CODE_SIGNATURE: u32 = 0x1D;
+
+/// A thin arm64 file with `LC_UUID`, `code` and an embedded signature (`LC_CODE_SIGNATURE`): a SuperBlob with the
+/// code directories (slot 0, then the alternate slots `0x1000…`), an empty requirements blob and a CMS blob
+/// wrapper holding `cms`, which stands for the signature that changes on every signing. Not runnable; it is what
+/// signature readers parse.
+pub fn signed_test_macho(uuid: [u8; 16], code: &[u8], cds: &[TestCodeDirectory], cms: &[u8]) -> SignedTestMachO {
+    let be = |v: u32| v.to_be_bytes();
+    let mut directories = Vec::new();
+    for cd in cds {
+        let ident = b"dev.russet.test.probe\0";
+        let hash_size = cd.slots.len().min(255) as u8;
+        let ident_offset = 44u32;
+        let hash_offset = ident_offset + ident.len() as u32;
+        let len = hash_offset + cd.slots.len() as u32;
+        let mut b = Vec::new();
+        // magic, length, version 0x20001, flags, hashOffset, identOffset, nSpecialSlots, nCodeSlots, codeLimit
+        for v in [0xFADE_0C02, len, 0x0002_0001, 0, hash_offset, ident_offset, 0, 1, code.len() as u32] {
+            b.extend_from_slice(&be(v));
+        }
+        // hashSize, hashType, platform, pageSize (2^12), spare2
+        b.extend_from_slice(&[hash_size, cd.hash_type, 0, 12]);
+        b.extend_from_slice(&be(0));
+        b.extend_from_slice(ident);
+        b.extend_from_slice(&cd.slots);
+        directories.push(b);
+    }
+    let mut blobs: Vec<(u32, Vec<u8>)> = Vec::new();
+    for (i, d) in directories.iter().enumerate() {
+        let slot = if i == 0 { 0 } else { 0x1000 + i as u32 - 1 };
+        blobs.push((slot, d.clone()));
+    }
+    let mut requirements = Vec::new();
+    for v in [0xFADE_0C01, 12, 0] {
+        requirements.extend_from_slice(&be(v));
+    }
+    blobs.insert(1.min(blobs.len()), (2, requirements));
+    let mut wrapper = Vec::new();
+    wrapper.extend_from_slice(&be(0xFADE_0B01));
+    wrapper.extend_from_slice(&be(8 + cms.len() as u32));
+    wrapper.extend_from_slice(cms);
+    blobs.push((0x10000, wrapper));
+    let header = 12 + 8 * blobs.len();
+    let total = header + blobs.iter().map(|(_, b)| b.len()).sum::<usize>();
+    let mut sig = Vec::new();
+    for v in [0xFADE_0CC0, total as u32, blobs.len() as u32] {
+        sig.extend_from_slice(&be(v));
+    }
+    let mut offset = header;
+    for (slot, b) in &blobs {
+        sig.extend_from_slice(&be(*slot));
+        sig.extend_from_slice(&be(offset as u32));
+        offset += b.len();
+    }
+    for (_, b) in &blobs {
+        sig.extend_from_slice(b);
+    }
+
+    let cmds_len = 24 + 16;
+    let code_at = 32 + cmds_len;
+    let sig_at = (code_at + code.len()).next_multiple_of(16);
+    let mut out = Vec::new();
+    for v in [MH_MAGIC_64, CPU_TYPE_ARM64, 0, MH_EXECUTE, 2, cmds_len as u32, 0x0020_0085, 0] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    for v in [LC_UUID, 24] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&uuid);
+    for v in [LC_CODE_SIGNATURE, 16, sig_at as u32, sig.len() as u32] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(code);
+    out.resize(sig_at, 0);
+    out.extend_from_slice(&sig);
+    SignedTestMachO { bytes: out, code_directories: directories }
+}
+
+/// A universal (fat) file of `slices` (`cputype`, `cpusubtype`, file), 16 KiB-aligned; `wide` writes the 64-bit
+/// table (`FAT_MAGIC_64`).
+pub fn universal(slices: &[(u32, u32, &[u8])], wide: bool) -> Vec<u8> {
+    const ALIGN: usize = 0x4000;
+    let mut out = Vec::new();
+    out.extend_from_slice(&(if wide { 0xCAFE_BABF_u32 } else { 0xCAFE_BABE }).to_be_bytes());
+    out.extend_from_slice(&(slices.len() as u32).to_be_bytes());
+    let mut at = ALIGN;
+    let mut placed = Vec::new();
+    for (cputype, subtype, bytes) in slices {
+        out.extend_from_slice(&cputype.to_be_bytes());
+        out.extend_from_slice(&subtype.to_be_bytes());
+        if wide {
+            out.extend_from_slice(&(at as u64).to_be_bytes());
+            out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+            out.extend_from_slice(&14u32.to_be_bytes());
+            out.extend_from_slice(&0u32.to_be_bytes());
+        } else {
+            out.extend_from_slice(&(at as u32).to_be_bytes());
+            out.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+            out.extend_from_slice(&14u32.to_be_bytes());
+        }
+        placed.push(at);
+        at = (at + bytes.len()).next_multiple_of(ALIGN);
+    }
+    for ((_, _, bytes), at) in slices.iter().zip(placed) {
+        out.resize(at, 0);
+        out.extend_from_slice(bytes);
+    }
+    out
+}
+
 /// Reads the header, segments, UUID and entry point of a thin 64-bit Mach-O.
 pub fn parse(data: &[u8]) -> io::Result<MachOInfo> {
     let bad = |what: &str| io::Error::new(io::ErrorKind::InvalidData, format!("Mach-O: {what}"));
@@ -241,5 +372,21 @@ mod tests {
         let main = &bytes[MAIN_OFFSET as usize..MAIN_OFFSET as usize + 8];
         assert_eq!(main, [0x00, 0x00, 0x80, 0xD2, 0xC0, 0x03, 0x5F, 0xD6]);
         assert!(parse(b"\x7fELF").is_err());
+    }
+
+    #[test]
+    fn signed_test_files_carry_their_uuid_and_blobs() {
+        let cds = [TestCodeDirectory::new(1, b"sha1"), TestCodeDirectory::new(2, b"sha256 slots")];
+        let built = signed_test_macho([3; 16], b"code", &cds, b"cms");
+        assert_eq!(parse(&built.bytes).unwrap().uuid.as_deref(), Some("03030303-0303-0303-0303-030303030303"));
+        assert_eq!(built.code_directories.len(), 2);
+        for cd in &built.code_directories {
+            assert!(built.bytes.windows(cd.len()).any(|w| w == cd.as_slice()));
+            assert_eq!(&cd[..4], &[0xFA, 0xDE, 0x0C, 0x02]);
+        }
+        assert_eq!(built.code_directories[1][37], 2, "hashType");
+        let fat = universal(&[(CPU_TYPE_ARM64, 0, &built.bytes)], false);
+        assert_eq!(&fat[..4], &[0xCA, 0xFE, 0xBA, 0xBE]);
+        assert_eq!(&fat[0x4000..0x4000 + built.bytes.len()], built.bytes.as_slice());
     }
 }

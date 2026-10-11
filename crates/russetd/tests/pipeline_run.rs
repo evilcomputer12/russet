@@ -26,7 +26,7 @@ use russet_protocol::run::{
 };
 use russet_toolchain::{Component, Provenance, ToolInfo};
 use russetd::pipeline::ledger::InstallLedger;
-use russetd::pipeline::live::{copy_app, file_sha256};
+use russetd::pipeline::live::copy_app;
 use russetd::pipeline::run::{
     AppSigner, BuildSpec, BuiltProduct, LldbResolver, Pipeline, ProjectBuilder, Provisioned, Provisioning, SignedApp,
     signed_dir,
@@ -124,8 +124,44 @@ impl Provisioning for FakeProvisioning {
     }
 }
 
-/// Copies and "signs" by appending a marker; the hash covers the signed executable.
-struct FakeSigner;
+/// A thin arm64 Mach-O: `code`, then an embedded signature whose code directory (SHA-256 type) holds `slots`
+/// and whose CMS blob holds `cms`. What W6's signer writes, as far as the install ledger can tell.
+fn signed_macho(code: &[u8], slots: &[u8], cms: &[u8]) -> Vec<u8> {
+    let be = |out: &mut Vec<u8>, words: &[u32]| words.iter().for_each(|w| out.extend_from_slice(&w.to_be_bytes()));
+    let ident = b"dev.russet.test.probe\0";
+    let cd_len = 44 + ident.len() + slots.len();
+    let mut cd = Vec::new();
+    be(&mut cd, &[0xFADE_0C02, cd_len as u32, 0x0002_0001, 0, (44 + ident.len()) as u32, 44, 0, 1, code.len() as u32]);
+    cd.extend_from_slice(&[32, 2, 0, 12]); // hashSize, hashType SHA-256, platform, pageSize
+    be(&mut cd, &[0]);
+    cd.extend_from_slice(ident);
+    cd.extend_from_slice(slots);
+    let mut wrapper = Vec::new();
+    be(&mut wrapper, &[0xFADE_0B01, 8 + cms.len() as u32]);
+    wrapper.extend_from_slice(cms);
+    let mut sig = Vec::new();
+    let total = 12 + 16 + cd.len() + wrapper.len();
+    be(&mut sig, &[0xFADE_0CC0, total as u32, 2, 0, 28, 0x10000, (28 + cd.len()) as u32]);
+    sig.extend_from_slice(&cd);
+    sig.extend_from_slice(&wrapper);
+    let sig_at = (32 + 16 + code.len()).next_multiple_of(16);
+    let mut out = Vec::new();
+    // mach_header_64 (arm64, MH_EXECUTE, one load command), then LC_CODE_SIGNATURE.
+    for w in [0xFEED_FACF_u32, 0x0100_000C, 0, 2, 1, 16, 0, 0, 0x1D, 16, sig_at as u32, sig.len() as u32] {
+        out.extend_from_slice(&w.to_le_bytes());
+    }
+    out.extend_from_slice(code);
+    out.resize(sig_at, 0);
+    out.extend_from_slice(&sig);
+    out
+}
+
+/// Copies and signs like W6's signer: the code directory follows the code, while the CMS signature carries the
+/// signing time, so the file changes on every signing.
+#[derive(Default)]
+struct FakeSigner {
+    signings: AtomicU32,
+}
 
 #[async_trait]
 impl AppSigner for FakeSigner {
@@ -133,10 +169,11 @@ impl AppSigner for FakeSigner {
         assert!(provisioned.profiles.contains_key(""));
         copy_app(&product.app, dest)?;
         let exe = dest.join("Probe");
-        let mut bytes = std::fs::read(&exe).unwrap();
-        bytes.extend_from_slice(b"SIGNED");
-        std::fs::write(&exe, bytes).unwrap();
-        Ok(SignedApp { app: dest.to_path_buf(), cdhash: file_sha256(&exe)? })
+        let code = std::fs::read(&exe).unwrap();
+        let n = self.signings.fetch_add(1, Ordering::SeqCst);
+        let cms = format!("CMS signingTime=2026-10-11T09:00:{n:02}Z");
+        std::fs::write(&exe, signed_macho(&code, &code, cms.as_bytes())).unwrap();
+        Ok(SignedApp { app: dest.to_path_buf() })
     }
 }
 
@@ -299,7 +336,7 @@ async fn fixture(mutations: usize) -> Fixture {
     let pipeline = Pipeline {
         builder: builder.clone(),
         provisioning: Arc::new(FakeProvisioning { mutations }),
-        signer: Arc::new(FakeSigner),
+        signer: Arc::new(FakeSigner::default()),
         lldb: Arc::new(FakeLldb),
         debug,
         ledger: Arc::new(InstallLedger::new(&dir.0.join("state"))),
@@ -328,10 +365,20 @@ async fn run_builds_signs_installs_if_changed_and_launches() {
     // The signed copy is where ARCHITECTURE §14.8 puts it, and the unsigned product stays.
     let signed = signed_dir(&f.project, "debug").join("Probe.app");
     assert_eq!(f.dev.installs.lock().unwrap().as_slice(), std::slice::from_ref(&signed));
-    assert!(std::fs::read(signed.join("Probe")).unwrap().ends_with(b"SIGNED"));
-    assert!(
-        !std::fs::read(f.project.join(".russet/build/debug-iphoneos/Probe.app/Probe")).unwrap().ends_with(b"SIGNED")
+    let first_signing = std::fs::read(signed.join("Probe")).unwrap();
+    assert!(first_signing.windows(4).any(|w| w == b"CMS "));
+    assert_eq!(
+        std::fs::read(f.project.join(".russet/build/debug-iphoneos/Probe.app/Probe")).unwrap(),
+        b"\xcf\xfa\xed\xfe v1"
     );
+    // The ledger records the signed executable's CDHash (ARCHITECTURE §14.8).
+    let cdhash = russet_debug::macho::identity(&signed.join("Probe")).unwrap().unwrap().cdhash.unwrap();
+    assert_eq!(cdhash.len(), 40);
+    let ledger: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(f._dir.0.join("state/devices").join(UDID).join("installs.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(ledger["dev.russet.test.probe"]["cdhash"], cdhash.as_str());
     // The launch got the user's args and env plus Russet's defaults.
     let launch = f.dev.launches.lock().unwrap()[0].clone();
     assert_eq!(launch.args, ["-RussetProbeCrash", "0"]);
@@ -363,8 +410,10 @@ async fn run_builds_signs_installs_if_changed_and_launches() {
     };
     assert_eq!(f.pipeline.output_query(&filtered).unwrap().entries.len(), 1);
 
-    // A second run with no change skips the install (the ledger); `always` installs; a change installs.
+    // A second run with no change skips the install (the ledger): the re-signed file differs (a new signing
+    // time) but its code directory does not. `always` installs; a change installs.
     let (r2, s2) = f.pipeline.start(p.clone(), &sink, &cancel).await.unwrap();
+    assert_ne!(std::fs::read(signed.join("Probe")).unwrap(), first_signing, "re-signing rewrote the CMS blob");
     assert!(!r2.installed);
     let (r3, s3) = f
         .pipeline

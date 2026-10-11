@@ -8,7 +8,9 @@
 //! 3. provision: a GET-only plan, applied only when it needs no Apple-side change in Wave 1 ([`Provisioning`]);
 //! 4. sign a copy into `<project>/.russet/build/<profile>-iphoneos/signed/` ([`AppSigner`]); the unsigned
 //!    product stays for the debugger;
-//! 5. install when the install ledger says the signed app changed (or `install: always`);
+//! 5. install when the install ledger says the signed app changed (or `install: always`): the pipeline reads the
+//!    CDHash of the signed main executable itself ([`russet_debug::macho`]), so the ledger never depends on what
+//!    a signer reports;
 //! 6. launch (`run.start`) or launch suspended and pre-attach the broker (`debug.prepare`).
 
 use std::collections::BTreeMap;
@@ -21,6 +23,7 @@ use russet_core::progress::{EventSink, LogStream};
 use russet_debug::async_trait;
 use russet_debug::launch::LaunchStrategy;
 use russet_debug::lldb::{InitSettings, LldbPlatform};
+use russet_debug::macho::MachIdentity;
 use russet_debug::{
     AttachMode, BrokerEndpoint, DebugRequest, DebugService, DebugTarget, Frontend, RunRequest, SessionHandle,
     SessionLease, TerminateMode,
@@ -91,8 +94,6 @@ pub trait Provisioning: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedApp {
     pub app: PathBuf,
-    /// Identifies the signed build for the install ledger.
-    pub cdhash: String,
 }
 
 /// The signing step.
@@ -127,7 +128,24 @@ pub struct ReadyApp {
     pub udid: Udid,
     pub product: BuiltProduct,
     pub signed: SignedApp,
+    /// The signed main executable's identity: its CDHash (the ledger's key) and `LC_UUID`.
+    pub identity: MachIdentity,
     pub installed: bool,
+}
+
+/// The identity of the signed main executable. `None` fields when it has no code signature (the ledger then
+/// installs every time).
+pub async fn signed_identity(signed: &SignedApp, product: &BuiltProduct) -> Result<MachIdentity> {
+    let exe = signed.app.join(product.executable.file_name().unwrap_or_default());
+    let path = exe.clone();
+    let read = tokio::task::spawn_blocking(move || russet_debug::macho::identity(&path))
+        .await
+        .map_err(|e| Error::new(codes::core::INTERNAL, format!("reading the signed executable failed: {e}")))?;
+    let id = read.map_err(|e| {
+        Error::new(codes::core::IO, format!("reading the signed executable {}: {e}", exe.display()))
+            .with_hint("The signer should have written it; run again with `--install always` after a clean build.")
+    })?;
+    Ok(id.unwrap_or_default())
 }
 
 /// `<project>/.russet/build/<profile>-iphoneos/signed/` (ARCHITECTURE §14.8).
@@ -213,25 +231,30 @@ impl Pipeline {
         let app_name = product.app.file_name().map(|n| n.to_os_string()).unwrap_or_else(|| "App.app".into());
         let dest = signed_dir(&project, &product.profile).join(app_name);
         let signed = self.signer.sign(&product, &provisioned, &dest).await?;
+        let identity = signed_identity(&signed, &product).await?;
+        if identity.cdhash.is_none() {
+            sink.log(LogStream::Info, "the signed executable has no code signature Russet can read: installing");
+        }
         stage(sink, "sign", "finished");
         cancelled(cancel)?;
 
         let mode = p.install.unwrap_or_default();
-        let installed = if self.ledger.needs_install(&udid.0, &product.bundle_id, &signed.cdhash, mode) {
+        let cdhash = identity.cdhash.as_deref();
+        let installed = if self.ledger.needs_install(&udid.0, &product.bundle_id, cdhash, mode) {
             stage(sink, "install", "started");
             if let Err(e) = devices.install(&udid, &signed.app, sink).await {
                 let _ = self.ledger.forget(&udid.0, &product.bundle_id);
                 stage(sink, "install", "failed");
                 return Err(e);
             }
-            self.ledger.record(&udid.0, &product.bundle_id, &signed.cdhash)?;
+            self.ledger.record(&udid.0, &product.bundle_id, cdhash)?;
             stage(sink, "install", "finished");
             true
         } else {
             sink.log(LogStream::Info, "install skipped: the installed app is current (install ledger)");
             false
         };
-        Ok(ReadyApp { project, udid, product, signed, installed })
+        Ok(ReadyApp { project, udid, product, signed, identity, installed })
     }
 
     fn run_request(&self, p: &RunStartParams, app: &ReadyApp) -> RunRequest {

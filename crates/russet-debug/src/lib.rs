@@ -43,6 +43,7 @@ pub mod jit;
 pub mod launch;
 pub mod lldb;
 pub mod logs;
+pub mod macho;
 pub mod session;
 pub mod symbols;
 pub mod wifi;

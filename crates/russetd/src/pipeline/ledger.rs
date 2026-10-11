@@ -3,7 +3,12 @@
 
 //! The install ledger (ARCHITECTURE §14.8): `state/devices/<udid>/installs.json` =
 //! `{"<bundleId>": {"cdhash": "…", "installedAt": "…"}}`. `run.start {install: if-changed}` installs only when the
-//! signed app's hash differs from the recorded one, so a second run with no changes skips the install.
+//! signed app's CDHash differs from the recorded one, so a second run with no changes skips the install.
+//!
+//! The key is the CDHash of the signed main executable ([`russet_debug::macho`]), not a file hash: the CMS
+//! signature inside the file carries its signing time, so the file changes on every signing, while the code
+//! directory (code, `Info.plist`, resource seal, entitlements) changes only when the app does. An app whose
+//! CDHash is unknown (no code signature found) is always installed, and its record is dropped.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -52,17 +57,22 @@ impl InstallLedger {
         self.read(udid).remove(bundle_id)
     }
 
-    /// Whether the pipeline must install: `always` does, `never` does not, `if-changed` when the hash differs.
-    pub fn needs_install(&self, udid: &str, bundle_id: &str, cdhash: &str, mode: InstallMode) -> bool {
+    /// Whether the pipeline must install: `always` does, `never` does not, `if-changed` when the CDHash differs
+    /// from the record or is unknown (`None`).
+    pub fn needs_install(&self, udid: &str, bundle_id: &str, cdhash: Option<&str>, mode: InstallMode) -> bool {
         match mode {
             InstallMode::Always => true,
             InstallMode::Never => false,
-            InstallMode::IfChanged => self.get(udid, bundle_id).is_none_or(|e| e.cdhash != cdhash),
+            InstallMode::IfChanged => match cdhash {
+                Some(h) => self.get(udid, bundle_id).is_none_or(|e| e.cdhash != h),
+                None => true,
+            },
         }
     }
 
-    /// Records an install.
-    pub fn record(&self, udid: &str, bundle_id: &str, cdhash: &str) -> Result<()> {
+    /// Records an install; an unknown CDHash drops the record, so the next run installs again.
+    pub fn record(&self, udid: &str, bundle_id: &str, cdhash: Option<&str>) -> Result<()> {
+        let Some(cdhash) = cdhash else { return self.forget(udid, bundle_id) };
         let _g = LEDGER_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut all = self.read(udid);
         all.insert(
@@ -111,21 +121,28 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("russet-ledger-{}", std::process::id()));
         let l = InstallLedger::new(&dir);
         let udid = "00008101-0000000000000000";
-        assert!(l.needs_install(udid, "dev.russet.test.probe", "aa", InstallMode::IfChanged));
-        l.record(udid, "dev.russet.test.probe", "aa").unwrap();
-        assert!(!l.needs_install(udid, "dev.russet.test.probe", "aa", InstallMode::IfChanged));
-        assert!(l.needs_install(udid, "dev.russet.test.probe", "bb", InstallMode::IfChanged));
-        assert!(l.needs_install(udid, "dev.russet.test.probe", "aa", InstallMode::Always));
-        assert!(!l.needs_install(udid, "dev.russet.test.probe", "bb", InstallMode::Never));
+        let probe = "dev.russet.test.probe";
+        assert!(l.needs_install(udid, probe, Some("aa"), InstallMode::IfChanged));
+        l.record(udid, probe, Some("aa")).unwrap();
+        assert!(!l.needs_install(udid, probe, Some("aa"), InstallMode::IfChanged));
+        assert!(l.needs_install(udid, probe, Some("bb"), InstallMode::IfChanged));
+        assert!(l.needs_install(udid, probe, Some("aa"), InstallMode::Always));
+        assert!(!l.needs_install(udid, probe, Some("bb"), InstallMode::Never));
+        // An unknown CDHash always installs.
+        assert!(l.needs_install(udid, probe, None, InstallMode::IfChanged));
         // Another device has its own ledger.
-        assert!(l.needs_install("other", "dev.russet.test.probe", "aa", InstallMode::IfChanged));
+        assert!(l.needs_install("other", probe, Some("aa"), InstallMode::IfChanged));
         let file: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.join("devices").join(udid).join("installs.json")).unwrap())
                 .unwrap();
         assert_eq!(file["dev.russet.test.probe"]["cdhash"], "aa");
         assert!(file["dev.russet.test.probe"]["installedAt"].as_str().unwrap().ends_with('Z'));
-        l.forget(udid, "dev.russet.test.probe").unwrap();
-        assert!(l.get(udid, "dev.russet.test.probe").is_none());
+        l.forget(udid, probe).unwrap();
+        assert!(l.get(udid, probe).is_none());
+        // Installing a build whose CDHash is unknown drops the record.
+        l.record(udid, probe, Some("aa")).unwrap();
+        l.record(udid, probe, None).unwrap();
+        assert!(l.get(udid, probe).is_none());
         assert_eq!(sanitize("../x"), "___x");
         let _ = std::fs::remove_dir_all(&dir);
     }
