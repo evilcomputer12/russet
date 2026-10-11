@@ -1,18 +1,180 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! `debug.*`: debugger-only calls (ARCHITECTURE §8.5). Owner: W7 (Wave 1), W11 (Wave 2), W18 (debug.jitStats, Wave 3).
-//!
-//! F0 stub (W1): every name of ARCHITECTURE §8.5 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
-//! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+//! `debug.*`: debugger-only calls (ARCHITECTURE §8.5). Owner: W7 (`debug.prepare`, Wave 1), W11 (Wave 2), W18
+//! (`debug.jitStats`, Wave 3). The rows of later waves keep their placeholder DTOs ([`Unspecified`]) until their
+//! owners write them.
 
+use std::collections::BTreeMap;
+
+use russet_core::ids::SessionId;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::common::AttachMode;
+use crate::run::RunStartParams;
 use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
 
-/// Params of `debug.prepare`: `run.start params + {stopOnEntry?, frontend?: dap|lldb-cli|none, jit?, symbols?, flavor?: swift|llvm, attachMode?: broker|legacy-async} → PreparedDebug`.
-pub type DebugPrepareParams = Unspecified;
-/// Result of `debug.prepare`.
-pub type DebugPrepareResult = Unspecified;
+/// Which debugger front end will connect (`debug.prepare {frontend}`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum DebugFrontend {
+    /// The IDE through the DAP hub (W11).
+    Dap,
+    /// `russet debug`: `lldb -s attach.lldb`.
+    #[default]
+    LldbCli,
+    /// Nothing yet: `russet debug prepare` prints the plan.
+    None,
+}
+
+/// The JIT servicer policy (Flutter, W18).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum JitPolicy {
+    #[default]
+    Auto,
+    Native,
+    LldbPython,
+    Off,
+}
+
+/// Device-symbol tiers (W11).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum SymbolTier {
+    #[default]
+    Auto,
+    None,
+    Core,
+    Full,
+}
+
+/// The LLDB flavor (ARCHITECTURE §16.1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum DebuggerFlavor {
+    #[default]
+    Swift,
+    Llvm,
+}
+
+/// Params of `debug.prepare`: the `run.start` params plus the debugger options.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugPrepareParams {
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub run: RunStartParams,
+    /// Stay stopped after the attach (no `process continue`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stop_on_entry: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frontend: Option<DebugFrontend>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub jit: Option<JitPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub symbols: Option<SymbolTier>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub flavor: Option<DebuggerFlavor>,
+    /// `broker` (default) or the M1 fallback `legacy-async` (ARCHITECTURE §10.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub attach_mode: Option<AttachMode>,
+}
+
+/// A resolved LLDB tool as `debug.prepare` reports it: the shape of `toolchain.resolve`'s `ToolInfo`
+/// (ARCHITECTURE §8.1). `env` is part of the contract: every launcher applies it (§16.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugToolInfo {
+    /// `lldb` or `lldb-dap`.
+    pub component: String,
+    pub version: String,
+    pub path: String,
+    /// `managed`, `system`, `uv`, `xtool-bundle`, `user` or `project-pin`.
+    pub provenance: String,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    pub ok: bool,
+    #[serde(default)]
+    pub problems: Vec<String>,
+}
+
+/// How LLDB reaches the broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrokerTransport {
+    Unix,
+    Tcp,
+}
+
+/// The broker endpoint (ARCHITECTURE §10.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerInfo {
+    pub transport: BrokerTransport,
+    /// The socket path (`unix`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub path: Option<String>,
+    /// The loopback port (`tcp`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub port: Option<u16>,
+    /// What `process connect` takes: `unix-connect:///…/gdb.sock` or `connect://127.0.0.1:<port>`.
+    pub lldb_url: String,
+}
+
+/// How the DAP hub is reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum DapTransport {
+    Unix,
+    Pipe,
+}
+
+/// The per-session DAP hub endpoint (ARCHITECTURE §10.2; W11).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DapInfo {
+    pub transport: DapTransport,
+    pub path: String,
+}
+
+/// Result of `debug.prepare` (`PreparedDebug`): the app is launched suspended and the broker holds the attach.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugPrepareResult {
+    pub session_id: SessionId,
+    pub pid: u32,
+    /// The bundle ID on the device.
+    pub bundle_id: String,
+    pub lldb: DebugToolInfo,
+    pub lldb_dap: DebugToolInfo,
+    pub broker: BrokerInfo,
+    /// LLDB settings (RD §8.4), before the attach commands.
+    pub init_commands: Vec<String>,
+    /// The Python-free attach sequence (RD §9.1); `legacy-async` adds the M1 sequence's `script` lines.
+    pub attach_commands: Vec<String>,
+    /// The `lldb-dap` attach configuration (RD §9.2).
+    #[ts(type = "Record<string, unknown>")]
+    pub dap_config: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dap: Option<DapInfo>,
+    /// The `attach.lldb` the daemon wrote: init plus attach commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub attach_script: Option<String>,
+    pub attach_mode: AttachMode,
+}
 crate::rpc_method!(
     /// `debug.prepare` (class `device`, long-running). W7 (Wave 1).
     DebugPrepare,
@@ -172,3 +334,74 @@ pub const METHODS: &[MethodInfo] = &[
 pub const NOTIFICATIONS: &[NotificationInfo] = &[];
 /// Requests the daemon sends to clients in this namespace.
 pub const CLIENT_METHODS: &[MethodInfo] = &[];
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn prepare_params_flatten_the_run_params() {
+        let p: DebugPrepareParams = serde_json::from_value(json!({
+            "project": "/home/u/RussetProbe", "sessionLease": "detached", "frontend": "lldb-cli",
+            "attachMode": "legacy-async", "stopOnEntry": true, "jit": "lldb-python", "flavor": "llvm"}))
+        .unwrap();
+        assert_eq!(p.run.project, "/home/u/RussetProbe");
+        assert_eq!(p.run.session_lease, Some(crate::common::SessionLease::Detached));
+        assert_eq!(p.frontend, Some(DebugFrontend::LldbCli));
+        assert_eq!(p.attach_mode, Some(AttachMode::LegacyAsync));
+        assert_eq!(
+            (p.stop_on_entry, p.jit, p.flavor),
+            (Some(true), Some(JitPolicy::LldbPython), Some(DebuggerFlavor::Llvm))
+        );
+        let back = serde_json::to_value(&p).unwrap();
+        assert_eq!(back["project"], "/home/u/RussetProbe");
+        assert_eq!(back["frontend"], "lldb-cli");
+        let ts = <DebugPrepareParams as TS>::decl(&ts_rs::Config::default());
+        assert!(ts.contains("project: string") && ts.contains("attachMode?: AttachMode"), "{ts}");
+    }
+
+    #[test]
+    fn the_prepared_debug_shape() {
+        let tool = |c: &str| DebugToolInfo {
+            component: c.into(),
+            version: "21.0.0".into(),
+            path: format!("/usr/lib/swift/usr/bin/{c}"),
+            provenance: "system".into(),
+            env: BTreeMap::from([("PYTHONHOME".to_owned(), "/pbs".to_owned())]),
+            ok: true,
+            problems: vec![],
+        };
+        let r = DebugPrepareResult {
+            session_id: serde_json::from_value(json!("ses_01J00000000000000000000000")).unwrap(),
+            pid: 932,
+            bundle_id: "dev.russet.test.probe".into(),
+            lldb: tool("lldb"),
+            lldb_dap: tool("lldb-dap"),
+            broker: BrokerInfo {
+                transport: BrokerTransport::Unix,
+                path: Some("/run/user/1000/russet/sessions/ses_x/gdb.sock".into()),
+                port: None,
+                lldb_url: "unix-connect:///run/user/1000/russet/sessions/ses_x/gdb.sock".into(),
+            },
+            init_commands: vec!["settings set target.load-cwd-lldbinit false".into()],
+            attach_commands: vec!["platform select remote-ios".into()],
+            dap_config: json!({"type": "lldb-dap", "request": "attach"}),
+            dap: None,
+            attach_script: Some("/p/.russet/debug/ses_x/attach.lldb".into()),
+            attach_mode: AttachMode::Broker,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["sessionId"], "ses_01J00000000000000000000000");
+        assert_eq!(v["lldbDap"]["component"], "lldb-dap");
+        assert_eq!(v["broker"]["transport"], "unix");
+        assert_eq!(v["broker"]["lldbUrl"], "unix-connect:///run/user/1000/russet/sessions/ses_x/gdb.sock");
+        assert_eq!(v["attachMode"], "broker");
+        assert!(v.get("dap").is_none());
+        let back: DebugPrepareResult = serde_json::from_value(v).unwrap();
+        assert_eq!(back, r);
+    }
+}
