@@ -6,7 +6,8 @@
 //!
 //! The Wave-2 and Wave-3 rows keep placeholder DTOs ([`Unspecified`]) until their owners define them.
 //! `account.addAscKey` and `account.importXtool` are `secrets`-class local-file imports: a non-interactive CLI
-//! may run them with `--yes` (ARCHITECTURE §7.5 [D 85]). Team IDs are masked on the wire.
+//! may run them with `--yes` (ARCHITECTURE §7.5 [D 85]). Team IDs are masked on the wire (`*******345`) and
+//! identities are named by their certificate serial.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -108,7 +109,8 @@ pub struct AccountImportXtoolParams {
 pub struct AccountImportXtoolResult {
     pub accounts: Vec<Account>,
     pub identities: Vec<SigningIdentity>,
-    /// Advice (always the `chmod 600` / `xtool auth logout` line) and anything skipped.
+    /// Advice (always the `chmod 600` / `xtool auth logout` line, which names xtool's directory but none of its
+    /// files) and anything skipped.
     pub warnings: Vec<String>,
     pub dry_run: bool,
 }

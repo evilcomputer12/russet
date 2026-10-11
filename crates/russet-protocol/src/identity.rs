@@ -19,11 +19,13 @@ pub enum CertificateKind {
     Distribution,
 }
 
-/// A signing identity's public part (`SigningIdentity`). The private key never leaves the daemon.
+/// A signing identity's public part (`SigningIdentity`). The private key never leaves the daemon, and nothing here
+/// names the team unmasked or the certificate's subject (it names a person).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SigningIdentity {
-    /// `<team>/<serial>`: what `sign.run {identityId}` takes.
+    /// The certificate serial (uppercase hex without leading zeros), what `sign.run {identityId}` takes; the
+    /// daemon also accepts the SHA-1 fingerprint. The daemon's internal `<team>/<serial>` id never goes on the wire.
     pub id: String,
     /// Masked (`*******XYZ`).
     pub team_id: String,
@@ -46,7 +48,7 @@ pub struct SigningIdentity {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct IdentityListParams {
-    /// Only this team's identities.
+    /// Only this team's identities: a team ID, or its masked form as the wire shows it (`*******345`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub team: Option<String>,

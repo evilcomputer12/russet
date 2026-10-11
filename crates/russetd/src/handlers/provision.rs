@@ -7,24 +7,26 @@
 //! without an approval (`perm.approvalRequired`); with one they wait for W12 (`core.notImplemented`).
 //! `provision.capabilities` is W12's.
 
-use russet_account::{AccountId, AccountService, ApprovalRef, Mutation, ProvisionOutcome, ProvisionPlan};
+use russet_account::{AccountId, AccountService, ApprovalRef, IdentityId, Mutation, ProvisionOutcome, ProvisionPlan};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_ipc::Router;
 use russet_protocol::provision as p;
 use russet_protocol::sign::Distribution as WireDistribution;
 
-use super::account::absolute;
+use super::account::{absolute, accounts_of, redacted};
 use super::not_implemented;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::ProvisionPlan, _, _>(|cx: DaemonCtx, _rq, params: p::ProvisionPlanParams| async move {
-        plan(&cx.accounts, params).await
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), plan(&svc, params).await).await
     });
     r.request::<p::ProvisionApply, _, _>(|cx: DaemonCtx, _rq, params: p::ProvisionApplyParams| async move {
-        apply(&cx.accounts, params).await
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), apply(&svc, params).await).await
     });
     r.request::<p::ProvisionCapabilities, _, _>(not_implemented::<p::ProvisionCapabilities>);
 }
@@ -59,17 +61,18 @@ pub async fn plan(svc: &AccountService, params: p::ProvisionPlanParams) -> Resul
 /// `provision.apply`.
 pub async fn apply(svc: &AccountService, params: p::ProvisionApplyParams) -> Result<p::ProvisionApplyResult> {
     let approval_id = match params.approval {
-        Some(a) => Some(
-            serde_json::from_value(serde_json::Value::String(a))
-                .map_err(|_| Error::new(codes::core::INVALID_ARGUMENT, "approval must be an approval id (`apr_…`)"))?,
-        ),
+        Some(a) => Some(serde_json::from_value(serde_json::Value::String(a)).map_err(|_| {
+            Error::new(codes::core::INVALID_ARGUMENT, "approval must be an approval id (`apr_…`)")
+                .with_hint("Pass the approvalId that perm.approvalRequired returned (`russet approvals list`).")
+        })?),
         None => None,
     };
     let outcome = svc.apply_plan(&params.plan_id, &ApprovalRef { approval_id }).await?;
     Ok(outcome_dto(&outcome))
 }
 
-/// The wire form of a plan (team masked, UDIDs already redacted by the planner).
+/// The wire form of a plan: the team masked, the identity named by its certificate serial, UDIDs already redacted
+/// by the planner.
 pub fn plan_dto(plan: &ProvisionPlan) -> p::ProvisionPlanResult {
     p::ProvisionPlanResult {
         plan_id: plan.plan_id.0.clone(),
@@ -77,7 +80,7 @@ pub fn plan_dto(plan: &ProvisionPlan) -> p::ProvisionPlanResult {
         account_id: plan.account_id.0.clone(),
         team_id: russet_sign::mask_team(&plan.team_id),
         distribution: wire_distribution(plan.distribution),
-        identity_id: plan.identity.as_ref().map(|i| i.0.clone()),
+        identity_id: plan.identity.as_ref().map(IdentityId::wire),
         mutations: plan.mutations.iter().map(mutation_dto).collect(),
         profiles: plan
             .profiles
@@ -111,7 +114,7 @@ pub fn mutation_dto(m: &Mutation) -> p::PlanMutation {
 /// The wire form of an outcome.
 pub fn outcome_dto(o: &ProvisionOutcome) -> p::ProvisionApplyResult {
     p::ProvisionApplyResult {
-        identity_id: o.identity.as_ref().map(|i| i.0.clone()),
+        identity_id: o.identity.as_ref().map(IdentityId::wire),
         bundles: o
             .bundles
             .iter()

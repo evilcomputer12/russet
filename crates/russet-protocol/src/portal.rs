@@ -3,8 +3,9 @@
 
 //! `portal.*`: developer-portal records (ARCHITECTURE §8.4). Owner: W6 (Wave 1), W12 (Wave 2).
 //!
-//! The list rows read App Store Connect with GET-scoped tokens. UDIDs and device names are masked unless an
-//! `ide` connection asks with `reveal: true`. The Wave-2 rows keep placeholder DTOs ([`Unspecified`]).
+//! The list rows read App Store Connect with GET-scoped tokens. UDIDs, device names and certificate display names
+//! (which can name a person) are masked or omitted unless an `ide` connection asks with `reveal: true`. The Wave-2
+//! rows keep placeholder DTOs ([`Unspecified`]).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,8 @@ pub struct PortalListParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub filter: Option<String>,
-    /// `portal.devices.list` from an `ide` connection: unmasked UDIDs and names.
+    /// From an `ide` connection: unmasked UDIDs and device names (`portal.devices.list`) and certificate display
+    /// names (`portal.certificates.list`). Ignored for every other connection kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reveal: Option<bool>,
@@ -41,6 +43,7 @@ pub struct PortalCertificate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub serial: Option<String>,
+    /// Omitted unless revealed (it can name a person).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub display_name: Option<String>,

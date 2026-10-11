@@ -77,7 +77,7 @@ pub struct PlannedProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProvisionPlanResult {
-    /// `pln_…`; plans can be applied for 10 minutes.
+    /// `pln_…`; plans can be applied for 10 minutes (then `provision.planStale`).
     pub plan_id: String,
     /// Hex SHA-256 the approval binds to.
     pub digest: String,
@@ -85,7 +85,7 @@ pub struct ProvisionPlanResult {
     /// Masked.
     pub team_id: String,
     pub distribution: Distribution,
-    /// The identity that signs, when one is usable.
+    /// The identity that signs, when one is usable: its `identity.list` id (the certificate serial).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub identity_id: Option<String>,
@@ -128,6 +128,7 @@ pub struct BundleProvision {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProvisionApplyResult {
+    /// The identity that signs: its `identity.list` id (the certificate serial).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub identity_id: Option<String>,

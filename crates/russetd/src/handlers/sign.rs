@@ -9,29 +9,36 @@
 
 use std::path::PathBuf;
 
-use russet_account::{AccountService, IdentityId, SignAppRequest};
+use russet_account::{AccountService, SignAppRequest};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_ipc::Router;
 use russet_protocol::sign as p;
-use russet_sign::{LintFinding, LintProfile, MergePolicy, PreSignFixes, Severity, SignatureInfo, VerifyOptions};
+use russet_sign::{
+    LintFinding, LintProfile, MergePolicy, PreSignFixes, Severity, SignReport, SignatureInfo, VerifyOptions,
+    VerifyReport,
+};
 
-use super::account::absolute;
+use super::account::{absolute, accounts_of, redacted, redacted_cx};
 use super::provision::distribution;
 use crate::DaemonCtx;
 
-/// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
+/// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3). The reading rows need no
+/// account; on an error they reach the account service to mask the team IDs it knows.
 pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::SignRun, _, _>(|cx: DaemonCtx, _rq, params: p::SignRunParams| async move {
-        run(&cx.accounts, params).await
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), run(&svc, params).await).await
     });
-    r.request::<p::SignVerify, _, _>(
-        |_cx: DaemonCtx, _rq, params: p::SignPathParams| async move { verify(params).await },
-    );
-    r.request::<p::SignLint, _, _>(|_cx: DaemonCtx, _rq, params: p::SignPathParams| async move { lint(params).await });
-    r.request::<p::SignInspect, _, _>(
-        |_cx: DaemonCtx, _rq, params: p::SignPathParams| async move { inspect(params).await },
-    );
+    r.request::<p::SignVerify, _, _>(|cx: DaemonCtx, _rq, params: p::SignPathParams| async move {
+        redacted_cx(&cx, verify(params).await).await
+    });
+    r.request::<p::SignLint, _, _>(|cx: DaemonCtx, _rq, params: p::SignPathParams| async move {
+        redacted_cx(&cx, lint(params).await).await
+    });
+    r.request::<p::SignInspect, _, _>(|cx: DaemonCtx, _rq, params: p::SignPathParams| async move {
+        redacted_cx(&cx, inspect(params).await).await
+    });
 }
 
 /// The domain lint profile of a wire value.
@@ -47,7 +54,10 @@ pub async fn run(svc: &AccountService, params: p::SignRunParams) -> Result<p::Si
     let path = absolute(&params.path, "path")?;
     let mut req = SignAppRequest::new(path);
     req.distribution = distribution(params.distribution);
-    req.identity = params.identity_id.map(IdentityId);
+    req.identity = match params.identity_id.as_deref() {
+        Some(name) => Some(svc.identities().resolve(name)?.id),
+        None => None,
+    };
     for (rel, file) in params.profiles {
         req.profiles.insert(rel, absolute(&file, "profiles")?);
     }
@@ -75,7 +85,12 @@ pub async fn run(svc: &AccountService, params: p::SignRunParams) -> Result<p::Si
     }
     req.fixes = fixes;
     let report = svc.sign_app(req).await?;
-    Ok(p::SignRunResult {
+    Ok(sign_report_dto(&report))
+}
+
+/// The wire form of a signing report (team masked).
+pub fn sign_report_dto(report: &SignReport) -> p::SignRunResult {
+    p::SignRunResult {
         output: report.output.display().to_string(),
         bundles: report
             .bundles
@@ -96,7 +111,7 @@ pub async fn run(svc: &AccountService, params: p::SignRunParams) -> Result<p::Si
             .map(|f| p::FixRecord { fix: f.fix.clone(), path: f.path.clone() })
             .collect(),
         lints: report.lints.iter().map(finding_dto).collect(),
-    })
+    }
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
@@ -110,7 +125,12 @@ pub async fn verify(params: p::SignPathParams) -> Result<p::SignVerifyResult> {
     let path: PathBuf = absolute(&params.path, "path")?;
     let opts = VerifyOptions { lints: params.profile.map(lint_profile), device: params.device };
     let report = blocking(move || russet_sign::verify(&path, &opts)).await?;
-    Ok(p::SignVerifyResult {
+    Ok(verify_dto(&report))
+}
+
+/// The wire form of a verification report (team masked).
+pub fn verify_dto(report: &VerifyReport) -> p::SignVerifyResult {
+    p::SignVerifyResult {
         ok: report.ok,
         path: report.path.display().to_string(),
         bundles: report
@@ -127,7 +147,7 @@ pub async fn verify(params: p::SignPathParams) -> Result<p::SignVerifyResult> {
             })
             .collect(),
         findings: report.findings.iter().map(finding_dto).collect(),
-    })
+    }
 }
 
 /// `sign.lint`.

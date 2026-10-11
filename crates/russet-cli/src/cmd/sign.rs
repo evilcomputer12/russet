@@ -4,7 +4,7 @@
 //! `russet sign` (ARCHITECTURE §8.7; SIGN §12). Owner: W6.
 //!
 //! - `russet sign <App.app> [--distribution …] [--identity ID] [--profile REL=FILE]… [--entitlements REL=FILE]…
-//!   [--merge least|profile-all] [--out PATH] [--no-fix NAME]… [--get-task-allow] [--lint P|none]`
+//!   [--merge least|profile-all] [--out SIGNED.app] [--no-fix NAME]… [--get-task-allow] [--lint P|none]`
 //! - `russet sign verify|lint|inspect <App.app|App.ipa> [--profile device-install|app-store]`
 //!
 //! `sign verify` exits 8 (`sign.verifyFailed`) when the signature does not verify, and `sign lint` exits 8
@@ -50,8 +50,8 @@ pub fn command() -> Command {
         .arg(
             Arg::new("identity")
                 .long("identity")
-                .value_name("TEAM/SERIAL")
-                .help("The signing identity (default: the newest the profiles list)"),
+                .value_name("ID")
+                .help("The signing identity: its id from `russet account list` (the certificate serial) or SHA-1 (default: the newest the profiles list)"),
         )
         .arg(
             Arg::new("sign-profile")
@@ -68,7 +68,12 @@ pub fn command() -> Command {
                 .help("Requested entitlements for a bundle"),
         )
         .arg(Arg::new("merge").long("merge").value_name("POLICY").value_parser(["least", "profile-all"]))
-        .arg(Arg::new("out").long("out").value_name("PATH").help("Sign a copy here (default: in place)"))
+        .arg(
+            Arg::new("out")
+                .long("out")
+                .value_name("APP")
+                .help("Sign a copy at this .app path, e.g. signed/App.app (default: in place); only an earlier signed copy of the same app is replaced"),
+        )
         .arg(
             Arg::new("no-fix")
                 .long("no-fix")

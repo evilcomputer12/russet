@@ -11,13 +11,15 @@ use russet_core::Result;
 use russet_ipc::Router;
 use russet_protocol::identity as p;
 
+use super::account::{accounts_of, redacted};
 use super::not_implemented;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::IdentityList, _, _>(|cx: DaemonCtx, _rq, params: p::IdentityListParams| async move {
-        list(&cx.accounts, params).await
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), list(&svc, params).await).await
     });
     r.request::<p::IdentityImportP12, _, _>(not_implemented::<p::IdentityImportP12>);
     r.request::<p::IdentityExportP12, _, _>(not_implemented::<p::IdentityExportP12>);
@@ -29,10 +31,11 @@ pub async fn list(svc: &AccountService, params: p::IdentityListParams) -> Result
     Ok(p::IdentityListResult { identities: identities.iter().map(identity_dto).collect() })
 }
 
-/// The wire form of an identity (team masked; no certificate subject, which names a person).
+/// The wire form of an identity: named by its certificate serial, the team masked, and no certificate subject
+/// (it names a person).
 pub fn identity_dto(i: &SigningIdentity) -> p::SigningIdentity {
     p::SigningIdentity {
-        id: i.id.0.clone(),
+        id: i.id.wire(),
         team_id: russet_sign::mask_team(&i.team_id),
         kind: match i.kind {
             CertKind::Development => p::CertificateKind::Development,

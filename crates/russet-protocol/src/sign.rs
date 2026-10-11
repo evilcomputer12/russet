@@ -83,7 +83,8 @@ pub struct SignRunParams {
     /// The `.app` to sign (absolute).
     pub path: String,
     pub distribution: Distribution,
-    /// `<team>/<serial>`, as `identity.list` shows it; else the newest identity the profiles list.
+    /// An identity's `id` as `identity.list` shows it (its certificate serial), or its SHA-1 fingerprint; omitted:
+    /// the newest identity the profiles list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub identity_id: Option<String>,
@@ -96,7 +97,8 @@ pub struct SignRunParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub merge_policy: Option<MergePolicy>,
-    /// Sign a copy here (an existing previous output is replaced); omitted: sign in place.
+    /// Sign a copy at this `.app` path; omitted: sign in place. An existing path is replaced only when it is an
+    /// earlier signed copy of the same app; a path inside the input (or containing it) is refused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub output: Option<String>,

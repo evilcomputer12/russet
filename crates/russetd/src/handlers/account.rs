@@ -7,6 +7,12 @@
 //! `secrets`-class local-file imports; the permission engine lets a non-interactive CLI run them after a plain
 //! confirmation that `--yes` pre-confirms (ARCHITECTURE §7.5 [D 85]). The other rows answer
 //! `core.notImplemented` until W12 and W22.
+//!
+//! **No team ID on the wire** (AGENTS.md §8): the DTOs mask team IDs (`*******345`) and name identities by their
+//! certificate serial, and every W6 handler passes its error through [`redacted`], which masks each team ID the
+//! account service knows in the message, hint, details and cause chain.
+
+use std::sync::Arc;
 
 use russet_account::{Account, AccountId, AccountKind, AccountService, AccountVerification, AddAscKey, ProbeResult};
 use russet_core::Result;
@@ -21,16 +27,20 @@ use crate::DaemonCtx;
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::AccountList, _, _>(|cx: DaemonCtx, _rq, _p: p::AccountListParams| async move {
-        list(&cx.accounts).await
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), list(&svc).await).await
     });
     r.request::<p::AccountAddAscKey, _, _>(|cx: DaemonCtx, _rq, params: p::AccountAddAscKeyParams| async move {
-        add_asc_key(&cx.accounts, params).await
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), add_asc_key(&svc, params).await).await
     });
     r.request::<p::AccountImportXtool, _, _>(|cx: DaemonCtx, _rq, params: p::AccountImportXtoolParams| async move {
-        import_xtool(&cx.accounts, params).await
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), import_xtool(&svc, params).await).await
     });
     r.request::<p::AccountVerify, _, _>(|cx: DaemonCtx, _rq, params: p::AccountVerifyParams| async move {
-        verify(&cx.accounts, params).await
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), verify(&svc, params).await).await
     });
     r.request::<p::AccountRemove, _, _>(not_implemented::<p::AccountRemove>);
     r.request::<p::AccountSetDefault, _, _>(not_implemented::<p::AccountSetDefault>);
@@ -39,6 +49,49 @@ pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::AccountAppleIdSubmitCode, _, _>(not_implemented::<p::AccountAppleIdSubmitCode>);
     r.request::<p::AccountAnisetteStatus, _, _>(not_implemented::<p::AccountAnisetteStatus>);
     r.request::<p::AccountAnisetteFetchLibraries, _, _>(not_implemented::<p::AccountAnisetteFetchLibraries>);
+}
+
+/// The account service of the daemon context.
+pub fn accounts_of(cx: &DaemonCtx) -> Result<Arc<AccountService>> {
+    cx.accounts.get()
+}
+
+/// Reads a service from its `DaemonCtx` slot. The F0 context holds the services as plain `Arc`s; the daemon
+/// runtime (W2) turns the slots into lazily started `Service`s, whose inherent `get()` takes precedence over this
+/// trait, so [`accounts_of`] compiles against both. Delete it once W2 is on main.
+#[allow(dead_code)] // unused once the slots are W2's `Service`s
+trait Slot<T: ?Sized> {
+    fn get(&self) -> Result<Arc<T>>;
+}
+
+impl<T: ?Sized> Slot<T> for Arc<T> {
+    fn get(&self) -> Result<Arc<T>> {
+        Ok(Arc::clone(self))
+    }
+}
+
+/// `r` with every team ID the account service knows masked in its error (the wire boundary of the W6 handlers;
+/// errors are assembled from paths, profiles and third-party messages that can name the team).
+pub async fn redacted<T>(svc: Option<&AccountService>, r: Result<T>) -> Result<T> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            let teams = match svc {
+                Some(s) => s.known_teams().await,
+                None => Vec::new(),
+            };
+            Err(russet_sign::redact_error(e, &teams))
+        }
+    }
+}
+
+/// Like [`redacted`] for handlers that need no account: the account service is reached only when there is an
+/// error to redact (and skipped when it cannot start).
+pub async fn redacted_cx<T>(cx: &DaemonCtx, r: Result<T>) -> Result<T> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) => redacted(accounts_of(cx).ok().as_deref(), Err(e)).await,
+    }
 }
 
 /// `account.list`.
