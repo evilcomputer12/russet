@@ -82,7 +82,8 @@ missing tool a failure. Other flags: `--quick`, `--profile full|windows`, `--ski
 
 `--need N` refuses when `free - N` would fall below the reserve (8 GiB, or 20 GiB with `--tier blue`); `--tier T`
 refuses below tier `T`; `--json` prints one object. `RUSSET_DISK_GUARD_FREE_GIB` simulates a value for tests and
-drills. `cargo xtask ci|test|build` run `disk-guard --tier amber --need 2` first and refuse at RED.
+drills. `cargo xtask ci|test|build` run `disk-guard --tier amber --need 2` first and refuse below it; on a CI runner
+(`CI` set) the tiers are advisory, because they describe the shared dev box, not an ephemeral runner.
 
 `cargo xtask sweep` keeps every slot (`~/.cache/russet-dev/target-*` and `CARGO_TARGET_DIR`) under 6 GiB: it skips a
 slot whose cargo lock is held by a running build, runs `cargo sweep --time 7` (or a built-in equivalent based on

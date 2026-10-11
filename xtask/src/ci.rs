@@ -405,7 +405,13 @@ fn preflight() -> Result<String> {
     }
     println!("{}", report.line());
     if let Some(r) = &report.refusal {
-        bail!("disk-guard refused: {r}");
+        // The tiers describe the shared dev box (QA §10). A hosted CI runner is ephemeral and sized by GitHub
+        // (QA V18), so there the guard reports and does not refuse.
+        if on_ci() {
+            println!("note: a CI runner (CI is set): the disk tiers are advisory here");
+        } else {
+            bail!("disk-guard refused: {r}");
+        }
     }
     if let Some(slot) = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from)
         && let Some(note) = crate::sweep::sweep_if_due(&slot, SWEEP_DAYS)
@@ -413,6 +419,11 @@ fn preflight() -> Result<String> {
         println!("{note}");
     }
     Ok(format!("{:.1} GiB free (tier {})", report.free_gib(), report.tier))
+}
+
+/// Whether this runs on a CI runner (`CI` set to anything but `false`/`0`, as GitHub Actions sets it).
+fn on_ci() -> bool {
+    std::env::var("CI").is_ok_and(|v| !v.is_empty() && v != "false" && v != "0")
 }
 
 fn status_outcome(r: Result<ExitStatus>) -> Outcome {
