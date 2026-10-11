@@ -1,5 +1,29 @@
 # Run & debug: design
 
+> **Implementation notes (W7, 2026-10-11):** where the Wave-1 code differs from the text below.
+> - `process connect -p gdb-remote <url>`: the attach plan names the plugin. On a host target LLDB 21.0.0
+>   otherwise picks another process plugin and the connect fails without a message (§9.1).
+> - Batch scripts run through `lldb -x -b -o 'command source -e false <script>'`: LLDB's batch mode stops at the
+>   first failing command, so a bad `--command` would otherwise skip the final `process detach`/`process kill`.
+>   The first stop is read through `thread-format`/`frame-format` probe lines (`RUSSET-STOP-…`,
+>   `RUSSET-FRAME-…`) for the `--json` result of ARCHITECTURE §8.7.
+> - `attachMode: legacy-async` is the M1 sequence over a plain forward and needs LLDB's script interpreter: three
+>   `script` lines switch to asynchronous mode around `process connect` (LLDB's command interpreter has no other
+>   way, §1 V3) and `SetPlatformFileSpec` names the device executable. Every other generated plan is Python-free.
+> - The broker answers LLDB's own `QSetDetachOnError` locally (`OK`), so the broker's value (0 for Russet-launched
+>   apps) stays in force (§4.6, §6.2).
+> - `run.stop {mode: detach}` leaves the app running and ends the session: state `exited`, no `exit` details.
+>   LLDB's `D` (`russet debug --detach`) keeps the session `running` with `debugger: detached` (§4.6).
+>   Interactive `russet debug` without `--detach` stops the owned session when LLDB quits, because LLDB detaches
+>   on quit after a `process connect` to a stopped process.
+> - `run.output.query {sinceMs}` is Unix epoch milliseconds; the filter has `sources`, `minLevel`, `contains`,
+>   `subsystem` and `category` (no regular expressions yet). An os_trace entry is dropped as a duplicate only when
+>   it arrives within 50 ms after the same stdio line (§12).
+> - The prototypes are ported into `crates/russet-testkit/src/debug` (fake debugserver, synthetic Mach-O,
+>   lldb-server and LLDB discovery, `jitdemo.c`, `probe.c`, DAP client) and deleted. On the host, `probe.c
+>   --suspended` waits until a tracer attaches (a self-raised `SIGSTOP` would be re-reported to LLDB after the first
+>   continue), and `jitdemo.c` aligns its regions to the 16 KiB iOS page, as Dart does.
+
 > **Lead note (2026-10-11):** where this document conflicts with [docs/ARCHITECTURE.md](../ARCHITECTURE.md), ARCHITECTURE.md wins; §20 there lists every resolved conflict (names, codes, files, crates). Work is scheduled in [docs/PLAN.md](../PLAN.md). Review round 1 (same day) corrected the JIT test plan: the rig iPhone 12 runs TXM on iOS 27.0, so DC-30 and the host test H8 prove page coverage on it (ARCHITECTURE §17.3, [D 71]); see §4.4, §7.1, §7.7, §23. Review round 2 added `russet debug --detach` and the session wire states (ARCHITECTURE §7.6, §9.5, [D 84]); see §4.6 and §17.2.
 
 - **Area:** run and debug (one-command run/debug, IDE debugging, JIT servicing, logs, crashes, symbols)
@@ -64,15 +88,16 @@ This document lists the interfaces it consumes from those areas (section 17.3).
 All commands ran on the CachyOS host with the Swift 6.4 toolchain (`/usr/lib/swift`). No device command
 was run; the iPhone belongs to the device agent.
 
-The throw-away prototypes behind V4, V5, V6 and V8 are kept in
-[`run-debug-prototypes/`](run-debug-prototypes/):
+The throw-away prototypes behind V4, V5, V6 and V8 were kept in `run-debug-prototypes/`; RD-02 ported them
+into `crates/russet-testkit/src/debug` and the H1–H3 and H6 tests of `crates/russet-debug/tests`, and deleted
+the folder:
 - `preattach_relay.py`
 - `dap_attach_test.py`
 - `fake_ios_stub.py`
 - `rx_servicer_proto.py`
 - `jitdemo.c`
 
-They are Python/C evidence, not product code. Task RD-02 ports them to Rust test harnesses.
+They were Python/C evidence, not product code.
 
 | # | Finding | How |
 |---|---|---|
@@ -689,7 +714,7 @@ settings set interpreter.stop-command-source-on-error false     # lldb CLI scrip
 platform select remote-ios --sysroot "<symbol cache>/<build>/<dsc-uuid>"     # only when local symbols exist [V7]
 target create --arch arm64-apple-ios "<local executable (unsigned build product or signed copy)>"
 target modules search-paths add "<device .app dir>" "<local .app dir>"     # belt and braces; UUID match suffices [V5]
-process connect <broker url>                                               # unix-connect:///… or connect://127.0.0.1:N
+process connect -p gdb-remote <broker url>                                # unix-connect:///… or connect://127.0.0.1:N
 ```
 
 With no `--sysroot`, use `platform select remote-ios`.
