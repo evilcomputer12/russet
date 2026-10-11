@@ -3,14 +3,24 @@
 
 //! Running probe commands (`swift --version`, `lldb -b -o 'platform list'`): short-lived children with a timeout,
 //! killed when the timeout fires. [`Exec`] is the seam tests replace.
+//!
+//! [`RunnerExec`] runs probes through russet-core's [`CommandRunner`], the single `russet-spawner` thread of
+//! [D 73]; the daemon uses it through [`Toolchains::with_runner`](crate::Toolchains::with_runner) once W2's
+//! `ProcessRunner` (F1) is on main. Until then the default is [`ProcessExec`] (`tokio::process`; probes set no
+//! `PR_SET_PDEATHSIG`, so the spawning thread's exit cannot kill them).
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use russet_core::error::{Error, Result, codes};
+use russet_core::proc::{CommandRunner, CommandSpec};
+use russet_core::progress::{EventSink, JobEventKind, LogStream, ProgressSink};
+use tokio_util::sync::CancellationToken;
 
 /// What a probe printed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -81,6 +91,64 @@ impl Exec for ProcessExec {
             )
             .with_hint("The tool hangs or the machine is overloaded; run it by hand.")),
         }
+    }
+}
+
+/// Probes through a [`CommandRunner`]: the program with `args`, `env` added to the inherited environment, stdin
+/// closed and `timeout` as the spec's timeout (the runner kills the tree and answers `core.timeout`).
+pub struct RunnerExec {
+    runner: Arc<dyn CommandRunner>,
+}
+
+impl std::fmt::Debug for RunnerExec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunnerExec").finish_non_exhaustive()
+    }
+}
+
+impl RunnerExec {
+    /// Probes through `runner`.
+    pub fn new(runner: Arc<dyn CommandRunner>) -> Self {
+        Self { runner }
+    }
+}
+
+/// Probe output is parsed, not streamed: the runner's progress and log events go nowhere.
+struct Discard;
+
+impl ProgressSink for Discard {
+    fn begin(&self, _title: &str, _cancellable: bool) {}
+    fn report(&self, _msg: Option<&str>, _pct: Option<u8>) {}
+    fn end(&self, _msg: Option<&str>) {}
+    fn log(&self, _stream: LogStream, _line: &str) {}
+}
+
+impl EventSink for Discard {
+    fn emit(&self, _e: JobEventKind) {}
+}
+
+#[async_trait]
+impl Exec for RunnerExec {
+    async fn output(
+        &self,
+        program: &Path,
+        args: &[&str],
+        env: &BTreeMap<String, String>,
+        timeout: Duration,
+    ) -> Result<ExecOutput> {
+        let spec = CommandSpec {
+            program: program.to_path_buf(),
+            args: args.iter().map(OsString::from).collect(),
+            env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect(),
+            timeout: Some(timeout),
+            ..CommandSpec::default()
+        };
+        let out = self.runner.run(&spec, &Discard, &CancellationToken::new()).await?;
+        Ok(ExecOutput {
+            code: out.code,
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        })
     }
 }
 

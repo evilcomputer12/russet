@@ -21,7 +21,12 @@ Pin manifest, probes, resolver with the env contract, installer, GC, SDK registr
   `~/.local/opt/python-3.12`, and becomes the env contract of §16.2 (`LD_LIBRARY_PATH`, `PYTHONHOME`).
 - `install`: `python-shared` and `darwin-tools` only (no Swift or LLVM downloads in Wave 1): free-space guard,
   resumable download, size and SHA-256 check, safe extraction, atomic rename, `selected.json`; `uninstall`, `gc`.
-- Probe output is cached in `cache/toolchain-probes.json` by program path, mtime, size, arguments and env.
+- Probe output is cached in `cache/toolchain-probes.json` by program path, mtime, size, arguments and env. Probes
+  run through the `Exec` seam: `ProcessExec` (`tokio::process`) by default, or `RunnerExec` over russet-core's
+  `CommandRunner` (`Toolchains::with_runner`), which the daemon passes once W2's `ProcessRunner` (F1) is on main.
+- `unmet(tool, requirement)` says why a candidate misses a project's pin or flavor (`toolchain.list` with a
+  project), and a resolve error that a managed install fixes names it in `details.install` (`darwin-tools`,
+  `python-shared`; doctor's automatic fix reads it).
 
 ## Tests
 

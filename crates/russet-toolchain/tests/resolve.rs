@@ -196,3 +196,63 @@ async fn nothing_installed_is_missing_with_a_hint() {
     assert_eq!(err.code(), codes::sdk::MISSING);
     assert!(tc.sdks().await.expect("sdks").is_empty());
 }
+
+/// A manifest that pins darwin-tools 1.1.0 and python-shared 3.12.15 (the artifacts are never fetched here).
+fn manifest_with_installs() -> russet_toolchain::pins::PinManifest {
+    let component = |name: &str, version: &str| {
+        format!(
+            "[[component]]\nname = \"{name}\"\nversion = \"{version}\"\nsource = \"test\"\n\n\
+             [component.artifacts.linux-x86_64]\nurl = \"https://example.com/{name}.tar.gz\"\nsize = 1\n\
+             sha256 = \"{}\"\nformat = \"tar.gz\"\n\n",
+            "0".repeat(64)
+        )
+    };
+    let components = component("darwin-tools", "1.1.0") + &component("python-shared", "3.12.15");
+    common::signed_manifest(&components).0
+}
+
+fn install_detail(e: &russet_core::Error) -> Option<String> {
+    e.to_data().details?.get("install")?.as_str().map(str::to_owned)
+}
+
+#[tokio::test]
+async fn errors_name_the_install_that_fixes_them() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let root = tmp.path().join("swift-6.4");
+    let bin = common::swift_toolchain(&root, "6.4");
+    let sys = tmp.path().join("sysbin");
+    common::script(&sys.join("ld64.lld"), "echo 'LLD 23.1.1'");
+    let host = common::host(vec![bin, sys], vec![], tmp.path());
+    let tc = Toolchains::new(RussetDirs::under(&tmp.path().join("rh")), Arc::new(manifest_with_installs()))
+        .with_host(host.clone());
+
+    // Only a too-old system LLD: darwin-tools fixes it, unless the project asks for another linker.
+    let err = tc.resolve(Component::Linker, &Requirement::any()).await.expect_err("too old");
+    assert_eq!(err.code(), codes::toolchain::LINKER_UNSUPPORTED);
+    assert_eq!(install_detail(&err).as_deref(), Some("darwin-tools"));
+    let err = tc.resolve(Component::Linker, &Requirement::flavor("darwin-tools@>=1.1")).await.expect_err("none");
+    assert_eq!(install_detail(&err).as_deref(), Some("darwin-tools"));
+    for other in ["llvm@>=23.1.3", "darwin-tools@>=1.2"] {
+        let err = tc.resolve(Component::Linker, &Requirement::flavor(other)).await.expect_err(other);
+        assert_eq!(install_detail(&err), None, "{other}: installing darwin-tools 1.1.0 does not satisfy it");
+    }
+
+    // An LLDB without remote-ios is not fixed by any install; one without libpython is.
+    common::script(&root.join("usr/bin/lldb"), "echo 'lldb version 21.0.0'");
+    let err = tc.resolve(Component::Lldb, &Requirement::any()).await.expect_err("no remote-ios");
+    assert_eq!(err.code(), codes::toolchain::BROKEN);
+    assert_eq!(install_detail(&err), None);
+    if liblldb_needing_python(&root) {
+        let tc = Toolchains::new(RussetDirs::under(&tmp.path().join("rh2")), Arc::new(manifest_with_installs()))
+            .with_host(host);
+        let err = tc.resolve(Component::Lldb, &Requirement::any()).await.expect_err("no libpython");
+        assert_eq!(err.code(), codes::toolchain::BROKEN);
+        assert_eq!(install_detail(&err).as_deref(), Some("python-shared"));
+    } else {
+        eprintln!("skipped the libpython half: no C compiler to build the fixture liblldb");
+    }
+    // Without a pin for it, nothing can be installed.
+    let tc = toolchains(tmp.path(), common::host(vec![], vec![], tmp.path()));
+    let err = tc.resolve(Component::Linker, &Requirement::any()).await.expect_err("missing");
+    assert_eq!((err.code(), install_detail(&err)), (codes::toolchain::MISSING, None));
+}

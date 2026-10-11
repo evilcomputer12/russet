@@ -17,7 +17,7 @@
 const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use russet_config::project::ToolchainSection;
@@ -147,6 +147,14 @@ pub struct ToolInfo {
     pub problems: Vec<String>,
 }
 
+impl ToolInfo {
+    /// The flavor of an LLDB or lldb-dap candidate: `swift` for the build toolchain's (it always carries the env
+    /// contract's `LD_LIBRARY_PATH`, ARCHITECTURE §16.2), `llvm` for a distro LLDB (no env).
+    pub fn lldb_flavor(&self) -> &'static str {
+        if self.env.contains_key("LD_LIBRARY_PATH") { "swift" } else { "llvm" }
+    }
+}
+
 /// A Darwin SDK known to the registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SdkInfo {
@@ -185,6 +193,16 @@ impl Requirement {
     /// A flavor or path.
     pub fn flavor(f: impl Into<String>) -> Self {
         Self { version: None, flavor: Some(f.into()) }
+    }
+
+    /// The flavor, unless it is empty or `auto`.
+    pub fn chosen_flavor(&self) -> Option<&str> {
+        self.flavor.as_deref().filter(|f| !f.is_empty() && *f != "auto")
+    }
+
+    /// The tool path the project names instead of a flavor (`[toolchain] linker = "tools/ld64.lld"`).
+    pub fn path(&self) -> Option<&str> {
+        self.chosen_flavor().filter(|f| f.contains('/') || f.contains('\\'))
     }
 }
 
@@ -300,6 +318,15 @@ impl Toolchains {
         self
     }
 
+    /// Runs probes through `runner` (the daemon's `ProcessRunner`, [D 73]), keeping the probe cache in
+    /// `cache/toolchain-probes.json`.
+    pub fn with_runner(mut self, runner: Arc<dyn russet_core::proc::CommandRunner>) -> Self {
+        let raw: Arc<dyn Exec> = Arc::new(exec::RunnerExec::new(runner));
+        self.exec = Arc::new(CachedExec::new(raw.clone(), Some(self.dirs.cache.join("toolchain-probes.json"))));
+        self.raw = raw;
+        self
+    }
+
     /// The free space installs must leave (`storage.min-free-space`, default 5 GiB).
     pub fn with_min_free_space(self, bytes: u64) -> Self {
         self.set_min_free_space(bytes);
@@ -380,14 +407,23 @@ impl Toolchains {
 
     /// The first working candidate of `c` that meets `req` (ARCHITECTURE §16.1 order).
     pub async fn resolve(&self, c: Component, req: &Requirement) -> Result<ToolInfo> {
-        let flavor = req.flavor.as_deref().filter(|f| !f.is_empty() && *f != "auto");
+        let flavor = req.chosen_flavor();
         if let Some(f) = flavor {
             validate_flavor(c, f)?;
         }
         if matches!(c, Component::Linker | Component::Lldb | Component::LldbDap)
-            && let Some(path) = flavor.filter(|f| f.contains('/'))
+            && let Some(path) = req.path()
         {
-            return self.explicit_tool(c, path).await;
+            let t = self.explicit_tool(c, path).await?;
+            if !t.ok {
+                return Err(Error::new(
+                    codes::toolchain::BROKEN,
+                    format!("{path} (named by the project) does not work: {}", t.problems.join("; ")),
+                )
+                .with_hint("Fix the path in the project file, or use `auto`.")
+                .with_details(serde_json::json!({ "component": c.as_str(), "problems": t.problems.join("; ") })));
+            }
+            return Ok(t);
         }
         let candidates = self.candidates(c, req).await;
         // `[toolchain] xcode-sdk` may name an Xcode build (`27A266a`) or an SDK id instead of a version.
@@ -449,6 +485,72 @@ impl Toolchains {
         }
     }
 
+    /// Why candidate `t` does not meet `req`, or `None` when it does: a project's version pin, its `xcode-sdk`
+    /// (a version, an Xcode build or an SDK id), its linker flavor or path, or its `[debug] lldb` flavor or path.
+    /// `toolchain.list` with a project marks such candidates `ok: false`, so the first `ok` candidate of each
+    /// component is the one the project resolves to.
+    pub fn unmet(&self, t: &ToolInfo, req: &Requirement) -> Option<String> {
+        let c = t.component;
+        if let Some(want) = req.version.as_deref().filter(|v| !v.is_empty()) {
+            match want.parse::<VersionReq>() {
+                Ok(r) if !t.version.parse::<Version>().is_ok_and(|v| r.matches(&v)) => {
+                    return Some(format!("the project requires {} {want}", c.as_str()));
+                }
+                Ok(_) => {}
+                // `[toolchain] xcode-sdk` naming an Xcode build or an SDK id.
+                Err(_) if c == Component::DarwinSdk => {
+                    let named = self
+                        .sdks_now()
+                        .into_iter()
+                        .any(|s| s.bundle == t.path && (s.xcode_build == want || s.id == want));
+                    if !named {
+                        return Some(format!("the project requires the {want} SDK"));
+                    }
+                }
+                Err(e) => return Some(format!("the project's {} requirement `{want}` is invalid: {e}", c.as_str())),
+            }
+        }
+        if !matches!(c, Component::Linker | Component::Lldb | Component::LldbDap) {
+            return None;
+        }
+        if let Some(path) = req.path() {
+            return (t.provenance != Provenance::ProjectPin || t.path != Path::new(path))
+                .then(|| format!("the project names {path}"));
+        }
+        let flavor = req.chosen_flavor()?;
+        let matches = match c {
+            Component::Linker => {
+                let bundles: BTreeMap<PathBuf, String> =
+                    self.sdks_now().into_iter().filter_map(|s| Some((s.bundle, s.darwin_tools?))).collect();
+                linker_flavor_matches(t, flavor, &bundles)
+            }
+            _ => t.lldb_flavor() == flavor,
+        };
+        (!matches).then(|| format!("the project asks for the {flavor} {}", c.as_str()))
+    }
+
+    /// The managed install that would fix a `c` that does not resolve under `flavor`, if one would:
+    /// `darwin-tools` for the linker (unless the project asks for another linker or a darwin-tools release the
+    /// pins do not carry), `python-shared` for an LLDB without libpython. Error details carry it as `install`,
+    /// which `russet doctor --fix` reads.
+    fn fixing_install(&self, c: Component, flavor: Option<&str>, problems: &str) -> Option<&'static str> {
+        match c {
+            Component::Linker => {
+                let pinned = self.pins.component("darwin-tools", None)?;
+                let (kind, req) = flavor.map_or(("darwin-tools", ""), |f| f.split_once('@').unwrap_or((f, "")));
+                let req_ok = req.is_empty()
+                    || req
+                        .parse::<VersionReq>()
+                        .is_ok_and(|r| pinned.version.parse::<Version>().is_ok_and(|v| r.matches(&v)));
+                (kind == "darwin-tools" && req_ok).then_some("darwin-tools")
+            }
+            Component::Lldb | Component::LldbDap if problems.contains("libpython") => {
+                self.pins.component("python-shared", None).map(|_| "python-shared")
+            }
+            _ => None,
+        }
+    }
+
     fn pick(
         &self,
         c: Component,
@@ -462,7 +564,11 @@ impl Toolchains {
             } else {
                 missing(c, missing_hint(c))
             };
-            return Err(code_err);
+            let mut details = serde_json::json!({ "component": c.as_str() });
+            if let Some(install) = self.fixing_install(c, flavor, "") {
+                details["install"] = install.into();
+            }
+            return Err(code_err.with_details(details));
         }
         let version_req: Option<VersionReq> = req
             .version
@@ -522,7 +628,11 @@ impl Toolchains {
             _ => Error::new(codes::toolchain::BROKEN, format!("{} does not work: {problems}", c.as_str()))
                 .with_hint(missing_hint(c)),
         };
-        Err(err.with_details(serde_json::json!({ "component": c.as_str(), "problems": problems })))
+        let mut details = serde_json::json!({ "component": c.as_str(), "problems": problems });
+        if let Some(install) = self.fixing_install(c, flavor, &problems) {
+            details["install"] = install.into();
+        }
+        Err(err.with_details(details))
     }
 
     async fn explicit_tool(&self, c: Component, path: &str) -> Result<ToolInfo> {
