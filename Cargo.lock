@@ -5262,14 +5262,23 @@ dependencies = [
 name = "russet-debug"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "russet-build",
  "russet-core",
  "russet-device",
  "russet-doctor",
  "russet-gdbremote",
+ "russet-protocol",
+ "russet-testkit",
  "russet-toolchain",
+ "serde",
+ "serde_json",
  "symbolic",
+ "time",
  "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
