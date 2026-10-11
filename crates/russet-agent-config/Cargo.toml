@@ -15,5 +15,6 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+jsonc-parser = { workspace = true, features = ["cst"] }
 russet-core.workspace = true
 toml_edit.workspace = true

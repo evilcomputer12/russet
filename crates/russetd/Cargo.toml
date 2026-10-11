@@ -37,5 +37,20 @@ russet-ship.workspace = true
 russet-sign.workspace = true
 russet-toolchain.workspace = true
 russet-xctest.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+# Pre-declared for W2 (ARCHITECTURE §6: lifecycle, jobs, subscriptions, approvals and audit, the §6.6 web
+# endpoint; core §12 logging, CORE-13), so no card edits this seam file mid-wave [D 86].
+axum = { workspace = true, features = ["tokio", "http1", "ws", "query"] }
+fs4.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+time = { workspace = true, features = ["formatting", "parsing"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "signal", "time", "process", "fs", "io-util", "sync"] }
 tokio-util.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tracing-journald.workspace = true # under systemd (JOURNAL_STREAM set), core §12

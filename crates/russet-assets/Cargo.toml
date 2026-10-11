@@ -16,4 +16,5 @@ workspace = true
 
 [dependencies]
 image = { workspace = true, features = ["png"] }
+lzfse_rust.workspace = true
 resvg.workspace = true

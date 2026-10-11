@@ -24,6 +24,12 @@ globset.workspace = true
 serde.workspace = true
 sha2.workspace = true
 toml.workspace = true
+# Pre-declared for W2's `cargo xtask schema` (schemas/rpc, extension/src/generated, docs/reference; ARCHITECTURE
+# §7.7), so W2 never edits this seam file mid-wave [D 86].
+russet-protocol.workspace = true
+schemars.workspace = true
+serde_json.workspace = true
+ts-rs = { workspace = true, features = ["serde-json-impl"] }
 
 [dev-dependencies]
 tempfile.workspace = true
