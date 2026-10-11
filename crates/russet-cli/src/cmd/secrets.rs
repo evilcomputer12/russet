@@ -16,7 +16,7 @@ use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_protocol::secrets as p;
 
-use super::config::report;
+use super::config::report_as;
 use crate::CliCtx;
 
 const KINDS: [&str; 8] = [
@@ -106,12 +106,53 @@ pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
         Error::new(codes::core::IO, format!("cannot read the current directory: {e}")).with_hint("cd somewhere else.")
     })?;
     match request(m, &cwd)? {
-        SecretsRequest::List(params) => report(cx, &cx.peer.call::<p::SecretsList>(params).await?)?,
-        SecretsRequest::Status => report(cx, &cx.peer.call::<p::SecretsStatus>(p::SecretsStatusParams {}).await?)?,
-        SecretsRequest::Set(params) => report(cx, &cx.peer.call::<p::SecretsSet>(params).await?)?,
-        SecretsRequest::Delete(params) => report(cx, &cx.peer.call::<p::SecretsDelete>(params).await?)?,
+        SecretsRequest::List(params) => report_as(cx, &cx.peer.call::<p::SecretsList>(params).await?, |r| {
+            if r.items.is_empty() {
+                "no secrets".to_owned()
+            } else {
+                r.items.iter().map(meta_line).collect::<Vec<_>>().join("\n")
+            }
+        })?,
+        SecretsRequest::Status => {
+            report_as(cx, &cx.peer.call::<p::SecretsStatus>(p::SecretsStatusParams {}).await?, status_line)?;
+        }
+        SecretsRequest::Set(params) => {
+            report_as(cx, &cx.peer.call::<p::SecretsSet>(params).await?, |m| format!("sealed {}", meta_line(m)))?;
+        }
+        SecretsRequest::Delete(params) => {
+            let id = params.id.clone();
+            report_as(cx, &cx.peer.call::<p::SecretsDelete>(params).await?, |r| {
+                if r.deleted { format!("deleted {id}") } else { format!("no secret {id}") }
+            })?;
+        }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn backend_name(b: p::SecretBackend) -> String {
+    serde_json::to_value(b).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+}
+
+/// A secret's metadata for humans (never its value).
+fn meta_line(m: &p::SecretMeta) -> String {
+    format!("{}  \"{}\"  {} bytes  {}  {}", m.id, m.label, m.size_bytes, backend_name(m.backend), m.created_at)
+}
+
+/// `secrets status` for humans.
+fn status_line(s: &p::SecretsStatusResult) -> String {
+    let state = match (s.available, s.locked) {
+        (false, _) => "not available",
+        (true, true) => "locked",
+        (true, false) => "available",
+    };
+    let mut out = format!("{} backend: {state}", backend_name(s.backend));
+    if let Some(r) = &s.reason {
+        out.push_str(&format!(" ({r})"));
+    }
+    if let Some(e) = &s.keyring_entry {
+        out.push_str(&format!("; keyring entry {e} (service dev.russet)"));
+    }
+    out
 }
 
 #[cfg(test)]

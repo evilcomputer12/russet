@@ -10,7 +10,8 @@ use clap::{Arg, ArgMatches, Command};
 use russet_core::Result;
 use russet_protocol::sdk as p;
 
-use super::config::report;
+use super::config::report_as;
+use super::toolchain::sdk_line;
 use crate::CliCtx;
 
 /// The `sdk` command.
@@ -34,7 +35,13 @@ pub fn command() -> Command {
 pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     match m.subcommand().and_then(|(_, a)| a.subcommand_name()) {
         Some("list") => {
-            report(cx, &cx.peer.call::<p::SdkList>(p::SdkListParams {}).await?)?;
+            report_as(cx, &cx.peer.call::<p::SdkList>(p::SdkListParams {}).await?, |r| {
+                if r.sdks.is_empty() {
+                    "no SDK; import one with `russet sdk import <Xcode_27.xip>`".to_owned()
+                } else {
+                    r.sdks.iter().map(sdk_line).collect::<Vec<_>>().join("\n")
+                }
+            })?;
             Ok(ExitCode::SUCCESS)
         }
         _ => super::not_implemented(m),

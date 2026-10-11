@@ -15,7 +15,7 @@ use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_protocol::doctor as p;
 
-use super::config::{project_param, report};
+use super::config::{project_param, report_as};
 use crate::CliCtx;
 
 /// The `doctor` command.
@@ -83,11 +83,79 @@ pub(crate) fn exit_status(report: &p::DoctorReport, strict: bool) -> u8 {
     if report.summary.fail > 0 || (strict && report.summary.warn > 0) { 4 } else { 0 }
 }
 
+fn status_label(s: p::DoctorStatus) -> &'static str {
+    match s {
+        p::DoctorStatus::Pass => "ok",
+        p::DoctorStatus::Warn => "warn",
+        p::DoctorStatus::Fail => "FAIL",
+        p::DoctorStatus::Skip => "skip",
+    }
+}
+
+fn plural(n: u32, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// The human report (core §11): the checks grouped by category in report order, each failure or warning with its
+/// hint and fix, then the counts.
+pub(crate) fn human(r: &p::DoctorReport) -> String {
+    let mut out = vec![format!(
+        "Russet {} ({}) on {} {}{}{}",
+        r.russet.version,
+        r.russet.build_id,
+        r.host.os,
+        r.host.arch,
+        r.host.distro.as_deref().map(|d| format!(" ({d})")).unwrap_or_default(),
+        if r.host.wsl { ", WSL" } else { "" }
+    )];
+    let width = r.checks.iter().map(|c| c.id.len()).max().unwrap_or(0);
+    let mut categories: Vec<p::DoctorCategory> = Vec::new();
+    for c in &r.checks {
+        if !categories.contains(&c.category) {
+            categories.push(c.category);
+        }
+    }
+    for cat in categories {
+        let name = serde_json::to_value(cat).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+        out.push(String::new());
+        out.push(name);
+        for c in r.checks.iter().filter(|c| c.category == cat) {
+            out.push(format!("  {:<4}  {:<width$}  {}", status_label(c.status), c.id, c.message));
+            let pad = " ".repeat(8 + width);
+            let problem = matches!(c.status, p::DoctorStatus::Fail | p::DoctorStatus::Warn);
+            if problem && let Some(d) = &c.detail {
+                out.push(format!("{pad}{d}"));
+            }
+            if problem && let Some(h) = &c.hint {
+                out.push(format!("{pad}hint: {h}"));
+            }
+            match &c.fix {
+                Some(p::DoctorFix::Auto { applied: true }) => out.push(format!("{pad}fixed automatically")),
+                Some(p::DoctorFix::Auto { applied: false }) => {
+                    out.push(format!("{pad}fix: `russet doctor --fix --check {}`", c.id));
+                }
+                Some(p::DoctorFix::Command { command }) => out.push(format!("{pad}fix: `{command}`")),
+                Some(p::DoctorFix::Manual) | None => {}
+            }
+        }
+    }
+    let s = &r.summary;
+    out.push(String::new());
+    out.push(format!(
+        "{}, {}, {}, {}",
+        plural(s.pass, "passed", "passed"),
+        plural(s.warn, "warning", "warnings"),
+        plural(s.fail, "failed", "failed"),
+        plural(s.skip, "skipped", "skipped")
+    ));
+    out.join("\n")
+}
+
 /// Runs this area's command; `m` is the root matches, so `m.subcommand()` names the command.
 pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     let (params, strict) = request(m, project_param(&cx.global)?, cx.global.device.clone())?;
     let report_value = cx.peer.call::<p::DoctorRun>(params).await?;
-    report(cx, &report_value)?;
+    report_as(cx, &report_value, human)?;
     Ok(ExitCode::from(exit_status(&report_value, strict)))
 }
 
@@ -135,5 +203,50 @@ mod tests {
         assert_eq!(exit_status(&report(1, 0), false), 4);
         assert_eq!(exit_status(&report(0, 2), false), 0);
         assert_eq!(exit_status(&report(0, 2), true), 4);
+    }
+
+    #[test]
+    fn the_human_report_groups_checks_by_category() {
+        let check = |id: &str, category, status, fix| p::DoctorCheck {
+            id: id.into(),
+            category,
+            title: id.into(),
+            status,
+            message: format!("{id} says hello"),
+            detail: None,
+            hint: (status == p::DoctorStatus::Fail).then(|| "do this".to_owned()),
+            fix,
+            duration_ms: 1,
+        };
+        let r = p::DoctorReport {
+            russet: p::DoctorBuild { version: "0.1.0".into(), build_id: "0.1.0+gabc".into() },
+            host: p::DoctorHost {
+                os: "linux".into(),
+                distro: Some("cachyos".into()),
+                arch: "x86_64".into(),
+                wsl: false,
+            },
+            checks: vec![
+                check("host.os", p::DoctorCategory::Host, p::DoctorStatus::Pass, None),
+                check(
+                    "toolchain.lldb",
+                    p::DoctorCategory::Toolchain,
+                    p::DoctorStatus::Fail,
+                    Some(p::DoctorFix::Auto { applied: false }),
+                ),
+                check("host.disk", p::DoctorCategory::Host, p::DoctorStatus::Warn, Some(p::DoctorFix::Manual)),
+            ],
+            summary: p::DoctorSummary { pass: 1, warn: 1, fail: 1, skip: 0 },
+        };
+        let text = human(&r);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "Russet 0.1.0 (0.1.0+gabc) on linux x86_64 (cachyos)");
+        let host = lines.iter().position(|l| *l == "host").expect("host group");
+        let toolchain = lines.iter().position(|l| *l == "toolchain").expect("toolchain group");
+        assert!(host < toolchain);
+        assert!(lines[host + 2].contains("warn") && lines[host + 2].contains("host.disk"), "{text}");
+        assert!(text.contains("FAIL  toolchain.lldb"), "{text}");
+        assert!(text.contains("hint: do this") && text.contains("fix: `russet doctor --fix --check toolchain.lldb`"));
+        assert_eq!(lines.last().copied(), Some("1 passed, 1 warning, 1 failed, 0 skipped"));
     }
 }

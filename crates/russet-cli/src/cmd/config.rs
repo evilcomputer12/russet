@@ -7,7 +7,8 @@
 //! the whole file before it writes anything. Without `--scope`, `set` and `unset` edit the file that owns the
 //! key: `config.toml` for the global sections of §14.3, `russet.toml` otherwise.
 //!
-//! This module also holds the helpers the other W3 commands share ([`project_param`], [`report`]).
+//! This module also holds the helpers the other W3 commands share ([`project_param`], [`report`],
+//! [`report_as`]).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -98,6 +99,16 @@ pub(crate) fn project_param(global: &GlobalArgs) -> Result<Option<String>> {
 fn absolute(cwd: &Path, p: &Path) -> PathBuf {
     let joined = if p.is_absolute() { p.to_path_buf() } else { cwd.join(p) };
     std::fs::canonicalize(&joined).unwrap_or(joined)
+}
+
+/// Hands a result to the reporter: the JSON document with `--json`, else the text `human` makes of it (the human
+/// reporter prints a string result as it is).
+pub(crate) fn report_as<T: Serialize>(cx: &CliCtx, v: &T, human: impl FnOnce(&T) -> String) -> Result<()> {
+    if cx.global.json {
+        return report(cx, v);
+    }
+    cx.reporter.result(&Value::String(human(v)));
+    Ok(())
 }
 
 /// Hands a result to the reporter (one JSON document with `--json`).

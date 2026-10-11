@@ -14,7 +14,7 @@ use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_protocol::toolchain as p;
 
-use super::config::{project_param, report};
+use super::config::{project_param, report_as};
 use crate::CliCtx;
 
 const COMPONENTS: [&str; 10] =
@@ -113,14 +113,93 @@ pub(crate) fn request(m: &ArgMatches, project: Option<String>) -> Result<Toolcha
     })
 }
 
+/// The wire name of a kebab-case enum value (`lldb-dap`).
+fn wire_name<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_value(v).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+}
+
+fn provenance(p: &p::ToolProvenance) -> String {
+    match p {
+        p::ToolProvenance::Managed { pin } => format!("managed {pin}"),
+        p::ToolProvenance::System => "system".into(),
+        p::ToolProvenance::Uv => "uv".into(),
+        p::ToolProvenance::XtoolBundle { .. } => "xtool bundle".into(),
+        p::ToolProvenance::User => "user".into(),
+        p::ToolProvenance::ProjectPin => "project".into(),
+    }
+}
+
+/// A tool for humans: component, version, `ok` or `no`, provenance and path, then its problems and its env (the
+/// variables every launcher applies, ARCHITECTURE §16.2).
+pub(crate) fn tool_lines(t: &p::ToolInfo) -> Vec<String> {
+    let version = if t.version.is_empty() { "?" } else { t.version.as_str() };
+    let mut out = vec![format!(
+        "{:<10} {:<8} {:<3} {:<16} {}",
+        wire_name(&t.component),
+        version,
+        if t.ok { "ok" } else { "no" },
+        provenance(&t.provenance),
+        t.path
+    )];
+    out.extend(t.problems.iter().map(|p| format!("    {p}")));
+    out.extend(t.env.iter().map(|(k, v)| format!("    {k}={v}")));
+    out
+}
+
+/// An SDK for humans.
+pub(crate) fn sdk_line(s: &p::SdkInfo) -> String {
+    format!(
+        "{} (Xcode {} {}, iOS {}, Swift {}, darwin-tools {}) at {}",
+        s.id,
+        s.xcode_version,
+        s.xcode_build,
+        s.ios_sdk,
+        if s.compatible_swift.is_empty() { "?" } else { &s.compatible_swift },
+        s.darwin_tools.as_deref().unwrap_or("none"),
+        s.bundle
+    )
+}
+
+/// `toolchain list` for humans: every candidate in resolution order (the first `ok` one of a component is the one
+/// in use), the SDKs and the pin manifest.
+pub(crate) fn human_list(r: &p::ToolchainListResult) -> String {
+    let mut out: Vec<String> = r.tools.iter().flat_map(tool_lines).collect();
+    out.push(String::new());
+    if r.sdks.is_empty() {
+        out.push("SDKs: none; import one with `russet sdk import <Xcode_27.xip>`".into());
+    } else {
+        out.push("SDKs:".into());
+        out.extend(r.sdks.iter().map(|s| format!("  {}", sdk_line(s))));
+    }
+    out.push(format!("Pins: {} ({})", r.pins.id, r.pins.source));
+    out.join("\n")
+}
+
+fn bytes(n: u64) -> String {
+    format!("{:.1} MiB", n as f64 / f64::from(1u32 << 20))
+}
+
 /// Runs this area's command; `m` is the root matches, so `m.subcommand()` names the command.
 pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
+    let one = |t: &p::ToolInfo| tool_lines(t).join("\n");
     match request(m, project_param(&cx.global)?)? {
-        ToolchainRequest::List(params) => report(cx, &cx.peer.call::<p::ToolchainList>(params).await?)?,
-        ToolchainRequest::Resolve(params) => report(cx, &cx.peer.call::<p::ToolchainResolve>(params).await?)?,
-        ToolchainRequest::Install(params) => report(cx, &cx.peer.call::<p::ToolchainInstall>(params).await?)?,
-        ToolchainRequest::Uninstall(params) => report(cx, &cx.peer.call::<p::ToolchainUninstall>(params).await?)?,
-        ToolchainRequest::Gc(params) => report(cx, &cx.peer.call::<p::ToolchainGc>(params).await?)?,
+        ToolchainRequest::List(params) => report_as(cx, &cx.peer.call::<p::ToolchainList>(params).await?, human_list)?,
+        ToolchainRequest::Resolve(params) => report_as(cx, &cx.peer.call::<p::ToolchainResolve>(params).await?, one)?,
+        ToolchainRequest::Install(params) => report_as(cx, &cx.peer.call::<p::ToolchainInstall>(params).await?, one)?,
+        ToolchainRequest::Uninstall(params) => {
+            report_as(cx, &cx.peer.call::<p::ToolchainUninstall>(params).await?, |r| {
+                format!("removed; {} freed", bytes(r.freed_bytes))
+            })?;
+        }
+        ToolchainRequest::Gc(params) => {
+            let dry = params.dry_run == Some(true);
+            report_as(cx, &cx.peer.call::<p::ToolchainGc>(params).await?, |r| {
+                let mut out: Vec<String> =
+                    r.removed.iter().map(|p| format!("{} {p}", if dry { "would remove" } else { "removed" })).collect();
+                out.push(format!("{} {}", bytes(r.freed_bytes), if dry { "would be freed" } else { "freed" }));
+                out.join("\n")
+            })?;
+        }
         ToolchainRequest::PinsUpdate => return super::not_implemented(m),
     }
     Ok(ExitCode::SUCCESS)
@@ -168,5 +247,56 @@ mod tests {
         );
         assert_eq!(parse_args(&["russet", "toolchain", "pins", "update"]), ToolchainRequest::PinsUpdate);
         assert!(crate::root_command().try_get_matches_from(["russet", "toolchain", "install", "gcc"]).is_err());
+    }
+
+    #[test]
+    fn the_human_list_shows_every_candidate_its_problems_and_env() {
+        let tool = |component, version: &str, ok, provenance, path: &str| p::ToolInfo {
+            component,
+            version: version.into(),
+            path: path.into(),
+            provenance,
+            env: Default::default(),
+            ok,
+            problems: if ok { vec![] } else { vec!["system LLD 23.1.1 is too old".into()] },
+        };
+        let mut lldb = tool(p::ToolComponent::LldbDap, "21.0.0", true, p::ToolProvenance::System, "/s/lldb-dap");
+        lldb.env.insert("PYTHONHOME".into(), "/pbs".into());
+        let list = p::ToolchainListResult {
+            tools: vec![
+                tool(
+                    p::ToolComponent::Linker,
+                    "21.1.6",
+                    true,
+                    p::ToolProvenance::XtoolBundle { bundle: "/b".into() },
+                    "/b/ld",
+                ),
+                tool(p::ToolComponent::Linker, "23.1.1", false, p::ToolProvenance::System, "/usr/bin/ld64.lld"),
+                lldb,
+            ],
+            sdks: vec![p::SdkInfo {
+                id: "xcode-27.0-27A266a".into(),
+                xcode_version: "27.0".into(),
+                xcode_build: "27A266a".into(),
+                ios_sdk: "27.0".into(),
+                swift_sdk_name: "darwin".into(),
+                bundle: "/b".into(),
+                darwin_tools: Some("1.1.0".into()),
+                compatible_swift: "6.4".into(),
+            }],
+            pins: p::PinsInfo { id: "2026.10.11".into(), source: "embedded".into() },
+        };
+        let text = human_list(&list);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(
+            lines[0].starts_with("linker") && lines[0].contains(" ok ") && lines[0].contains("xtool bundle"),
+            "{text}"
+        );
+        assert!(lines[1].contains(" no ") && lines[2].trim() == "system LLD 23.1.1 is too old", "{text}");
+        assert!(lines[3].starts_with("lldb-dap") && lines[4].trim() == "PYTHONHOME=/pbs", "{text}");
+        assert!(
+            text.contains("xcode-27.0-27A266a (Xcode 27.0 27A266a, iOS 27.0, Swift 6.4, darwin-tools 1.1.0) at /b")
+        );
+        assert_eq!(lines.last().copied(), Some("Pins: 2026.10.11 (embedded)"));
     }
 }
