@@ -60,7 +60,7 @@ impl KeyringKeySource {
     }
 
     fn info(&self, available: bool, locked: bool, reason: Option<String>) -> BackendInfo {
-        BackendInfo { kind: BackendKind::Keyring, available, locked, reason, keyring_entry: Some(self.entry.clone()) }
+        BackendInfo { kind: BackendKind::Keyring, available, locked, reason }
     }
 
     /// Deletes the entry (`russet secrets` never does this on its own; tests clean up their own entries).
@@ -124,6 +124,10 @@ fn map_keyring_error(e: keyring_core::Error, what: &str) -> Error {
 impl MasterKeySource for KeyringKeySource {
     fn kind(&self) -> BackendKind {
         BackendKind::Keyring
+    }
+
+    fn keyring_entry(&self) -> Option<String> {
+        Some(self.entry.clone())
     }
 
     fn load(&self) -> Result<Option<MasterKey>> {

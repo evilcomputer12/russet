@@ -90,6 +90,13 @@ impl SecretStore for AutoStore {
         }
     }
 
+    fn keyring_entry(&self) -> Option<String> {
+        match self.cached() {
+            Some(true) => None,
+            _ => self.keyring.keyring_entry(),
+        }
+    }
+
     async fn status(&self) -> BackendInfo {
         match self.store().await {
             Ok(s) => s.status().await,

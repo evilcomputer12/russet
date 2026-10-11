@@ -529,12 +529,12 @@ Errors report the file, line and column. Spans come from `toml_edit` and key pat
 ### 5.5 `russet-secrets`
 
 > **As implemented (W3, 2026-10-11):** the ARCHITECTURE §5.3 API (`SecretId {kind, name}`, `SecretBytes`,
-> `put/get/delete/list/backend`) plus `SecretStore::status()` (an async probe with a default) and
-> `BackendInfo.keyring_entry`. Backends: `SealedStore` with `KeyringKeySource` or `PassphraseKeySource`,
-> `EnvStore` (read-only CI variables), `MemoryStore` (tests); `redact` holds the field-name and JWT/PEM/Bearer
-> helpers. `SecretsConfig` is `{backend}`; `open_default` reads the rest of its inputs (`RUSSET_HOME`, the
-> passphrase, the session bus) into a `SecretsEnv`, and `open_with(dirs, cfg, env)` takes one explicitly (tests).
-> See §9.6 for the on-disk layout.
+> `put/get/delete/list/backend`) plus two defaulted methods, `SecretStore::status()` (an async probe) and
+> `SecretStore::keyring_entry()`; `BackendInfo` keeps its F0 fields. Backends: `SealedStore` with
+> `KeyringKeySource` or `PassphraseKeySource`, `EnvStore` (read-only CI variables), `MemoryStore` (tests);
+> `redact` holds the field-name and JWT/PEM/Bearer helpers. `SecretsConfig` is `{backend}`; `open_default` reads
+> the rest of its inputs (`RUSSET_HOME`, the passphrase, the session bus) into a `SecretsEnv`, and
+> `open_with(dirs, cfg, env)` takes one explicitly (tests). See §9.6 for the on-disk layout.
 
 ```rust
 pub struct SecretRef(String);   // stable id, e.g. "asc/team-main", "appleid/me@example.com", "cert/dev-ABCDE12345"

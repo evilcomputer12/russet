@@ -95,7 +95,8 @@ pub async fn status(store: &dyn SecretStore) -> p::SecretsStatusResult {
         available: info.available,
         locked: info.locked,
         reason: info.reason,
-        keyring_entry: info.keyring_entry,
+        // After `status()`: `auto` has chosen its backend by then.
+        keyring_entry: store.keyring_entry(),
     }
 }
 

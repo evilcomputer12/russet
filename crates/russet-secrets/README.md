@@ -21,7 +21,7 @@ SecretStore over a keyring-core master key and sealed files; passphrase, env and
   `master.salt` (passphrase only).
 - The keyring entry is service `dev.russet`, user `master-key`, or `master-key-<first 8 hex of
   sha256(RUSSET_HOME)>` with `RUSSET_HOME` set (`printf %s "$RUSSET_HOME" | sha256sum | cut -c1-8`) [D 83];
-  `BackendInfo.keyring_entry` names it. The key is stored base64-encoded as the entry's password.
+  `SecretStore::keyring_entry()` names it. The key is stored base64-encoded as the entry's password.
 - Nothing blocks or touches the keyring at open: keyring-core runs on blocking threads on first use, and
   `SecretStore::status()` probes it (`secrets.status`, doctor's `secrets.backend`).
 - `redact`: the field-name rule and the JWT/PEM/Bearer mask of ARCHITECTURE §12.2 for the logging layer (W2).

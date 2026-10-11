@@ -157,7 +157,7 @@ fn two_russet_homes_get_two_keyring_entries() {
     // open_with never touches the keyring; the entry is named without I/O.
     let sa = open_with(&RussetDirs::under(a.path()), &cfg, &env(a.path())).expect("a");
     let sb = open_with(&RussetDirs::under(b.path()), &cfg, &env(b.path())).expect("b");
-    let (ea, eb) = (sa.backend().keyring_entry.expect("entry a"), sb.backend().keyring_entry.expect("entry b"));
+    let (ea, eb) = (sa.keyring_entry().expect("entry a"), sb.keyring_entry().expect("entry b"));
     assert!(ea.starts_with("master-key-") && eb.starts_with("master-key-"));
     assert_ne!(ea, eb);
     assert_eq!(SecretsEnv::default().keyring_entry_name(), "master-key");

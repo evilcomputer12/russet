@@ -33,7 +33,7 @@ fn a_4_kib_secret_round_trips_through_the_os_keyring() {
             let store = SealedStore::new(dir.clone(), Box::new(KeyringKeySource::new(entry.clone())));
             let status = store.status().await;
             assert!(status.available && !status.locked, "keyring not usable: {status:?}");
-            assert_eq!(status.keyring_entry.as_deref(), Some(entry.as_str()));
+            assert_eq!(store.keyring_entry().as_deref(), Some(entry.as_str()));
             let secret: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
             let id = SecretId { kind: SecretKind::AscKey, name: "live-test".into() };
             let meta = store.put(&id, "live keyring test", SecretBytes::new(secret.clone())).await.expect("put");

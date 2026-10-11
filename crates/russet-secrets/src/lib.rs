@@ -196,9 +196,6 @@ pub struct BackendInfo {
     pub available: bool,
     pub locked: bool,
     pub reason: Option<String>,
-    /// The keyring entry holding the master key (`master-key` or `master-key-<hash8>`), for the keyring backend.
-    /// Removing a worktree also removes this entry (PLAN §14).
-    pub keyring_entry: Option<String>,
 }
 
 /// The backend choice (`RUSSET_SECRETS_BACKEND`: `auto|keyring|passphrase|env`, plus `memory` for tests).
@@ -293,6 +290,11 @@ pub trait SecretStore: Send + Sync {
     /// (`secrets.status`, doctor's `secrets.backend`).
     async fn status(&self) -> BackendInfo {
         self.backend()
+    }
+    /// The keyring entry holding the master key (`master-key` or `master-key-<hash8>`) when the keyring backend
+    /// is (or, for `auto`, may be) in use; removing a worktree also removes this entry (PLAN §14).
+    fn keyring_entry(&self) -> Option<String> {
+        None
     }
 }
 

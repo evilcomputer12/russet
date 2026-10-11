@@ -67,6 +67,6 @@ impl SecretStore for MemoryStore {
     }
 
     fn backend(&self) -> BackendInfo {
-        BackendInfo { kind: BackendKind::Memory, available: true, locked: false, reason: None, keyring_entry: None }
+        BackendInfo { kind: BackendKind::Memory, available: true, locked: false, reason: None }
     }
 }

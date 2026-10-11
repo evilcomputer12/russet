@@ -320,7 +320,7 @@ impl SecretsBackend {
         let Some(h) = cx.extension::<SecretsHandle>() else { return missing_service(cx, SECRETS) };
         let info = h.0.status().await;
         let backend = info.kind.as_str();
-        let entry = info.keyring_entry.map(|e| format!(", entry {e}")).unwrap_or_default();
+        let entry = h.0.keyring_entry().map(|e| format!(", entry {e}")).unwrap_or_default();
         let reason = info.reason.map(|r| format!(": {r}")).unwrap_or_default();
         if !info.available {
             CheckResult::fail(format!("the {backend} backend is not available{reason}")).with_hint(

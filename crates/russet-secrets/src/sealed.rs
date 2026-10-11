@@ -44,6 +44,10 @@ pub trait MasterKeySource: Send + Sync + 'static {
     fn probe(&self) -> BackendInfo;
     /// The state as last known, without I/O.
     fn describe(&self) -> BackendInfo;
+    /// The keyring entry holding the key, for the keyring source.
+    fn keyring_entry(&self) -> Option<String> {
+        None
+    }
 }
 
 /// `store.json`.
@@ -283,7 +287,7 @@ impl SealedStore {
         let store = StoreFile {
             version: 1,
             backend: backend_name(self.inner.source.kind()).into(),
-            keyring_entry: self.inner.source.describe().keyring_entry,
+            keyring_entry: self.inner.source.keyring_entry(),
         };
         let text = serde_json::to_vec_pretty(&store).map_err(|e| {
             Error::new(codes::core::INTERNAL, format!("cannot encode store.json: {e}")).with_hint("Report this bug.")
@@ -418,6 +422,10 @@ impl SecretStore for SealedStore {
 
     fn backend(&self) -> BackendInfo {
         self.describe()
+    }
+
+    fn keyring_entry(&self) -> Option<String> {
+        self.inner.source.keyring_entry()
     }
 
     async fn status(&self) -> BackendInfo {

@@ -131,7 +131,6 @@ impl SecretStore for EnvStore {
             available: true,
             locked: false,
             reason: (!self.problems.is_empty()).then(|| self.problems.join("; ")),
-            keyring_entry: None,
         }
     }
 }

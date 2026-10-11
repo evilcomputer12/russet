@@ -90,7 +90,7 @@ impl PassphraseKeySource {
     }
 
     fn info(&self, available: bool, locked: bool, reason: Option<String>) -> BackendInfo {
-        BackendInfo { kind: BackendKind::PassphraseFile, available, locked, reason, keyring_entry: None }
+        BackendInfo { kind: BackendKind::PassphraseFile, available, locked, reason }
     }
 }
 
