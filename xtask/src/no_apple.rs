@@ -239,11 +239,9 @@ mod tests {
     fn ordinary_files_pass() {
         let dir = tempfile::tempdir().expect("tempdir");
         let d = dir.path();
-        assert!(
-            scan_file(&write(d, "lib.rs", b"// SPDX-License-Identifier: MIT\nfn main() {}\n"))
-                .expect("scan")
-                .is_empty()
-        );
+        // Spelled in pieces so `reuse lint` does not read this test's string as this file's licence.
+        let source = concat!("// SPDX-", "License-Identifier: MIT\nfn main() {}\n");
+        assert!(scan_file(&write(d, "lib.rs", source.as_bytes())).expect("scan").is_empty());
         assert!(
             scan_file(&write(d, "NOTICE.md", b"Apple and Xcode are trademarks of Apple Inc.\n"))
                 .expect("scan")
