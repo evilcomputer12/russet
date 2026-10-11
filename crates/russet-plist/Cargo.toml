@@ -16,3 +16,4 @@ workspace = true
 
 [dependencies]
 plist.workspace = true
+thiserror.workspace = true
