@@ -12,20 +12,36 @@ PLAN W8.
 
 | File | Runs on | Jobs |
 |---|---|---|
-| `.github/workflows/ci.yml` | **private phase:** pushes to `main`; non-draft pull requests labelled `ci`; weekly (Monday 03:17 UTC) and on dispatch for Windows. **Public phase** (repository variable `RUSSET_PUBLIC` = `true`): every non-draft pull request and every push to `main` | `rust-linux` (ubuntu-24.04): `cargo xtask ci --profile pr --require-tools` (fmt, clippy, nextest, deny, every guard, check-layers, check-paths, schema drift), with the commit check over the pull request or the push; `guard dco` on public-phase pull requests; the JUnit report through `upload-safe`. `rust-windows` (windows-2025): `cargo xtask ci --profile windows` |
+| `.github/workflows/ci.yml` | **private phase:** pushes to `main`; non-draft pull requests labelled `ci`; weekly (Monday 03:17 UTC) and on dispatch for Windows. **Public phase** (repository variable `RUSSET_PUBLIC` = `true`): every non-draft pull request and every push to `main` | `rust-linux` (ubuntu-24.04): `cargo xtask ci --profile pr --require-tools` (fmt, clippy, nextest, deny, every guard, check-layers, check-paths, schema drift), with the commit check and the docs-only filter over the pull request or the push; zizmor's online audits; on `main`, the guard over the target directories rust-cache saves; `guard dco` on public-phase pull requests; the JUnit report through `upload-safe`. `rust-windows` (windows-2025): `cargo xtask ci --profile windows` and the cache guard |
 | `.github/workflows/nightly.yml` | weekly (Sunday 02:41 UTC) in the private phase; nightly once public; dispatch | `cargo xtask ci --profile full` (every feature, doc tests, rustdoc `-D warnings`, `cargo deny check` with advisories) |
-| `.github/actions/upload-safe` | every artifact upload | `cargo xtask guard apple-files secrets --artifacts <path>` with `.github/upload-safe.toml`, then `actions/upload-artifact` |
+| `.github/workflows/oracle.yml`, `lab.yml`, `release.yml` | dispatch (`release.yml` also `v*` tags) | stubs that fail at once on a Linux runner, until W16 (oracle, QA-12) and W26 (release, QA-18) fill them; the lab stays local in the private phase (`cargo xtask lab`, W9, QA §4.5) |
+| `.github/actions/upload-safe` | every artifact upload | refuses globs, `!`, `~` and several lines in `path`, then `cargo xtask guard apple-files secrets --artifacts <path> --if-missing <if-no-files-found>` with `.github/upload-safe.toml`, then `actions/upload-artifact` |
 | `.github/dependabot.yml` | weekly | GitHub Actions (SHA pins), cargo (minor and patch, exact pins excluded), the Node harness; a 7-day cooldown |
 
 Rules every workflow follows (QA §4.1): `permissions: {}` at the top and `contents: read` per job;
 `persist-credentials: false`; third-party actions pinned to full commit SHAs with the version in a comment; no
 `pull_request_target`; untrusted values reach scripts only through `env`; no `*-latest` labels, no `-large`
 runners, no hosted `ubuntu-22.04`, no macOS on pushes or pull requests. `zizmor` (medium severity and above) runs as
-one of the guards. The guards share `rust-linux` instead of having a job of their own: every job is billed rounded
-up to whole minutes and pays its own setup.
+one of the guards, offline; a separate step adds its online audits (a pinned SHA that is not its action's commit, a
+known-vulnerable version) with the job's read-only token. The guards share `rust-linux` instead of having a job of
+their own: every job is billed rounded up to whole minutes and pays its own setup.
 
-Not yet present, by design: `oracle.yml`, `apple-smoke.yml` (W16), `apple-release.yml` (W23), `release.yml`,
-`publish.yml` (W26), `ide.yml` (W25), the `extension` job (W14) and the lab (local only, `cargo xtask lab`, W9).
+**Docs-only changes** (QA §4.1). When every file changed by the push or the pull request matches
+`**/*.md`, `docs/**`, `LICENSES/**`, `.github/ISSUE_TEMPLATE/**`, `.github/CODEOWNERS` or
+`.github/pull_request_template.md`, `--changed-since <base>` skips fmt, clippy, the tests and deny; the guards,
+check-layers, check-paths and schema drift (which checks `docs/reference/`) still run. A dispatch, a new branch or a
+change set with any other file runs everything; the weekly full run covers whatever a docs change could affect.
+
+**Caches** (QA §4.1 principle 2). rust-cache saves `~/.cargo` and the target directory's dependency artifacts (it
+drops the workspace's own) after a successful job: on `main` for Linux, every run for Windows. Before that, the job
+runs `cargo xtask guard apple-files` over `target/debug/{deps,build,.fingerprint}` and `~/.cargo/bin` (the installed
+tools), so a failing guard also stops the save. The cargo registry and git caches are not scanned: they hold
+crates.io and git archives, compressed and pinned by Cargo.lock's checksums, that anyone can download.
+
+Not yet present, by design: `apple-smoke.yml` (W16), `apple-release.yml` (W23), `publish.yml` (W26), `ide.yml`
+(W25) and the `extension` job (W14). Not planned while private: an Arch Linux container job and a Wine job
+(core's CORE-15): every extra job costs included minutes the QA §4.8 plan does not have, and windows-2025 covers
+Windows.
 
 ## Toolchain and tools in CI
 
@@ -66,7 +82,9 @@ repository. Labelling a pull request `ci` spends minutes too: use it when a chan
 `cargo xtask ci --profile pr` runs the same gates as `rust-linux` and `guard` (QA §4.9). It works with missing
 optional tools: cargo-nextest falls back to `cargo test`; cargo-deny, reuse, typos, gitleaks and zizmor are
 skipped with a note; the summary lists what is missing and the one install line. `--require-tools` (CI) makes a
-missing tool a failure. Other flags: `--quick`, `--profile full|windows`, `--skip <step>`, `--fail-fast`,
+missing tool a failure. Other flags: `--quick` (fmt, plus clippy and the unit tests of the packages changed against
+`--base`: `--lib` for packages with a library, `--bins` for packages with binaries such as xtask),
+`--profile full|windows`, `--changed-since <rev>` (the docs-only filter), `--skip <step>`, `--fail-fast`,
 `--dry-run` (prints the steps).
 
 ## Disk tiers and target slots
@@ -85,8 +103,15 @@ refuses below tier `T`; `--json` prints one object. `RUSSET_DISK_GUARD_FREE_GIB`
 drills. `cargo xtask ci|test|build` run `disk-guard --tier amber --need 2` first and refuse below it; on a CI runner
 (`CI` set) the tiers are advisory, because they describe the shared dev box, not an ephemeral runner.
 
-`cargo xtask sweep` keeps every slot (`~/.cache/russet-dev/target-*` and `CARGO_TARGET_DIR`) under 6 GiB: it skips a
-slot whose cargo lock is held by a running build, runs `cargo sweep --time 7` (or a built-in equivalent based on
-modification times, since `/home` is mounted `noatime`), and with `--clean-over-cap` cleans a slot that stays over
-the cap. The cargo wrappers run the time-based sweep of the current slot by themselves once a week (stamp file
-`.russet-sweep` in the slot).
+`cargo xtask sweep` sweeps every slot (`~/.cache/russet-dev/target-*` and `CARGO_TARGET_DIR`): it skips a slot whose
+cargo lock is held by a running build, runs `cargo sweep --time 7` (or a built-in equivalent based on modification
+times, since `/home` is mounted `noatime`), measures the slot against the cap (6 GiB, QA-24; `--max-gib` or
+`RUSSET_SWEEP_CAP_GIB`), counting a hard-linked file once as `du` does, and with `--clean-over-cap` empties the
+profile directories of a slot that stays over the cap. The cargo wrappers run the time-based sweep of the current
+slot by themselves once a week (stamp file `.russet-sweep` in the slot) and warn when it is over the cap; they never
+clean, because cleaning a shared slot throws away every worktree's build.
+
+**The 6 GiB cap is not met today.** A slot that several worktrees build in holds each worktree's workspace crates
+next to the shared dependencies: on 2026-10-11, slot `a` (W2, W3, W8) measured 29 GiB and slot `b` 16 GiB, all of it
+used within the week, so the time-based sweep removes nothing. The lead decides between a larger cap and
+per-worktree slots; until then `--clean-over-cap` is the manual remedy.

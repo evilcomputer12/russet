@@ -29,8 +29,10 @@ their card in [docs/PLAN.md](docs/PLAN.md). Contracts (names, wire formats, file
   else uses the scripted device backend (`RUSSET_DEVICE_BACKEND=scripted:…`, see
   [docs/contributing/testing.md](docs/contributing/testing.md)).
 - **Disk.** Check before heavy work: `cargo xtask disk-guard --need <GiB>` (tiers RED < 8 GiB, AMBER 8–25, GREEN
-  25–45, BLUE ≥ 45 with a 20 GiB reserve). `cargo xtask sweep` keeps the target slots under 6 GiB; the cargo
-  wrappers run it weekly by themselves.
+  25–45, BLUE ≥ 45 with a 20 GiB reserve). The cargo wrappers sweep artifacts unused for 7 days from your target
+  slot once a week and warn when the slot is over its 6 GiB cap. A slot that several worktrees build in grows past
+  the cap within days anyway; `cargo xtask sweep --clean-over-cap` (when no build runs) empties it, and the slot
+  policy (a larger cap or per-worktree slots) is the lead's call ([docs/contributing/ci.md](docs/contributing/ci.md)).
 
 ## The loop
 
@@ -97,9 +99,11 @@ no outside contributors.
   `PROVENANCE.toml` with its SHA-256 and the committed script that generated it from open tools
   ([docs/contributing/guards.md](docs/contributing/guards.md)).
 - **Never commit or print** keys, tokens, passwords, UDIDs, ECIDs, serial numbers, team IDs, Apple IDs or device
-  names. Tests use synthetic PKI and redacted fixtures; synthetic UDIDs use chip id `0000`. Keep the real values in
-  your local denylist (`~/.config/russet/private-identifiers`, one per line), which `cargo xtask guard secrets`
-  checks without ever printing them.
+  names. Tests use synthetic PKI and redacted fixtures; synthetic UDIDs use chip id `00000000` or an all-zero ECID,
+  which the guard recognizes. Any other synthetic value the guard flags (a test JWT, a test token) needs a reviewed
+  entry in `.github/synthetic-secrets.toml` ([docs/contributing/guards.md](docs/contributing/guards.md)). Keep the
+  real values in your local denylist (`~/.config/russet/private-identifiers`, one per line), which
+  `cargo xtask guard secrets` checks without ever printing them.
 - **Device logs and reports.** Attach the output of `russet doctor --report --redact`, never raw logs, pair records,
   provisioning profiles or crash reports of other apps.
 
