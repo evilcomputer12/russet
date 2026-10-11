@@ -116,6 +116,7 @@ async fn run_daemon(a: &ArgMatches) -> Result<ExitCode> {
     o.allow_live_device = a.get_flag("allow-live-device");
     if let Some(t) = idle_timeout(a)? {
         o.idle_timeout = (!t.is_zero()).then_some(t);
+        o.idle_timeout_pinned = true;
     }
     russetd::run(o).await?;
     Ok(ExitCode::SUCCESS)
@@ -163,8 +164,20 @@ struct Stopped {
 }
 
 async fn stop(force: bool, cx: &CliCtx) -> Result<ExitCode> {
+    if crate::wants_in_process(&cx.global) {
+        cx.output(&Stopped { stopped: false, pid: None }, |_| {
+            "--no-daemon: there is no daemon process to stop".to_owned()
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let peer = match cx.peer.existing().await {
         Ok(p) => p,
+        Err(e) if russet_ipc::client::is_shutting_down(&e) => {
+            // It is already stopping: wait for it like a stop we asked for.
+            wait_stopped().await?;
+            cx.output(&Stopped { stopped: true, pid: None }, |_| "the daemon has stopped".to_owned())?;
+            return Ok(ExitCode::SUCCESS);
+        }
         Err(e) if e.code() == codes::ipc::DAEMON_UNAVAILABLE => {
             cx.output(&Stopped { stopped: false, pid: None }, |_| "the daemon is not running".to_owned())?;
             return Ok(ExitCode::SUCCESS);
@@ -180,11 +193,21 @@ async fn stop(force: bool, cx: &CliCtx) -> Result<ExitCode> {
         )
         .with_hint("Let them finish, or stop it anyway with `russet daemon stop --force`."));
     }
+    wait_stopped().await?;
+    cx.output(&Stopped { stopped: true, pid }, |s| match s.pid {
+        Some(pid) => format!("stopped the daemon (pid {pid})"),
+        None => "stopped the daemon".to_owned(),
+    })?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Waits up to [`STOP_WAIT`] for the daemon's endpoint to go (it goes last, after the jobs' grace).
+async fn wait_stopped() -> Result<()> {
     let endpoint = Endpoint::from_env(&RussetDirs::from_env()?)?;
     let deadline = Instant::now() + STOP_WAIT;
     loop {
         match endpoint.open(Duration::from_millis(200)).await {
-            Err(e) if e.code() == codes::ipc::DAEMON_UNAVAILABLE => break,
+            Err(e) if e.code() == codes::ipc::DAEMON_UNAVAILABLE => return Ok(()),
             Err(e) => return Err(e),
             Ok(p) => {
                 p.close();
@@ -196,11 +219,6 @@ async fn stop(force: bool, cx: &CliCtx) -> Result<ExitCode> {
             }
         }
     }
-    cx.output(&Stopped { stopped: true, pid }, |s| match s.pid {
-        Some(pid) => format!("stopped the daemon (pid {pid})"),
-        None => "stopped the daemon".to_owned(),
-    })?;
-    Ok(ExitCode::SUCCESS)
 }
 
 async fn status(cx: &CliCtx) -> Result<ExitCode> {

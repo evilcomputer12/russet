@@ -4,10 +4,15 @@
 //! `russet bugreport [--out PATH]` (ARCHITECTURE §8.7; core §12, CORE-13). Owner: W2.
 //!
 //! Writes a zip (0600) to the cache directory with: this build's identity, `daemon.status`, `doctor.run`,
-//! `toolchain.list` (each as JSON, or the error the daemon gave), the last three daemon log files and the
-//! configuration files. Every text line goes through the redaction rules again, so the archive holds secret
-//! references only. Nothing is uploaded. The daemon is not started for a bug report: without one, the report says
-//! so.
+//! `toolchain.list` (each as JSON, or the error the daemon gave), the last three daemon log files, the
+//! configuration files (`config.toml`, `mcp-policy.toml`, `provision-policy.toml`) and a summary of
+//! `accounts.toml` (how many accounts of which kind; the file itself stays out). Nothing is uploaded, and the
+//! daemon is not started for a bug report: without one, the report says so.
+//!
+//! A bug report is meant to be attached to an issue, so every entry goes through two filters: the secret
+//! redaction of the logs (secret references only), and an [`IdentifierMask`] that replaces UDIDs, Apple IDs,
+//! DSIDs, team, key and issuer IDs, signing-identity and device names with placeholders (`<udid-1>`; equal
+//! values share one) and the home directory with `~` (ARCHITECTURE §12.1).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,7 +20,7 @@ use std::process::ExitCode;
 use clap::{Arg, ArgMatches, Command};
 use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, Result};
-use russet_core::redact::redact_text;
+use russet_core::redact::{IdentifierMask, redact_json, redact_text};
 use serde_json::Value;
 
 use crate::CliCtx;
@@ -31,9 +36,39 @@ pub fn command() -> Command {
     )
 }
 
-/// Every line of `text`, redacted.
-fn redact_lines(text: &str) -> String {
-    text.lines().map(|l| redact_text(l).into_owned()).collect::<Vec<_>>().join("\n") + "\n"
+/// Every line of `text`, with secrets redacted and identifiers masked.
+fn redact_lines(text: &str, mask: &mut IdentifierMask) -> String {
+    text.lines().map(|l| mask.text(&redact_text(l))).collect::<Vec<_>>().join("\n") + "\n"
+}
+
+/// The user's home directory, which the report shows as `~`.
+fn home_dir() -> Option<PathBuf> {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute())
+}
+
+/// What a bug report keeps of `accounts.toml`: how many accounts of which kind, and whether one is the default.
+fn accounts_summary(text: &str) -> Value {
+    let mut kinds = std::collections::BTreeMap::<String, u64>::new();
+    let mut accounts = 0u64;
+    let mut default = false;
+    for line in text.lines().map(str::trim) {
+        if line == "[[account]]" {
+            accounts += 1;
+        } else if let Some(v) = line.strip_prefix("kind").map(str::trim_start).and_then(|r| r.strip_prefix('=')) {
+            let kind = v.trim().trim_matches('"');
+            if matches!(kind, "asc-team-key" | "asc-individual-key" | "apple-id") {
+                *kinds.entry(kind.to_owned()).or_default() += 1;
+            } else {
+                *kinds.entry("other".to_owned()).or_default() += 1;
+            }
+        } else if line.starts_with("default") && line.contains('=') {
+            default = true;
+        }
+    }
+    let kinds: Vec<Value> =
+        kinds.into_iter().map(|(kind, count)| serde_json::json!({"kind": kind, "count": count})).collect();
+    serde_json::json!({"accounts": accounts, "kinds": kinds, "default": default})
 }
 
 /// The last `n` daemon log files, oldest first.
@@ -59,7 +94,7 @@ fn last_logs(dir: &Path, n: usize) -> Vec<PathBuf> {
 pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     let Some((_, a)) = m.subcommand() else { return Err(Error::invalid_argument("no bugreport command")) };
     let dirs = RussetDirs::from_env()?;
-    let mut zip = Zip::default();
+    let mut zip = Zip::new(IdentifierMask::new(home_dir().as_deref()));
     let about = serde_json::json!({
         "version": russet_core::build_info::VERSION,
         "buildId": russet_core::build_info::BUILD_ID,
@@ -92,13 +127,16 @@ pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
 
     for log in last_logs(&dirs.logs(), 3) {
         if let (Ok(text), Some(name)) = (std::fs::read_to_string(&log), log.file_name().and_then(|n| n.to_str())) {
-            zip.add(&format!("logs/{name}"), redact_lines(&text).as_bytes());
+            zip.add_text(&format!("logs/{name}"), &text);
         }
     }
-    for name in ["config.toml", "mcp-policy.toml", "provision-policy.toml", "accounts.toml"] {
+    for name in ["config.toml", "mcp-policy.toml", "provision-policy.toml"] {
         if let Ok(text) = std::fs::read_to_string(dirs.config.join(name)) {
-            zip.add(&format!("config/{name}"), redact_lines(&text).as_bytes());
+            zip.add_text(&format!("config/{name}"), &text);
         }
+    }
+    if let Ok(text) = std::fs::read_to_string(dirs.config.join("accounts.toml")) {
+        zip.add_json("config/accounts.summary.json", &accounts_summary(&text));
     }
 
     let out = match a.get_one::<PathBuf>("out") {
@@ -117,12 +155,14 @@ pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// A minimal zip writer: stored (uncompressed) entries, UTF-8 names, fixed timestamps.
+/// A minimal zip writer: stored (uncompressed) entries, UTF-8 names, fixed timestamps. Text and JSON entries go
+/// through the redaction and the identifier mask of the report.
 #[derive(Default)]
 pub struct Zip {
     data: Vec<u8>,
     central: Vec<u8>,
     names: Vec<String>,
+    mask: IdentifierMask,
 }
 
 /// CRC-32 (IEEE 802.3), as zip uses it.
@@ -139,9 +179,22 @@ pub fn crc32(bytes: &[u8]) -> u32 {
 }
 
 impl Zip {
+    /// An archive whose text entries `mask` filters.
+    pub fn new(mask: IdentifierMask) -> Self {
+        Self { mask, ..Self::default() }
+    }
+
     fn add_json(&mut self, name: &str, v: &Value) {
-        let text = serde_json::to_string_pretty(v).unwrap_or_default();
-        self.add(name, redact_lines(&text).as_bytes());
+        let mut v = v.clone();
+        redact_json(&mut v);
+        self.mask.json(&mut v);
+        let text = serde_json::to_string_pretty(&v).unwrap_or_default();
+        self.add_text(name, &text);
+    }
+
+    fn add_text(&mut self, name: &str, text: &str) {
+        let filtered = redact_lines(text, &mut self.mask);
+        self.add(name, filtered.as_bytes());
     }
 
     /// Adds a file.
@@ -208,6 +261,18 @@ mod tests {
     fn crc32_matches_the_standard_check_value() {
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
         assert_eq!(crc32(b""), 0);
+    }
+
+    #[test]
+    fn the_accounts_summary_names_no_account() {
+        let text = "schema = 1\ndefault = \"asc:QW3ERT5YU7\"\n\n[[account]]\nid = \"asc:QW3ERT5YU7\"\nkind = \"asc-team-key\"\n\
+                    team-id = \"ZX9Y8W7V6U\"\n\n[[account]]\nkind = \"apple-id\"\napple-id = \"a@example.com\"\n";
+        let v = accounts_summary(text);
+        assert_eq!(
+            v,
+            serde_json::json!({"accounts": 2, "default": true, "kinds": [{"kind": "apple-id", "count": 1},
+                                                                         {"kind": "asc-team-key", "count": 1}]})
+        );
     }
 
     #[test]

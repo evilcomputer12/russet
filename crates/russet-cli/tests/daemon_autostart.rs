@@ -109,3 +109,32 @@ fn no_daemon_runs_in_process() {
     assert!(human.status.success());
     assert!(String::from_utf8_lossy(&human.stdout).contains("endpoint: inproc"));
 }
+
+/// `RUSSET_DAEMON=inproc` is `--no-daemon` (ARCHITECTURE §14.9).
+#[test]
+fn russet_daemon_inproc_runs_in_process() {
+    let home = Home::new("autostart-inproc-env");
+    let child = home
+        .cmd()
+        .env("RUSSET_DAEMON", "inproc")
+        .args(["--json", "daemon", "status"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    let cli_pid = child.id();
+    let out = child.wait_with_output().expect("wait");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    assert_eq!(v["endpoint"], "inproc");
+    assert_eq!(v["pid"].as_u64(), Some(u64::from(cli_pid)));
+    assert!(daemons_of(&home.root).is_empty(), "nothing was spawned");
+    let path = home.cmd().env("RUSSET_DAEMON", "inproc").args(["daemon", "path"]).output().expect("runs");
+    assert!(path.status.success());
+    assert!(String::from_utf8_lossy(&path.stdout).contains("inproc"));
+    // There is no daemon process to stop.
+    let stop = home.cmd().env("RUSSET_DAEMON", "inproc").args(["--json", "daemon", "stop"]).output().expect("runs");
+    assert!(stop.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&stop.stdout).expect("JSON");
+    assert_eq!(v["stopped"], false);
+}

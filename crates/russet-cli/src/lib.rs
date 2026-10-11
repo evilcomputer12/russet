@@ -57,7 +57,7 @@ impl std::fmt::Debug for DaemonLink {
 
 /// Whether the daemon runs in this process (`--no-daemon`, `RUSSET_DAEMON=inproc`).
 pub fn wants_in_process(global: &GlobalArgs) -> bool {
-    global.no_daemon || std::env::var("RUSSET_DAEMON").is_ok_and(|v| v.trim() == "inproc")
+    global.no_daemon || russet_ipc::in_process_requested()
 }
 
 impl DaemonLink {
