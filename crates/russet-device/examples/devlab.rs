@@ -499,6 +499,7 @@ async fn run() -> russet_core::Result<()> {
             let filter = russet_device::LogFilter {
                 pid: flag(&args, "--pid").and_then(|p| p.parse().ok()),
                 bundle_id: flag(&args, "--bundle"),
+                backlog: num(&args, "--backlog", 0usize),
                 ..Default::default()
             };
             let mut s = h.logs(filter).await?;

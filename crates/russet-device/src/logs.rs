@@ -10,12 +10,15 @@
 //!
 //! A [`LogStream`] batches entries in 50 ms windows and keeps at most 10,000 pending entries; a slow consumer loses
 //! the oldest and the next batch reports `dropped` (ARCHITECTURE §6.4). [`LogCapture`] keeps a 20,000-entry ring per
-//! device for `logs.tail`.
+//! device for `logs.tail`, and stops [`TAIL_IDLE`] after the last `logs.tail` call however busy its source is.
+//!
+//! A stream for a `bundle_id` follows the app (device.md §6.7): os_trace and the console match the app's executable
+//! name, so a relaunch (a new pid) keeps flowing into the same stream. A stream for a `pid` stays with that process.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use idevice::Idevice;
 use idevice::os_trace_relay::{OsTraceLog, OsTraceRelayClient};
@@ -26,9 +29,11 @@ use time::OffsetDateTime;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::from_idevice;
+use crate::actor::DeviceActor;
+use crate::error::{device_error, from_idevice, invalid_argument};
 use crate::manager::DeviceHandle;
 use crate::pairing::LABEL;
+use crate::process::OutputHub;
 
 /// The batching window (device.md §6.7).
 pub const BATCH_WINDOW: Duration = Duration::from_millis(50);
@@ -38,6 +43,8 @@ pub const STREAM_CAPACITY: usize = 10_000;
 pub const TAIL_CAPACITY: usize = 20_000;
 /// A tail capture stops after this long without a `logs.tail` call.
 pub const TAIL_IDLE: Duration = Duration::from_secs(120);
+/// How often a capture checks whether it is idle.
+pub const TAIL_IDLE_CHECK: Duration = Duration::from_secs(10);
 
 /// Which sources a stream reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -64,6 +71,10 @@ pub struct LogFilter {
     pub contains: Option<String>,
     /// Empty means `oslog` and `stdout`.
     pub sources: Vec<LogSourceKind>,
+    /// Console lines from before the stream opened to deliver first (`logs.subscribe {backlog}`): the `stdout`
+    /// source keeps the last 2,000 lines of each process Russet launched. os_trace and syslog have no history on
+    /// the device. `0` (the default) delivers only new entries.
+    pub backlog: usize,
 }
 
 impl LogFilter {
@@ -313,30 +324,116 @@ impl Drop for LogStream {
     }
 }
 
+#[cfg(test)]
+impl LogStream {
+    /// A stream over an existing batcher.
+    pub(crate) fn from_batcher(batcher: Arc<Batcher>) -> Self {
+        Self { batcher, stop: CancellationToken::new() }
+    }
+}
+
+/// Counts the readers of a stream; the batcher closes when the last one ends.
+#[derive(Clone)]
+struct Readers {
+    n: Arc<AtomicU64>,
+    batcher: Arc<Batcher>,
+}
+
+impl Readers {
+    fn start(&self) -> ReaderGuard {
+        self.n.fetch_add(1, Ordering::SeqCst);
+        ReaderGuard(self.clone())
+    }
+}
+
+struct ReaderGuard(Readers);
+
+impl Drop for ReaderGuard {
+    fn drop(&mut self) {
+        if self.0.n.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.0.batcher.close();
+        }
+    }
+}
+
+/// Feeds one console into the stream: at most `backlog` earlier lines, then everything new.
+fn spawn_console_reader(
+    hub: &OutputHub,
+    backlog: usize,
+    b: Arc<Batcher>,
+    s: CancellationToken,
+    filt: LogFilter,
+    r: &Readers,
+) {
+    let (earlier, mut rx) = hub.subscribe_with(backlog);
+    let guard = r.start();
+    tokio::spawn(async move {
+        let _guard = guard;
+        for e in earlier {
+            if filt.matches(&e) {
+                b.push(e);
+            }
+        }
+        loop {
+            let next = tokio::select! {
+                _ = s.cancelled() => break,
+                n = rx.recv() => n,
+            };
+            match next {
+                Ok(e) => {
+                    if filt.matches(&e) {
+                        b.push(e);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    b.dropped.fetch_add(n, Ordering::Relaxed);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
 /// Opens the sources of `f` and merges them.
+///
+/// - `pid`: os_trace filtered on the device, and that process's console.
+/// - `bundle_id` (no `pid`): the app's executable name on the host, so the stream follows relaunches; the consoles
+///   of its running processes and of every later launch. `app.notInstalled` when the app is not on the device.
 pub async fn open(h: &DeviceHandle, mut f: LogFilter) -> Result<LogStream> {
     let batcher = Arc::new(Batcher::new(STREAM_CAPACITY));
     let stop = CancellationToken::new();
+    let readers = Readers { n: Arc::new(AtomicU64::new(0)), batcher: Arc::clone(&batcher) };
+    // The stream does not end while it is being set up.
+    let setup = readers.start();
     let mut pids: Vec<u32> = f.pid.into_iter().collect();
-    if pids.is_empty()
+    let mut follow: Option<String> = None;
+    if f.pid.is_none()
         && let Some(b) = f.bundle_id.clone()
     {
-        pids = crate::process::pids_of(h, &b).await.unwrap_or_default();
-        if let Some(first) = pids.first() {
-            f.pid = Some(*first);
-        } else if let Ok(Some(app)) = crate::apps::lookup(h, &b).await {
-            // Not running yet: match the executable's name until it starts.
-            f.process = app.executable;
+        let app = crate::apps::lookup(h, &b).await?.ok_or_else(|| {
+            device_error(russet_core::error::codes::app::NOT_INSTALLED, format!("{b} is not installed"))
+        })?;
+        match app.executable.filter(|e| !e.is_empty()) {
+            Some(exe) => {
+                f.process.get_or_insert(exe);
+                follow = Some(b);
+            }
+            // Without an executable name, stay with the running process.
+            None => {
+                pids = crate::process::pids_of(h, &b).await?;
+                f.pid = Some(*pids.first().ok_or_else(|| {
+                    russet_core::Error::new(russet_core::error::codes::core::NOT_FOUND, format!("{b} is not running"))
+                })?);
+            }
         }
     }
-    let readers = Arc::new(AtomicU64::new(0));
     if f.wants(LogSourceKind::OsLog) {
         let stream = h.conn().lockdown_service(h.udid(), "com.apple.os_trace_relay").await?;
         let client = OsTraceRelayClient { idevice: Idevice::new(stream, LABEL) };
         let mut rx = client.start_trace(f.pid).await.map_err(|e| from_idevice(e, "starting os_trace_relay"))?;
-        let (b, s, filt, r) = (Arc::clone(&batcher), stop.clone(), f.clone(), Arc::clone(&readers));
-        r.fetch_add(1, Ordering::SeqCst);
+        let (b, s, filt, guard) = (Arc::clone(&batcher), stop.clone(), f.clone(), readers.start());
         tokio::spawn(async move {
+            let _guard = guard;
             loop {
                 let next = tokio::select! {
                     _ = s.cancelled() => break,
@@ -352,17 +449,14 @@ pub async fn open(h: &DeviceHandle, mut f: LogFilter) -> Result<LogStream> {
                     Err(_) => break,
                 }
             }
-            if r.fetch_sub(1, Ordering::SeqCst) == 1 {
-                b.close();
-            }
         });
     }
     if f.wants(LogSourceKind::Syslog) {
         let stream = h.conn().lockdown_service(h.udid(), "com.apple.syslog_relay").await?;
         let mut client = SyslogRelayClient::new(Idevice::new(stream, LABEL));
-        let (b, s, filt, r) = (Arc::clone(&batcher), stop.clone(), f.clone(), Arc::clone(&readers));
-        r.fetch_add(1, Ordering::SeqCst);
+        let (b, s, filt, guard) = (Arc::clone(&batcher), stop.clone(), f.clone(), readers.start());
         tokio::spawn(async move {
+            let _guard = guard;
             loop {
                 let next = tokio::select! {
                     _ = s.cancelled() => break,
@@ -378,87 +472,158 @@ pub async fn open(h: &DeviceHandle, mut f: LogFilter) -> Result<LogStream> {
                     Err(_) => break,
                 }
             }
-            if r.fetch_sub(1, Ordering::SeqCst) == 1 {
-                b.close();
-            }
         });
     }
     if f.wants(LogSourceKind::Stdout) {
-        let hubs: Vec<_> = pids.iter().filter_map(|p| h.actor.output(*p)).collect();
-        for hub in hubs {
-            let (backlog, mut rx) = hub.subscribe();
-            let (b, s, filt, r) = (Arc::clone(&batcher), stop.clone(), f.clone(), Arc::clone(&readers));
-            r.fetch_add(1, Ordering::SeqCst);
-            tokio::spawn(async move {
-                for e in backlog {
-                    if filt.matches(&e) {
-                        b.push(e);
-                    }
+        match follow {
+            Some(bundle) => {
+                // Subscribe before listing, so a launch in between is not missed (its pid is deduplicated).
+                let mut later = h.actor.output_events.subscribe();
+                let now = h.actor.outputs_of_bundle(&bundle);
+                let mut seen: BTreeSet<u32> = BTreeSet::new();
+                for hub in &now {
+                    seen.insert(hub.pid());
+                    spawn_console_reader(hub, f.backlog, Arc::clone(&batcher), stop.clone(), f.clone(), &readers);
                 }
-                loop {
-                    let next = tokio::select! {
-                        _ = s.cancelled() => break,
-                        n = rx.recv() => n,
-                    };
-                    match next {
-                        Ok(e) => {
-                            if filt.matches(&e) {
-                                b.push(e);
+                let (b, s, filt, r, guard) =
+                    (Arc::clone(&batcher), stop.clone(), f.clone(), readers.clone(), readers.start());
+                tokio::spawn(async move {
+                    let _guard = guard;
+                    loop {
+                        let hub = tokio::select! {
+                            _ = s.cancelled() => break,
+                            h = later.recv() => h,
+                        };
+                        match hub {
+                            Ok(hub) if hub.bundle_id() == Some(bundle.as_str()) && seen.insert(hub.pid()) => {
+                                // Everything a new launch printed is new to this stream.
+                                spawn_console_reader(&hub, usize::MAX, Arc::clone(&b), s.clone(), filt.clone(), &r);
                             }
+                            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                            Err(_) => break,
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            b.dropped.fetch_add(n, Ordering::Relaxed);
-                        }
-                        Err(_) => break,
                     }
+                });
+            }
+            None => {
+                let hubs: Vec<Arc<OutputHub>> = pids.iter().filter_map(|p| h.actor.output(*p)).collect();
+                for hub in hubs {
+                    spawn_console_reader(&hub, f.backlog, Arc::clone(&batcher), stop.clone(), f.clone(), &readers);
                 }
-                if r.fetch_sub(1, Ordering::SeqCst) == 1 {
-                    b.close();
-                }
-            });
+            }
         }
     }
-    if readers.load(Ordering::SeqCst) == 0 {
-        batcher.close();
-    }
+    drop(setup);
     Ok(LogStream { batcher, stop })
+}
+
+/// `logs.tail` ring sequence numbers are process-wide, so a cursor from a capture that ended never hides the
+/// entries of the capture that replaced it.
+static TAIL_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// One `logs.tail` ring entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TailItem {
+    /// The cursor value (process-wide, increasing).
+    pub seq: u64,
+    /// `entry.ts` in Unix milliseconds (`None` when it does not parse).
+    pub at_ms: Option<i64>,
+    pub entry: LogEntry,
+}
+
+impl TailItem {
+    /// Wraps an entry with the next sequence number.
+    pub fn new(entry: LogEntry) -> Self {
+        let at_ms = OffsetDateTime::parse(&entry.ts, &time::format_description::well_known::Rfc3339)
+            .ok()
+            .map(|t| (t.unix_timestamp_nanos().div_euclid(1_000_000)) as i64);
+        Self { seq: TAIL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, at_ms, entry }
+    }
 }
 
 /// A background capture feeding the `logs.tail` ring.
 #[derive(Debug)]
 pub struct LogCapture {
-    ring: Mutex<VecDeque<(u64, LogEntry)>>,
-    seq: AtomicU64,
-    last_used: Mutex<Instant>,
-    started: Instant,
+    ring: Mutex<VecDeque<TailItem>>,
+    last_used: Mutex<tokio::time::Instant>,
+    started: tokio::time::Instant,
     stop: CancellationToken,
 }
 
 impl LogCapture {
+    fn new() -> Self {
+        let now = tokio::time::Instant::now();
+        Self {
+            ring: Mutex::new(VecDeque::new()),
+            last_used: Mutex::new(now),
+            started: now,
+            stop: CancellationToken::new(),
+        }
+    }
+
     fn push(&self, e: LogEntry) {
-        let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let item = TailItem::new(e);
         if let Ok(mut r) = self.ring.lock() {
             if r.len() == TAIL_CAPACITY {
                 r.pop_front();
             }
-            r.push_back((seq, e));
+            r.push_back(item);
         }
     }
 
     fn touch(&self) {
         if let Ok(mut l) = self.last_used.lock() {
-            *l = Instant::now();
+            *l = tokio::time::Instant::now();
         }
     }
 
-    fn idle(&self) -> bool {
-        self.last_used.lock().map(|l| l.elapsed() >= TAIL_IDLE).unwrap_or(true)
+    fn idle_for(&self, idle: Duration) -> bool {
+        self.last_used.lock().map(|l| l.elapsed() >= idle).unwrap_or(true)
+    }
+
+    /// Whether the capture still runs.
+    pub fn is_running(&self) -> bool {
+        !self.stop.is_cancelled()
     }
 
     /// Stops the capture.
     pub fn stop(&self) {
         self.stop.cancel();
     }
+}
+
+/// Runs a capture until it was not used for `idle` (checked every `check`, independently of how often entries
+/// arrive), its source ends, or it is stopped; then frees the ring and calls `on_stop`.
+async fn run_capture(
+    c: Arc<LogCapture>,
+    mut stream: LogStream,
+    idle: Duration,
+    check: Duration,
+    on_stop: impl FnOnce(),
+) {
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + check, check);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = c.stop.cancelled() => break,
+            _ = tick.tick() => {
+                if c.idle_for(idle) {
+                    tracing::debug!("logs.tail capture idle; stopping it");
+                    break;
+                }
+            }
+            b = stream.next_batch() => match b {
+                Some(b) => for e in b.entries { c.push(e) },
+                None => break,
+            },
+        }
+    }
+    c.stop.cancel();
+    stream.close();
+    if let Ok(mut r) = c.ring.lock() {
+        *r = VecDeque::new();
+    }
+    on_stop();
 }
 
 /// A `logs.tail` query.
@@ -470,7 +635,7 @@ pub struct TailQuery {
     pub lines: Option<u32>,
     pub min_level: Option<LogLevel>,
     pub contains: Option<String>,
-    /// RFC 3339; only entries at or after it.
+    /// RFC 3339 (any offset, any fraction); only entries at or after it.
     pub since: Option<String>,
     /// Only entries after this cursor (from a previous result).
     pub cursor: Option<String>,
@@ -487,23 +652,54 @@ pub struct TailResult {
     pub cursor: Option<String>,
 }
 
+/// `since` as Unix milliseconds, rounded up (entries carry milliseconds); `core.invalidArgument` unless RFC 3339.
+pub fn parse_since(since: &str) -> Result<i64> {
+    let t = OffsetDateTime::parse(since.trim(), &time::format_description::well_known::Rfc3339).map_err(|e| {
+        invalid_argument(format!("since {since:?} is not an RFC 3339 time: {e}"))
+            .with_hint("Use a time like 2026-10-11T09:00:00Z or 2026-10-11T11:00:00.5+02:00.")
+    })?;
+    let ns = t.unix_timestamp_nanos();
+    let ms = ns.div_euclid(1_000_000) + i128::from(ns.rem_euclid(1_000_000) > 0);
+    Ok(ms as i64)
+}
+
 /// Picks entries from a ring: filter, then the last `lines`.
-pub fn select_tail(ring: &[(u64, LogEntry)], q: &TailQuery) -> TailResult {
+pub fn select_tail(ring: &[TailItem], q: &TailQuery) -> Result<TailResult> {
     let lines = q.lines.unwrap_or(200).clamp(1, 2000) as usize;
-    let after: u64 = q.cursor.as_deref().and_then(|c| c.parse().ok()).unwrap_or(0);
+    let after: u64 = match q.cursor.as_deref() {
+        None => 0,
+        Some(c) => c.trim().parse().map_err(|_| invalid_argument(format!("cursor {c:?} is not a logs.tail cursor")))?,
+    };
+    let since = q.since.as_deref().map(parse_since).transpose()?;
     let filter = LogFilter { min_level: q.min_level, contains: q.contains.clone(), ..Default::default() };
-    let matched: Vec<&(u64, LogEntry)> = ring
+    let matched: Vec<&TailItem> = ring
         .iter()
-        .filter(|(seq, e)| *seq > after && filter.matches(e) && q.since.as_deref().is_none_or(|s| e.ts.as_str() >= s))
+        .filter(|i| {
+            i.seq > after && filter.matches(&i.entry) && since.is_none_or(|s| i.at_ms.is_some_and(|at| at >= s))
+        })
         .collect();
     let truncated = matched.len() > lines;
     let picked = &matched[matched.len().saturating_sub(lines)..];
-    let cursor = picked.last().map(|(s, _)| s.to_string()).or_else(|| q.cursor.clone());
-    TailResult { entries: picked.iter().map(|(_, e)| e.clone()).collect(), truncated, cursor }
+    let cursor = picked.last().map(|i| i.seq.to_string()).or_else(|| q.cursor.clone());
+    Ok(TailResult { entries: picked.iter().map(|i| i.entry.clone()).collect(), truncated, cursor })
+}
+
+/// Removes `capture` from its device's table (if it is still the one under `key`).
+fn forget_capture(actor: &Weak<DeviceActor>, key: &str, capture: &Arc<LogCapture>) {
+    if let Some(a) = actor.upgrade()
+        && let Ok(mut m) = a.captures.lock()
+        && m.get(key).is_some_and(|c| Arc::ptr_eq(c, capture))
+    {
+        m.remove(key);
+    }
 }
 
 /// `logs.tail`: reads the ring of the matching capture, starting one (and waiting `first_wait`) when none runs.
+/// The capture stops [`TAIL_IDLE`] after the last call.
 pub async fn tail(h: &DeviceHandle, q: TailQuery) -> Result<TailResult> {
+    if let Some(s) = q.since.as_deref() {
+        parse_since(s)?;
+    }
     let key = match (q.pid, q.bundle_id.as_deref()) {
         (Some(p), _) => format!("pid:{p}"),
         (None, Some(b)) => format!("bundle:{b}"),
@@ -511,43 +707,25 @@ pub async fn tail(h: &DeviceHandle, q: TailQuery) -> Result<TailResult> {
     };
     let existing = h.actor.captures.lock().ok().and_then(|m| m.get(&key).cloned());
     let capture = match existing {
-        Some(c) if !c.stop.is_cancelled() => c,
+        Some(c) if c.is_running() => c,
         _ => {
             let filter = LogFilter {
                 pid: q.pid,
                 bundle_id: q.bundle_id.clone(),
                 sources: vec![LogSourceKind::OsLog, LogSourceKind::Stdout],
+                // The console's earlier lines belong in the tail (`russet logs --app` right after a launch).
+                backlog: usize::MAX,
                 ..Default::default()
             };
-            let mut stream = open(h, filter).await?;
-            let capture = Arc::new(LogCapture {
-                ring: Mutex::new(VecDeque::new()),
-                seq: AtomicU64::new(0),
-                last_used: Mutex::new(Instant::now()),
-                started: Instant::now(),
-                stop: CancellationToken::new(),
-            });
-            let c = Arc::clone(&capture);
+            let stream = open(h, filter).await?;
+            let capture = Arc::new(LogCapture::new());
+            let (c, actor, k) = (Arc::clone(&capture), Arc::downgrade(&h.actor), key.clone());
             tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = c.stop.cancelled() => break,
-                        _ = tokio::time::sleep(Duration::from_secs(10)) => {
-                            if c.idle() {
-                                c.stop.cancel();
-                                break;
-                            }
-                        }
-                        b = stream.next_batch() => match b {
-                            Some(b) => for e in b.entries { c.push(e) },
-                            None => break,
-                        },
-                    }
-                }
-                c.stop.cancel();
+                let c2 = Arc::clone(&c);
+                run_capture(c, stream, TAIL_IDLE, TAIL_IDLE_CHECK, move || forget_capture(&actor, &k, &c2)).await;
             });
             if let Ok(mut m) = h.actor.captures.lock() {
-                m.retain(|_, c| !c.stop.is_cancelled());
+                m.retain(|_, c| c.is_running());
                 m.insert(key, Arc::clone(&capture));
             }
             capture
@@ -559,8 +737,8 @@ pub async fn tail(h: &DeviceHandle, q: TailQuery) -> Result<TailResult> {
     if elapsed < wait {
         tokio::time::sleep(wait - elapsed).await;
     }
-    let ring: Vec<(u64, LogEntry)> = capture.ring.lock().map(|r| r.iter().cloned().collect()).unwrap_or_default();
-    Ok(select_tail(&ring, &q))
+    let ring: Vec<TailItem> = capture.ring.lock().map(|r| r.iter().cloned().collect()).unwrap_or_default();
+    select_tail(&ring, &q)
 }
 
 #[cfg(test)]
@@ -673,19 +851,127 @@ mod tests {
         assert_eq!(b.next(BATCH_WINDOW).await, None);
     }
 
+    fn ring_of(entries: Vec<LogEntry>) -> Vec<TailItem> {
+        entries.into_iter().map(TailItem::new).collect()
+    }
+
     #[test]
     fn tails_filter_then_keep_the_last_lines() {
-        let ring: Vec<(u64, LogEntry)> = (1..=10)
-            .map(|i| (i, e(if i % 2 == 0 { LogLevel::Error } else { LogLevel::Info }, &format!("m{i}"))))
-            .collect();
+        let ring = ring_of(
+            (1..=10).map(|i| e(if i % 2 == 0 { LogLevel::Error } else { LogLevel::Info }, &format!("m{i}"))).collect(),
+        );
         let r =
-            select_tail(&ring, &TailQuery { lines: Some(2), min_level: Some(LogLevel::Error), ..Default::default() });
+            select_tail(&ring, &TailQuery { lines: Some(2), min_level: Some(LogLevel::Error), ..Default::default() })
+                .expect("tail");
         assert_eq!(r.entries.iter().map(|x| x.message.as_str()).collect::<Vec<_>>(), vec!["m8", "m10"]);
         assert!(r.truncated);
-        assert_eq!(r.cursor.as_deref(), Some("10"));
-        let r = select_tail(&ring, &TailQuery { cursor: Some("8".into()), ..Default::default() });
+        assert_eq!(r.cursor.as_deref(), Some(ring[9].seq.to_string().as_str()));
+        let r = select_tail(&ring, &TailQuery { cursor: Some(ring[7].seq.to_string()), ..Default::default() })
+            .expect("tail");
         assert_eq!(r.entries.len(), 2);
         assert!(!r.truncated);
+        assert_eq!(
+            select_tail(&ring, &TailQuery { cursor: Some("soon".into()), ..Default::default() })
+                .expect_err("bad cursor")
+                .code(),
+            russet_core::error::codes::core::INVALID_ARGUMENT
+        );
+        // Sequence numbers keep growing across rings, so an old cursor never hides a new capture's entries.
+        let newer = ring_of(vec![e(LogLevel::Info, "after a restart")]);
+        let r = select_tail(&newer, &TailQuery { cursor: Some(ring[9].seq.to_string()), ..Default::default() })
+            .expect("tail");
+        assert_eq!(r.entries.len(), 1);
+    }
+
+    fn at(ts: &str, msg: &str) -> LogEntry {
+        LogEntry { ts: ts.into(), ..e(LogLevel::Info, msg) }
+    }
+
+    #[test]
+    fn since_compares_times_not_strings() {
+        let ring = ring_of(vec![
+            at("2026-10-11T08:59:59.999Z", "before"),
+            at("2026-10-11T09:00:00.000Z", "on the second"),
+            at("2026-10-11T09:00:00.123Z", "fraction"),
+            at("2026-10-11T09:00:01.000Z", "later"),
+        ]);
+        let msgs = |since: &str| -> Vec<String> {
+            select_tail(&ring, &TailQuery { since: Some(since.into()), ..Default::default() })
+                .expect("tail")
+                .entries
+                .into_iter()
+                .map(|x| x.message)
+                .collect()
+        };
+        // Whole seconds: `.123Z` is after `09:00:00Z` (a string compare said '.' < 'Z' and dropped it).
+        assert_eq!(msgs("2026-10-11T09:00:00Z"), ["on the second", "fraction", "later"]);
+        // Other offsets are the same instant.
+        assert_eq!(msgs("2026-10-11T11:00:00+02:00"), ["on the second", "fraction", "later"]);
+        assert_eq!(msgs("2026-10-11T04:00:00.123-05:00"), ["fraction", "later"]);
+        // Sub-millisecond precision rounds up: entries carry milliseconds.
+        assert_eq!(msgs("2026-10-11T09:00:00.1225Z"), ["fraction", "later"]);
+        assert_eq!(msgs("2026-10-11T09:00:00.1235Z"), ["later"]);
+        assert_eq!(msgs("2026-10-11T08:59:59.9991Z"), ["on the second", "fraction", "later"]);
+        for bad in ["yesterday", "2026-10-11 09:00:00", "2026-10-11T09:00:00"] {
+            let err = select_tail(&ring, &TailQuery { since: Some(bad.into()), ..Default::default() })
+                .expect_err("not RFC 3339");
+            assert_eq!(err.code(), russet_core::error::codes::core::INVALID_ARGUMENT, "{bad}");
+        }
+    }
+
+    /// The review's probe: entries every 100 ms must not keep a capture alive; only `logs.tail` calls do.
+    #[tokio::test(start_paused = true)]
+    async fn a_capture_stops_when_unused_however_busy_its_source_is() {
+        let batcher = Arc::new(Batcher::new(STREAM_CAPACITY));
+        let stream = LogStream::from_batcher(Arc::clone(&batcher));
+        let capture = Arc::new(LogCapture::new());
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&stopped);
+        let task = tokio::spawn(run_capture(Arc::clone(&capture), stream, TAIL_IDLE, TAIL_IDLE_CHECK, move || {
+            flag.store(true, Ordering::SeqCst)
+        }));
+        let producer = {
+            let b = Arc::clone(&batcher);
+            tokio::spawn(async move {
+                let mut i = 0u64;
+                loop {
+                    b.push(e(LogLevel::Default, &format!("beat {i}")));
+                    i += 1;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+        };
+        // In use: a `logs.tail` call every 60 s keeps it running.
+        for _ in 0..5 {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert!(capture.is_running());
+            capture.touch();
+        }
+        assert!(!capture.ring.lock().expect("ring").is_empty());
+        // Unused: it stops within TAIL_IDLE plus one check, while the producer keeps going.
+        let started = tokio::time::Instant::now();
+        tokio::time::timeout(TAIL_IDLE + TAIL_IDLE_CHECK + Duration::from_secs(1), task)
+            .await
+            .expect("the capture stopped")
+            .expect("join");
+        assert!(started.elapsed() >= TAIL_IDLE - TAIL_IDLE_CHECK);
+        assert!(!capture.is_running());
+        assert!(stopped.load(Ordering::SeqCst), "on_stop ran");
+        assert!(capture.ring.lock().expect("ring").is_empty(), "the ring is freed");
+        assert!(!producer.is_finished());
+        producer.abort();
+    }
+
+    #[test]
+    fn a_subscription_gets_at_most_its_backlog() {
+        let hub = OutputHub::new(932, Some("RussetProbe".into()));
+        for i in 0..5 {
+            hub.push_line(&format!("line {i}"));
+        }
+        assert!(hub.subscribe_with(0).0.is_empty());
+        let (two, _) = hub.subscribe_with(2);
+        assert_eq!(two.iter().map(|x| x.message.as_str()).collect::<Vec<_>>(), vec!["line 3", "line 4"]);
+        assert_eq!(hub.subscribe().0.len(), 5);
     }
 
     #[test]

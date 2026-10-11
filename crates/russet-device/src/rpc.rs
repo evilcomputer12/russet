@@ -262,9 +262,10 @@ pub fn forward_list(m: &DeviceManager) -> pf::ForwardListResult {
     pf::ForwardListResult { forwards: m.forwards().iter().map(wire::forward).collect() }
 }
 
-/// The domain filter of `logs.subscribe`.
-pub fn log_filter(sources: &[pl::LogsSource], f: &pl::LogFilter) -> LogFilter {
+/// The domain filter of `logs.subscribe`; `backlog` (default 0) bounds the console lines replayed first.
+pub fn log_filter(sources: &[pl::LogsSource], f: &pl::LogFilter, backlog: Option<u32>) -> LogFilter {
     LogFilter {
+        backlog: backlog.map_or(0, |n| n as usize),
         pid: f.pid,
         bundle_id: f.bundle_id.clone(),
         process: f.process.clone(),
@@ -285,7 +286,7 @@ pub fn log_filter(sources: &[pl::LogsSource], f: &pl::LogFilter) -> LogFilter {
 
 pub async fn logs_subscribe(m: &DeviceManager, p: &pl::LogsSubscribeParams) -> Result<LogStream> {
     let h = handle(m, p.udid.as_deref())?;
-    h.logs(log_filter(&p.sources, &p.filter)).await
+    h.logs(log_filter(&p.sources, &p.filter, p.backlog)).await
 }
 
 pub async fn logs_tail(m: &DeviceManager, p: pl::LogsTailParams) -> Result<pl::LogsTailResult> {

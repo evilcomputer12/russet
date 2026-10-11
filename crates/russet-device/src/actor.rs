@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
+use tokio::sync::broadcast;
+
 use crate::logs::LogCapture;
 use crate::model::{DeviceState, DeviceSummary, Identity, Readiness, Transport, Tri, Udid};
 use crate::process::OutputHub;
@@ -34,6 +36,8 @@ pub(crate) struct DeviceActor {
     pub device_lock: tokio::sync::Mutex<()>,
     /// Console output of the processes Russet launched, by pid (the `stdout` log source).
     pub outputs: Mutex<BTreeMap<u32, Arc<OutputHub>>>,
+    /// Every console registered from now on, so a bundle's log stream follows a relaunch (device.md §6.7).
+    pub output_events: broadcast::Sender<Arc<OutputHub>>,
     /// The background capture behind `logs.tail`, by key (`pid:<n>`, `bundle:<id>` or `all`).
     pub captures: Mutex<BTreeMap<String, Arc<LogCapture>>>,
 }
@@ -47,6 +51,7 @@ impl DeviceActor {
             identity_lock: tokio::sync::Mutex::new(()),
             device_lock: tokio::sync::Mutex::new(()),
             outputs: Mutex::new(BTreeMap::new()),
+            output_events: broadcast::channel(16).0,
             captures: Mutex::new(BTreeMap::new()),
         }
     }
@@ -84,12 +89,22 @@ impl DeviceActor {
         }
     }
 
-    /// Records the console of a launched process for the `stdout` log source; finished ones are pruned.
+    /// Records the console of a launched process for the `stdout` log source (finished ones are pruned) and
+    /// announces it to the streams that follow its app.
     pub fn register_output(&self, pid: u32, hub: Arc<OutputHub>) {
         if let Ok(mut m) = self.outputs.lock() {
             m.retain(|_, h| !h.is_finished());
-            m.insert(pid, hub);
+            m.insert(pid, Arc::clone(&hub));
         }
+        let _ = self.output_events.send(hub);
+    }
+
+    /// The live consoles of an app's processes.
+    pub fn outputs_of_bundle(&self, bundle_id: &str) -> Vec<Arc<OutputHub>> {
+        self.outputs
+            .lock()
+            .map(|m| m.values().filter(|h| !h.is_finished() && h.bundle_id() == Some(bundle_id)).cloned().collect())
+            .unwrap_or_default()
     }
 
     pub fn output(&self, pid: u32) -> Option<Arc<OutputHub>> {

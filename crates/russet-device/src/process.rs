@@ -104,6 +104,7 @@ const OUTPUT_BACKLOG: usize = 2000;
 pub struct OutputHub {
     pid: u32,
     process: Option<String>,
+    bundle_id: Option<String>,
     tx: broadcast::Sender<LogEntry>,
     backlog: Mutex<VecDeque<LogEntry>>,
     finished: AtomicBool,
@@ -112,10 +113,16 @@ pub struct OutputHub {
 
 impl OutputHub {
     pub fn new(pid: u32, process: Option<String>) -> Self {
+        Self::for_app(pid, process, None)
+    }
+
+    /// The console of `bundle_id`'s process `pid`.
+    pub fn for_app(pid: u32, process: Option<String>, bundle_id: Option<String>) -> Self {
         let (tx, _) = broadcast::channel(1024);
         Self {
             pid,
             process,
+            bundle_id,
             tx,
             backlog: Mutex::new(VecDeque::new()),
             finished: AtomicBool::new(false),
@@ -151,10 +158,30 @@ impl OutputHub {
 
     /// The backlog and a live receiver (no gap between them).
     pub fn subscribe(&self) -> (Vec<LogEntry>, broadcast::Receiver<LogEntry>) {
+        self.subscribe_with(usize::MAX)
+    }
+
+    /// At most the last `backlog` lines and a live receiver (no gap between them).
+    pub fn subscribe_with(&self, backlog: usize) -> (Vec<LogEntry>, broadcast::Receiver<LogEntry>) {
         let guard = self.backlog.lock();
         let rx = self.tx.subscribe();
-        let backlog = guard.map(|b| b.iter().cloned().collect()).unwrap_or_default();
-        (backlog, rx)
+        let lines = guard
+            .map(|b| {
+                let skip = b.len().saturating_sub(backlog);
+                b.iter().skip(skip).cloned().collect()
+            })
+            .unwrap_or_default();
+        (lines, rx)
+    }
+
+    /// The app this console belongs to, when Russet launched it by bundle id.
+    pub fn bundle_id(&self) -> Option<&str> {
+        self.bundle_id.as_deref()
+    }
+
+    /// The process name its lines carry.
+    pub fn process(&self) -> Option<&str> {
+        self.process.as_deref()
     }
 
     pub fn finish(&self) {
@@ -343,7 +370,7 @@ async fn launch_coredevice(h: &DeviceHandle, r: &LaunchRequest) -> Result<Launch
     let mut output = None;
     let mut stdin = None;
     if let Some((stream, _)) = stdio {
-        let hub = Arc::new(OutputHub::new(launched.pid, name.clone()));
+        let hub = Arc::new(OutputHub::for_app(launched.pid, name.clone(), Some(r.bundle_id.clone())));
         let (mut read, write) = tokio::io::split(stream);
         stdin = Some(write);
         let hub2 = Arc::clone(&hub);
