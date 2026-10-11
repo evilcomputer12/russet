@@ -153,3 +153,29 @@ fn sha(path: &Utf8Path) -> String {
     use sha2::Digest;
     sha2::Sha256::digest(std::fs::read(path).unwrap()).iter().map(|b| format!("{b:02x}")).collect()
 }
+
+/// The release profile: Swift Build's dSYM (or dsymutil), `llvm-strip -x`, L002 at error severity.
+#[tokio::test(flavor = "multi_thread")]
+async fn russet_probe_builds_in_release() {
+    let Some(h) = host() else { return };
+    let (_dir, root) = support::tmp();
+    let project = support::copy_probe(&root);
+    let b = builder(h, &root);
+    let sink = RecordingSink::default();
+    let mut r = BuildRequest::new(&project);
+    r.configuration = Some("release".into());
+    let out = b.build(r, &sink, CancellationToken::new()).await.unwrap_or_else(|e| {
+        let lines = sink.lines.lock().unwrap();
+        panic!("release build failed: {e:?}\n{}", lines.iter().map(|(_, l)| l.as_str()).collect::<Vec<_>>().join("\n"))
+    });
+    assert_eq!(out.app.path, project.join(".russet/build/release-iphoneos/RussetProbe.app"));
+    let text = otool(&out.app.executable);
+    assert!(text.contains("sdk 27.0") && text.contains("minos 17.0"), "{text}");
+    assert!(out.signing_plan.items.iter().all(|i| !i.get_task_allow), "release builds are not debuggable");
+    assert_eq!(out.dsyms.len(), 1, "release builds have a dSYM");
+    let dwarf = out.dsyms[0].join("Contents/Resources/DWARF/RussetProbe");
+    assert!(dwarf.is_file(), "the dSYM's DWARF file is named after the executable: {dwarf}");
+    for l in &out.lints {
+        eprintln!("lint {} {:?} {} (fixed: {})", l.code, l.severity, l.message, l.fixed);
+    }
+}

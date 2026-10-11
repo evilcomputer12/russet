@@ -1322,6 +1322,12 @@ impl Builder {
             }
             if built.is_dir() {
                 bundle::copy_tree(&built, &out)?;
+                // Swift Build names the DWARF file after the builder's target; the app's executable is the product.
+                let dwarf = out.join("Contents/Resources/DWARF");
+                let from = dwarf.join(&plan.app.target_name);
+                if from.is_file() {
+                    std::fs::rename(&from, dwarf.join(&plan.app.product)).map_err(|e| spm::io(&from, e))?;
+                }
                 dsyms.push(out);
             } else if let Some(dsymutil) = &res.facts.tools.dsymutil {
                 let spec = CommandSpec {
@@ -1352,6 +1358,7 @@ impl Builder {
                         timeout: Some(Duration::from_secs(120)),
                     };
                     self.run_tool(&spec, "llvm-strip", em, cancel).await?;
+                    bundle::set_times(&assembled.app.path, self.env.epoch)?;
                 }
                 None => em.warn(
                     "build.warn.strip",
