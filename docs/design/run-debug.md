@@ -611,6 +611,15 @@ v1 ships only `FlutterRxPages`.
 
 ### 8.2 The libpython problem on Linux
 
+> **As implemented (W3, RD-05, 2026-10-11):** the resolver reads `liblldb`'s `DT_NEEDED` libpython with its own
+> ELF reader (russet-toolchain's `elf.rs`: the header, the program headers and the dynamic section only; goblin is
+> not used) and searches the `ldconfig` cache, then an existing uv-managed python-build-standalone (provenance
+> `uv`), then Russet's managed `python-shared`, installed by `russet toolchain install python-shared` into
+> `data/toolchains/python-shared/3.12.15/` (ARCHITECTURE §14.8) from the signed `pins/stable.toml` (not
+> `$XDG_DATA_HOME/russet/python/…` or `russet-toolchains.toml`). `~/.local/opt/python-3.12` is never used. Doctor
+> reports, for example, `swift lldb 21.0.0 at /usr/lib/swift/usr/bin/lldb, python: pbs 3.12.15 (uv)`, and offers
+> the python-shared install as its automatic fix only when a missing libpython is the cause.
+
 - **Facts.** Swift's Linux `liblldb` has a hard `DT_NEEDED` on `libpython3.12.so.1.0`; without it neither
   `lldb` nor `lldb-dap` starts [V2]. Arch ships Python 3.14 [VF].
 - **Decision** (answers [core.md](core.md) section 22, open question 4: "managed build vs user-provided"): use a pinned

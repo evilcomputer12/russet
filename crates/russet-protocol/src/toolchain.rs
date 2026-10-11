@@ -1,18 +1,138 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! `toolchain.*`: managed toolchains and pins (ARCHITECTURE §16). Owner: W3.
+//! `toolchain.*`: resolved tools, managed installs and pins (ARCHITECTURE §8.1, §16). Owner: W3 (`pins.update`:
+//! W26).
 //!
-//! F0 stub (W1): every name of ARCHITECTURE §8.1 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
-//! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+//! `ToolInfo.env` is part of the contract (§16.2): every launcher applies it (LLDB needs `LD_LIBRARY_PATH` and
+//! `PYTHONHOME` for libpython).
+
+use std::collections::BTreeMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{MethodInfo, NotificationInfo, RpcMethod, RpcNotification, Unspecified};
 
-/// Params of `toolchain.list`: `{project?, refresh?} → {tools: ToolInfo[], sdks: SdkInfo[], pins{id,source}}`.
-pub type ToolchainListParams = Unspecified;
-/// Result of `toolchain.list`.
-pub type ToolchainListResult = Unspecified;
+/// A toolchain component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToolComponent {
+    Swift,
+    DarwinSdk,
+    Linker,
+    Lldb,
+    LldbDap,
+    Libpython,
+    Xtool,
+    Flutter,
+    GenSnapshotIos,
+    Llvm,
+}
+
+/// A component Russet downloads and installs itself (`toolchain.install`). Wave 1: `python-shared` and
+/// `darwin-tools`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManagedComponent {
+    /// python-build-standalone, the libpython of Swift's LLDB.
+    PythonShared,
+    /// The darwin-tools linker (`ld64.lld`, LLD 21.1.6 patched for `arm64e.x1` TBDs).
+    DarwinTools,
+    Swift,
+    Llvm,
+    Flutter,
+    Xtool,
+}
+
+/// Where a resolved tool came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ToolProvenance {
+    /// Installed by Russet; `pin` is `<component>@<version>`.
+    Managed { pin: String },
+    /// Found on the system (`PATH`, `ldconfig`).
+    System,
+    /// An existing uv-managed python-build-standalone.
+    Uv,
+    /// Inside an xtool SDK bundle, read in place.
+    #[serde(rename_all = "camelCase")]
+    XtoolBundle { bundle: String },
+    /// Installed by the user elsewhere (swiftly).
+    User,
+    /// Named by the project (`[toolchain] linker = "<path>"`, `[debug] lldb = "<path>"`).
+    ProjectPin,
+}
+
+/// A resolved tool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInfo {
+    pub component: ToolComponent,
+    pub version: String,
+    pub path: String,
+    pub provenance: ToolProvenance,
+    /// Environment every launcher must apply (ARCHITECTURE §16.2).
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    pub ok: bool,
+    #[serde(default)]
+    pub problems: Vec<String>,
+}
+
+/// A Darwin SDK known to the registry (Russet imports and xtool bundles).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SdkInfo {
+    /// For example `xcode-27.0-27A266a`.
+    pub id: String,
+    pub xcode_version: String,
+    pub xcode_build: String,
+    pub ios_sdk: String,
+    pub swift_sdk_name: String,
+    pub bundle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub darwin_tools: Option<String>,
+    /// The Swift `major.minor` the SDK needs (empty when the pins have no row for it).
+    pub compatible_swift: String,
+}
+
+/// The pin manifest in use.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PinsInfo {
+    pub id: String,
+    /// `embedded`, or the path of an updated manifest.
+    pub source: String,
+}
+
+/// Params of `toolchain.list`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainListParams {
+    /// The project root, for its `[toolchain]` and `[debug]` pins: candidates they exclude are listed with
+    /// `ok: false` and the reason in `problems`, and a tool the project names by path comes first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub project: Option<String>,
+    /// Re-run every probe instead of using the probe cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub refresh: Option<bool>,
+}
+
+/// Result of `toolchain.list`: every candidate of every component, in resolution order; the first `ok` candidate
+/// of a component is the one `toolchain.resolve` picks (for the given project).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainListResult {
+    pub tools: Vec<ToolInfo>,
+    pub sdks: Vec<SdkInfo>,
+    pub pins: PinsInfo,
+}
+
 crate::rpc_method!(
     /// `toolchain.list` (class `read`). W3 (Wave 1).
     ToolchainList,
@@ -21,10 +141,20 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `toolchain.resolve`: `{component, project?} → ToolInfo (incl. env)`.
-pub type ToolchainResolveParams = Unspecified;
-/// Result of `toolchain.resolve`.
-pub type ToolchainResolveResult = Unspecified;
+/// Params of `toolchain.resolve`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainResolveParams {
+    pub component: ToolComponent,
+    /// The project root, for `[toolchain]` and `[debug] lldb`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub project: Option<String>,
+}
+
+/// Result of `toolchain.resolve`: the first working candidate, with its env.
+pub type ToolchainResolveResult = ToolInfo;
+
 crate::rpc_method!(
     /// `toolchain.resolve` (class `read`). W3 (Wave 1).
     ToolchainResolve,
@@ -33,10 +163,20 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `toolchain.install`: `{component, version} → ToolInfo`.
-pub type ToolchainInstallParams = Unspecified;
-/// Result of `toolchain.install`.
-pub type ToolchainInstallResult = Unspecified;
+/// Params of `toolchain.install`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainInstallParams {
+    pub component: ManagedComponent,
+    /// The pinned version; omitted = the pin manifest's version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub version: Option<String>,
+}
+
+/// Result of `toolchain.install`: the installed tool, resolved.
+pub type ToolchainInstallResult = ToolInfo;
+
 crate::rpc_method!(
     /// `toolchain.install` (class `system`, long-running). W3 (Wave 1: python-shared, darwin-tools).
     ToolchainInstall,
@@ -45,10 +185,22 @@ crate::rpc_method!(
     Permission::System, long_running
 );
 
-/// Params of `toolchain.uninstall`: `{component, version} → {freedBytes}`.
-pub type ToolchainUninstallParams = Unspecified;
+/// Params of `toolchain.uninstall`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainUninstallParams {
+    pub component: ManagedComponent,
+    pub version: String,
+}
+
 /// Result of `toolchain.uninstall`.
-pub type ToolchainUninstallResult = Unspecified;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainUninstallResult {
+    #[ts(type = "number")]
+    pub freed_bytes: u64,
+}
+
 crate::rpc_method!(
     /// `toolchain.uninstall` (class `system`). W3 (Wave 2).
     ToolchainUninstall,
@@ -57,10 +209,24 @@ crate::rpc_method!(
     Permission::System
 );
 
-/// Params of `toolchain.gc`: `{dryRun?} → {freedBytes, removed[]}`.
-pub type ToolchainGcParams = Unspecified;
+/// Params of `toolchain.gc`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainGcParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dry_run: Option<bool>,
+}
+
 /// Result of `toolchain.gc`.
-pub type ToolchainGcResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainGcResult {
+    #[ts(type = "number")]
+    pub freed_bytes: u64,
+    pub removed: Vec<String>,
+}
+
 crate::rpc_method!(
     /// `toolchain.gc` (class `system`). W3 (Wave 2).
     ToolchainGc,
@@ -69,7 +235,7 @@ crate::rpc_method!(
     Permission::System
 );
 
-/// Params of `toolchain.pins.update`: `{channel?} → {id, changed}`.
+/// Params of `toolchain.pins.update`: `{channel?} → {id, changed}` (W26 defines them).
 pub type ToolchainPinsUpdateParams = Unspecified;
 /// Result of `toolchain.pins.update`.
 pub type ToolchainPinsUpdateResult = Unspecified;
@@ -81,8 +247,13 @@ crate::rpc_method!(
     Permission::System
 );
 
-/// Params of the `toolchain.changed` notification: `{components[]}; to all`.
-pub type ToolchainChangedParams = Unspecified;
+/// Params of the `toolchain.changed` notification (to every connection).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolchainChangedParams {
+    pub components: Vec<ToolComponent>,
+}
+
 crate::rpc_notification!(
     /// `toolchain.changed` (daemon → client). W3.
     ToolchainChanged,

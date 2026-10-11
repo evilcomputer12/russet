@@ -1,0 +1,1138 @@
+{
+  "$defs": {
+    "AgentsSection": {
+      "additionalProperties": false,
+      "description": "`[agents]`: may only narrow `mcp-policy.toml` (ARCHITECTURE §7.5).",
+      "properties": {
+        "deny-tools": {
+          "default": [],
+          "description": "MCP tools agents may not call in this project.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tier-max": {
+          "description": "Lowers every client's `tier-max`; it never raises one.",
+          "format": "uint8",
+          "maximum": 3,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AppExtension": {
+      "additionalProperties": false,
+      "description": "One `[[app.extensions]]` entry.",
+      "properties": {
+        "bundle-id-suffix": {
+          "description": "The effective ID is `<app bundle id>.<suffix>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entitlements": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "info-plist": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "default": "",
+          "description": "For example `widgetkit`.",
+          "type": "string"
+        },
+        "product": {
+          "default": "",
+          "description": "The SwiftPM library product.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "AppSection": {
+      "additionalProperties": false,
+      "description": "`[app]`.",
+      "properties": {
+        "accent-color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "build-number": {
+          "description": "`CFBundleVersion`, or `auto`, `git-count` or `timestamp`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bundle-id": {
+          "description": "The canonical bundle ID; paid teams use it exactly (ARCHITECTURE §16.5).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deployment-target": {
+          "description": "Must be one of the SDK's `ValidDeploymentTargets`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "devices": {
+          "default": [
+            "iphone"
+          ],
+          "items": {
+            "$ref": "#/$defs/DeviceFamily"
+          },
+          "type": "array"
+        },
+        "display-name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entitlements": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extensions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AppExtension"
+          },
+          "type": "array"
+        },
+        "icon": {
+          "description": "An icon set in a main-bundle catalog, or a `.png` (development only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "info-plist": {
+          "description": "Extra keys merged at precedence level 3 (build §4.4).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "launch-screen": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LaunchScreen"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "orientations": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "ipad": {
+              "items": {
+                "$ref": "#/$defs/Orientation"
+              },
+              "type": "array"
+            },
+            "iphone": {
+              "items": {
+                "$ref": "#/$defs/Orientation"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "privacy-manifest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "description": "`CFBundleShortVersionString`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AttachMode": {
+      "description": "`[debug] attach-mode` [D 38].",
+      "enum": [
+        "broker",
+        "legacy-async"
+      ],
+      "type": "string"
+    },
+    "AutoOnOff": {
+      "description": "`auto | on | off`.",
+      "enum": [
+        "auto",
+        "on",
+        "off"
+      ],
+      "type": "string"
+    },
+    "BuildBackend": {
+      "description": "`[build] backend`.",
+      "enum": [
+        "swiftbuild",
+        "native",
+        "xtool",
+        "pif"
+      ],
+      "type": "string"
+    },
+    "BuildProfile": {
+      "additionalProperties": false,
+      "description": "`[build.profiles.<name>]`: overrides of `[build]` for one profile.",
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BuildBackend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dsym": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/When"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LintMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overrides": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "package": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sdk": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strip": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/When"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "BuildSection": {
+      "additionalProperties": false,
+      "description": "`[build]`.",
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/BuildBackend",
+          "default": "swiftbuild"
+        },
+        "default-profile": {
+          "default": "debug",
+          "type": "string"
+        },
+        "dsym": {
+          "$ref": "#/$defs/When",
+          "default": "release"
+        },
+        "flutter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlutterBuild"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jobs": {
+          "$ref": "#/$defs/Jobs",
+          "default": "auto"
+        },
+        "launch-screen-fallback": {
+          "$ref": "#/$defs/LaunchScreenFallback",
+          "default": "error"
+        },
+        "launch-storyboard": {
+          "$ref": "#/$defs/LaunchStoryboard",
+          "default": "auto"
+        },
+        "lint": {
+          "$ref": "#/$defs/LintMode",
+          "default": "auto"
+        },
+        "metadata": {
+          "$ref": "#/$defs/MetadataPolicy",
+          "default": "sdk"
+        },
+        "metadata-consent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataConsent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Required for `metadata = \"xcode-compat\"`; recorded by `russet ship stamp` or the IDE (ARCHITECTURE §16.4)."
+        },
+        "overrides": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Build-setting overrides, for example `RUSSET_LINK_SDK_VERSION = \"deployment\"` (diagnosis only).",
+          "type": "object"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BuildProfile"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "sdk": {
+          "default": "auto",
+          "description": "`auto`, an SDK canonical name (`iphoneos27.0`) or an Xcode build (`27A266a`).",
+          "type": "string"
+        },
+        "strip": {
+          "$ref": "#/$defs/When",
+          "default": "release"
+        },
+        "swiftpm": {
+          "$ref": "#/$defs/SwiftpmBuild",
+          "default": {
+            "cc-flags": [],
+            "ld-flags": [],
+            "package": ".",
+            "swiftc-flags": []
+          }
+        },
+        "xcode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/XcodeBuild"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "BundleIdPolicy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BundleIdPolicyName"
+        },
+        {
+          "$ref": "#/$defs/CustomBundleIds"
+        }
+      ],
+      "description": "`[signing] bundle-id-policy` (ARCHITECTURE §16.5): a name, or `{ custom = { \"<id>\" = \"<effective id>\" } }`."
+    },
+    "BundleIdPolicyName": {
+      "description": "The named bundle-ID policies.",
+      "oneOf": [
+        {
+          "enum": [
+            "exact",
+            "team-suffix",
+            "xtool-prefix"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Exact for paid teams, team-suffix for free teams.",
+          "type": "string"
+        }
+      ]
+    },
+    "CiProvider": {
+      "description": "`[ship.ci] provider`.",
+      "enum": [
+        "github",
+        "xcode-cloud"
+      ],
+      "type": "string"
+    },
+    "CiSigning": {
+      "description": "`[ship.ci] signing`.",
+      "enum": [
+        "russet",
+        "xcode-manual",
+        "xcode-cloud"
+      ],
+      "type": "string"
+    },
+    "CustomBundleIds": {
+      "additionalProperties": false,
+      "description": "`{ custom = { … } }`.",
+      "properties": {
+        "custom": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "custom"
+      ],
+      "type": "object"
+    },
+    "DebugSection": {
+      "additionalProperties": false,
+      "description": "`[debug]`.",
+      "properties": {
+        "attach-mode": {
+          "$ref": "#/$defs/AttachMode",
+          "default": "broker"
+        },
+        "init-commands": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "jit": {
+          "$ref": "#/$defs/JitMode",
+          "default": "auto"
+        },
+        "lldb": {
+          "default": "auto",
+          "description": "`auto`, `swift`, `llvm` or a path (RD §8.1).",
+          "type": "string"
+        },
+        "swift-expressions": {
+          "$ref": "#/$defs/AutoOnOff",
+          "default": "auto"
+        },
+        "symbols": {
+          "$ref": "#/$defs/SymbolsMode",
+          "default": "auto"
+        }
+      },
+      "type": "object"
+    },
+    "DeviceFamily": {
+      "description": "`[app] devices` entries and `orientations` keys.",
+      "enum": [
+        "iphone",
+        "ipad"
+      ],
+      "type": "string"
+    },
+    "EntitlementMerge": {
+      "description": "`[signing] merge`.",
+      "enum": [
+        "least",
+        "profile-all"
+      ],
+      "type": "string"
+    },
+    "FlutterBuild": {
+      "additionalProperties": false,
+      "description": "`[build.flutter]`.",
+      "properties": {
+        "dart-defines": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "flavor": {
+          "default": "",
+          "type": "string"
+        },
+        "gen-snapshot": {
+          "default": "auto",
+          "type": "string"
+        },
+        "plugins": {
+          "$ref": "#/$defs/FlutterPlugins",
+          "default": "swiftpm"
+        },
+        "target": {
+          "default": "lib/main.dart",
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "FlutterPlugins": {
+      "description": "`[build.flutter] plugins`.",
+      "enum": [
+        "swiftpm",
+        "swiftpm+convert",
+        "swiftpm+cocoapods"
+      ],
+      "type": "string"
+    },
+    "InstallMode": {
+      "description": "`[run] install`.",
+      "enum": [
+        "if-changed",
+        "always",
+        "never"
+      ],
+      "type": "string"
+    },
+    "JitMode": {
+      "description": "`[debug] jit`.",
+      "enum": [
+        "auto",
+        "native",
+        "lldb-python",
+        "off"
+      ],
+      "type": "string"
+    },
+    "Jobs": {
+      "description": "\"auto\" or a positive number of parallel jobs.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "type": "string"
+        },
+        {
+          "minimum": 1,
+          "type": "integer"
+        }
+      ]
+    },
+    "LaunchMode": {
+      "description": "`[run] launch`.",
+      "enum": [
+        "auto",
+        "coredevice",
+        "dvt"
+      ],
+      "type": "string"
+    },
+    "LaunchScreen": {
+      "additionalProperties": false,
+      "description": "`[app] launch-screen`.",
+      "properties": {
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "respects-safe-area": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LaunchScreenFallback": {
+      "description": "`[build] launch-screen-fallback`.",
+      "enum": [
+        "error",
+        "empty"
+      ],
+      "type": "string"
+    },
+    "LaunchStoryboard": {
+      "description": "`[build] launch-storyboard` [D 75].",
+      "enum": [
+        "auto",
+        "compile",
+        "convert"
+      ],
+      "type": "string"
+    },
+    "LintMode": {
+      "description": "`[build] lint`: `auto` warns in debug and errors in release.",
+      "enum": [
+        "auto",
+        "warn",
+        "error",
+        "off"
+      ],
+      "type": "string"
+    },
+    "MetadataConsent": {
+      "additionalProperties": false,
+      "description": "`[build] metadata-consent`.",
+      "properties": {
+        "at": {
+          "default": "",
+          "type": "string"
+        },
+        "by": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "MetadataPolicy": {
+      "description": "`[build] metadata` (ARCHITECTURE §16.4).",
+      "enum": [
+        "none",
+        "minimal",
+        "sdk",
+        "xcode-compat"
+      ],
+      "type": "string"
+    },
+    "Orientation": {
+      "description": "`[app] orientations` values.",
+      "enum": [
+        "portrait",
+        "portrait-upside-down",
+        "landscape-left",
+        "landscape-right"
+      ],
+      "type": "string"
+    },
+    "PackageKind": {
+      "description": "`[build.profiles.<name>] package`.",
+      "enum": [
+        "none",
+        "ipa-dev",
+        "ipa-store"
+      ],
+      "type": "string"
+    },
+    "ProjectSection": {
+      "additionalProperties": false,
+      "description": "`[project]`.",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Stack"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Auto-detected when omitted."
+        }
+      },
+      "type": "object"
+    },
+    "RunSection": {
+      "additionalProperties": false,
+      "description": "`[run]`.",
+      "properties": {
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "console": {
+          "default": true,
+          "type": "boolean"
+        },
+        "device": {
+          "default": "auto",
+          "description": "`auto`, a UDID or an alias.",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "install": {
+          "$ref": "#/$defs/InstallMode",
+          "default": "if-changed"
+        },
+        "launch": {
+          "$ref": "#/$defs/LaunchMode",
+          "default": "auto"
+        }
+      },
+      "type": "object"
+    },
+    "ShipCi": {
+      "additionalProperties": false,
+      "description": "`[ship.ci]` [D 76].",
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/CiProvider",
+          "default": "github"
+        },
+        "signing": {
+          "$ref": "#/$defs/CiSigning",
+          "default": "russet"
+        }
+      },
+      "type": "object"
+    },
+    "ShipMode": {
+      "description": "`[ship] mode`.",
+      "enum": [
+        "linux-native",
+        "apple-hardware"
+      ],
+      "type": "string"
+    },
+    "ShipSection": {
+      "additionalProperties": false,
+      "description": "`[ship]`.",
+      "properties": {
+        "app-id": {
+          "description": "The numeric App Store Connect app id; filled on the first upload.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "build-number": {
+          "default": "auto",
+          "type": "string"
+        },
+        "ci": {
+          "$ref": "#/$defs/ShipCi",
+          "default": {
+            "provider": "github",
+            "signing": "russet"
+          }
+        },
+        "mode": {
+          "$ref": "#/$defs/ShipMode",
+          "default": "linux-native"
+        },
+        "testflight-groups": {
+          "default": [
+            "Internal"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "uses-non-exempt-encryption": {
+          "default": false,
+          "description": "Written as `ITSAppUsesNonExemptEncryption`.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SigningMode": {
+      "description": "`[signing] mode`.",
+      "enum": [
+        "automatic",
+        "manual"
+      ],
+      "type": "string"
+    },
+    "SigningSection": {
+      "additionalProperties": false,
+      "description": "`[signing]`.",
+      "properties": {
+        "account": {
+          "description": "An account id from `accounts.toml`; normally set in `russet.local.toml`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bundle-id-policy": {
+          "$ref": "#/$defs/BundleIdPolicy",
+          "default": "auto"
+        },
+        "merge": {
+          "$ref": "#/$defs/EntitlementMerge",
+          "default": "least"
+        },
+        "mode": {
+          "$ref": "#/$defs/SigningMode",
+          "default": "automatic"
+        },
+        "targets": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SigningTarget"
+          },
+          "default": {},
+          "description": "Per-bundle settings, keyed by the bundle's path inside the app (for example `PlugIns/HelloWidget.appex`).",
+          "type": "object"
+        },
+        "team": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SigningTarget": {
+      "additionalProperties": false,
+      "description": "`[signing.targets.\"<path>\"]`.",
+      "properties": {
+        "entitlements": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile": {
+          "description": "Manual mode only: the path of a `.mobileprovision`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Stack": {
+      "description": "`[project] stack`.",
+      "enum": [
+        "swiftpm",
+        "flutter",
+        "xcode",
+        "react-native",
+        "maui"
+      ],
+      "type": "string"
+    },
+    "SwiftpmBuild": {
+      "additionalProperties": false,
+      "description": "`[build.swiftpm]`.",
+      "properties": {
+        "cc-flags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ld-flags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "package": {
+          "default": ".",
+          "type": "string"
+        },
+        "product": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "swiftc-flags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SymbolsMode": {
+      "description": "`[debug] symbols`.",
+      "enum": [
+        "auto",
+        "none",
+        "core",
+        "full"
+      ],
+      "type": "string"
+    },
+    "ToolchainSection": {
+      "additionalProperties": false,
+      "description": "`[toolchain]`: overrides of the pin manifest (ARCHITECTURE §16.1).",
+      "properties": {
+        "linker": {
+          "description": "`auto`, `darwin-tools@1.1.0`, `llvm@>=23.1.3` or a path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "swift": {
+          "description": "For example `6.4.0`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "xcode-sdk": {
+          "description": "Needs an imported SDK of this Xcode version, for example `27.0`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "When": {
+      "description": "`never | release | always` (`[build] dsym`, `strip`).",
+      "enum": [
+        "never",
+        "release",
+        "always"
+      ],
+      "type": "string"
+    },
+    "XcodeBuild": {
+      "additionalProperties": false,
+      "description": "`[build.xcode]` (Wave 6).",
+      "properties": {
+        "cocoapods": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "configuration": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Russet profile → Xcode configuration, for example `{ debug = \"Debug\", release = \"Release\" }`.",
+          "type": "object"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scheme": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://russet.dev/schemas/config/project.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A Russet project file (ARCHITECTURE §14.2).",
+  "properties": {
+    "agents": {
+      "$ref": "#/$defs/AgentsSection",
+      "default": {
+        "deny-tools": []
+      },
+      "description": "May only narrow the user's `mcp-policy.toml` (ARCHITECTURE §7.5, §14.1)."
+    },
+    "app": {
+      "$ref": "#/$defs/AppSection",
+      "default": {
+        "devices": [
+          "iphone"
+        ],
+        "extensions": [],
+        "orientations": {},
+        "resources": []
+      }
+    },
+    "build": {
+      "$ref": "#/$defs/BuildSection",
+      "default": {
+        "backend": "swiftbuild",
+        "default-profile": "debug",
+        "dsym": "release",
+        "jobs": "auto",
+        "launch-screen-fallback": "error",
+        "launch-storyboard": "auto",
+        "lint": "auto",
+        "metadata": "sdk",
+        "overrides": {},
+        "profiles": {},
+        "sdk": "auto",
+        "strip": "release",
+        "swiftpm": {
+          "cc-flags": [],
+          "ld-flags": [],
+          "package": ".",
+          "swiftc-flags": []
+        }
+      }
+    },
+    "debug": {
+      "$ref": "#/$defs/DebugSection",
+      "default": {
+        "attach-mode": "broker",
+        "init-commands": [],
+        "jit": "auto",
+        "lldb": "auto",
+        "swift-expressions": "auto",
+        "symbols": "auto"
+      }
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectSection",
+      "default": {}
+    },
+    "run": {
+      "$ref": "#/$defs/RunSection",
+      "default": {
+        "args": [],
+        "console": true,
+        "device": "auto",
+        "env": {},
+        "install": "if-changed",
+        "launch": "auto"
+      }
+    },
+    "schema": {
+      "description": "The file-format version; only `1` exists.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "ship": {
+      "$ref": "#/$defs/ShipSection",
+      "default": {
+        "build-number": "auto",
+        "ci": {
+          "provider": "github",
+          "signing": "russet"
+        },
+        "mode": "linux-native",
+        "testflight-groups": [
+          "Internal"
+        ],
+        "uses-non-exempt-encryption": false
+      }
+    },
+    "signing": {
+      "$ref": "#/$defs/SigningSection",
+      "default": {
+        "bundle-id-policy": "auto",
+        "merge": "least",
+        "mode": "automatic",
+        "targets": {}
+      }
+    },
+    "toolchain": {
+      "$ref": "#/$defs/ToolchainSection",
+      "default": {}
+    }
+  },
+  "title": "russet.toml",
+  "type": "object"
+}

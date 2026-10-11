@@ -1,0 +1,164 @@
+{
+  "$defs": {
+    "AccountEntry": {
+      "additionalProperties": false,
+      "description": "One `[[account]]`.",
+      "properties": {
+        "anisette": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Anisette"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "apple-id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "`asc:<KEYID>` or `appleid:<DSID>`.",
+          "type": "string"
+        },
+        "imported-from": {
+          "description": "Optional provenance, for example `xtool`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "issuer-id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key-id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/AccountKind"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secret": {
+          "description": "A reference into the secret store: `secret:<kind>/<name>`.",
+          "type": "string"
+        },
+        "team-id": {
+          "description": "Discovered from a certificate OU, else a bundle-ID seed id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "team-tier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TeamTier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "secret"
+      ],
+      "type": "object"
+    },
+    "AccountKind": {
+      "description": "`[[account]] kind`.",
+      "enum": [
+        "asc-team-key",
+        "asc-individual-key",
+        "apple-id"
+      ],
+      "type": "string"
+    },
+    "Anisette": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AnisetteKind"
+        },
+        {
+          "$ref": "#/$defs/RemoteAnisette"
+        }
+      ],
+      "description": "`[[account]] anisette`: `\"local\"` or `{ remote = \"https://…\" }`."
+    },
+    "AnisetteKind": {
+      "description": "The named anisette providers.",
+      "enum": [
+        "local"
+      ],
+      "type": "string"
+    },
+    "RemoteAnisette": {
+      "additionalProperties": false,
+      "description": "`{ remote = \"https://…\" }`.",
+      "properties": {
+        "remote": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "remote"
+      ],
+      "type": "object"
+    },
+    "TeamTier": {
+      "description": "`[[account]] team-tier`.",
+      "enum": [
+        "free",
+        "paid"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://russet.dev/schemas/config/accounts.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Russet's accounts (ARCHITECTURE §14.4); no secrets.",
+  "properties": {
+    "account": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/AccountEntry"
+      },
+      "type": "array"
+    },
+    "default": {
+      "description": "The default account id, for example `asc:<KEYID>`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema": {
+      "description": "The file-format version; only `1` exists.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "accounts.toml",
+  "type": "object"
+}

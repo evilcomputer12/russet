@@ -1,0 +1,114 @@
+{
+  "$defs": {
+    "ApprovalMode": {
+      "description": "`[tools.<name>] approval`: `session` (once per MCP session) or `always` (every call). Tier 3 is always `always`.",
+      "enum": [
+        "session",
+        "always"
+      ],
+      "type": "string"
+    },
+    "Duration": {
+      "description": "A duration such as \"30m\", \"2s\", \"1h30m\", \"500ms\" or \"0\".",
+      "pattern": "^(0|([0-9]+(ms|s|m|h|d))+)$",
+      "type": "string"
+    },
+    "McpClientPolicy": {
+      "additionalProperties": false,
+      "description": "`[clients.<id>]`.",
+      "properties": {
+        "reveal-udid": {
+          "default": false,
+          "description": "Whether the client may see full UDIDs (ARCHITECTURE §12.2).",
+          "type": "boolean"
+        },
+        "tier-max": {
+          "format": "uint8",
+          "maximum": 3,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "McpToolPolicy": {
+      "additionalProperties": false,
+      "description": "`[tools.<name>]`.",
+      "properties": {
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rate-limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RateLimit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RateLimit": {
+      "description": "\"<count>/<duration>\", for example \"1/10m\".",
+      "pattern": "^[0-9]+/(0|([0-9]+(ms|s|m|h|d))+)$",
+      "type": "string"
+    }
+  },
+  "$id": "https://russet.dev/schemas/config/mcp-policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "MCP tiers and approvals per client (ARCHITECTURE §14.6).",
+  "properties": {
+    "clients": {
+      "additionalProperties": {
+        "$ref": "#/$defs/McpClientPolicy"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "default-tier-max": {
+      "default": 1,
+      "description": "The tier of clients without their own entry (default 1; local models 0 [D 60]).",
+      "format": "uint8",
+      "maximum": 3,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema": {
+      "description": "The file-format version; only `1` exists.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "session-approval-ttl": {
+      "$ref": "#/$defs/Duration",
+      "default": "30m",
+      "description": "HTTP clients only; at most 8 h (ARCHITECTURE §11.3) [D 67]."
+    },
+    "tools": {
+      "additionalProperties": {
+        "$ref": "#/$defs/McpToolPolicy"
+      },
+      "default": {},
+      "type": "object"
+    }
+  },
+  "title": "mcp-policy.toml",
+  "type": "object"
+}

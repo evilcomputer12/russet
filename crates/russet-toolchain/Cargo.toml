@@ -15,13 +15,27 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
+flate2.workspace = true
+fs4.workspace = true
 goblin.workspace = true
 minisign-verify.workspace = true
 pgp.workspace = true
+plist.workspace = true
 reqwest = { workspace = true, features = ["json", "stream"] }
 russet-config.workspace = true
 russet-core.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 tar.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "process", "rt", "sync", "time", "macros"] }
 tokio-util.workspace = true
+toml.workspace = true
 zstd.workspace = true
+
+[dev-dependencies]
+minisign = "0.10.0"
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net"] }
