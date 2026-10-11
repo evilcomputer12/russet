@@ -241,6 +241,124 @@ export type ClientKind = "cli" | "ide" | "mcp" | "flutter-device" | "test";
 export type ClientRef = { kind: ClientKind, name: string, };
 
 /**
+ * Params of the `config.changed` notification (to every connection).
+ */
+export type ConfigChangedParams = { scope: ConfigWriteScope, path: string, };
+
+/**
+ * A candidate file of the requested scope (`russet config path`).
+ */
+export type ConfigFileInfo = { scope: ConfigWriteScope, path: string, exists: boolean, };
+
+/**
+ * The configuration files with a schema.
+ */
+export type ConfigFileKind = "project" | "global" | "accounts" | "mcp-policy" | "provision-policy";
+
+/**
+ * Params of `config.get`.
+ */
+export type ConfigGetParams = { scope: ConfigReadScope, 
+/**
+ * The project root (absolute); needed for the project and local scopes and for project keys.
+ */
+project?: string, 
+/**
+ * A dotted key in TOML syntax (`daemon.idle-timeout`); omitted = the whole view.
+ */
+key?: string, };
+
+/**
+ * Result of `config.get`.
+ */
+export type ConfigGetResult = { 
+/**
+ * The value; omitted when the requested file does not set the key.
+ */
+value?: JsonValue, 
+/**
+ * Where the value came from, highest precedence first.
+ */
+sources: Array<ConfigSource>, 
+/**
+ * The candidate files of the scope and whether they exist.
+ */
+files: Array<ConfigFileInfo>, };
+
+/**
+ * The view `config.get` reads.
+ */
+export type ConfigReadScope = "effective" | "global" | "project" | "local";
+
+/**
+ * Params of `config.schema`.
+ */
+export type ConfigSchemaParams = { file: ConfigFileKind, };
+
+/**
+ * Result of `config.schema`: the file's JSON Schema (draft 2020-12).
+ */
+export type ConfigSchemaResult = { schema: JsonValue, };
+
+/**
+ * Params of `config.set`.
+ */
+export type ConfigSetParams = { scope: ConfigWriteScope, 
+/**
+ * The project root (absolute); needed for the project and local scopes.
+ */
+project?: string, 
+/**
+ * A dotted key in TOML syntax.
+ */
+key: string, 
+/**
+ * The new value; strings are converted to the key's type (`"2"` → `2`). Omitted or `null` unsets.
+ */
+value?: JsonValue, };
+
+/**
+ * Result of `config.set` and `config.unset`.
+ */
+export type ConfigSetResult = { 
+/**
+ * The file that was (or would have been) written.
+ */
+path: string, 
+/**
+ * Whether the file changed.
+ */
+changed: boolean, };
+
+/**
+ * One source of a value.
+ */
+export type ConfigSource = { scope: ConfigSourceScope, 
+/**
+ * The file, for file scopes.
+ */
+path?: string, 
+/**
+ * The environment variable, for `env`.
+ */
+var?: string, };
+
+/**
+ * Where a value came from (ARCHITECTURE §14.1, highest precedence first).
+ */
+export type ConfigSourceScope = "env" | "local" | "project" | "global" | "default";
+
+/**
+ * Params of `config.unset`.
+ */
+export type ConfigUnsetParams = { scope: ConfigWriteScope, project?: string, key: string, };
+
+/**
+ * The file `config.set`/`config.unset` edit.
+ */
+export type ConfigWriteScope = "global" | "project" | "local";
+
+/**
  * A client connection: `{kind, name, connectionId}` (approvals' `requestedBy` and `grantedBy`, owners of jobs
  * and leases).
  */
@@ -391,6 +509,75 @@ shuttingDown: boolean,
  * How long the daemon still gives its jobs, at most (`0` when forced).
  */
 graceMs?: number, };
+
+/**
+ * The Russet build that ran the checks.
+ */
+export type DoctorBuild = { version: string, buildId: string, };
+
+/**
+ * Report grouping.
+ */
+export type DoctorCategory = "host" | "daemon" | "config" | "secrets" | "usbmux" | "device" | "toolchain" | "account" | "network" | "platform";
+
+/**
+ * One check's result.
+ */
+export type DoctorCheck = { 
+/**
+ * Stable id, for example `toolchain.linker`.
+ */
+id: string, category: DoctorCategory, title: string, status: DoctorStatus, message: string, detail?: string, hint?: string, fix?: DoctorFix, durationMs: number, };
+
+/**
+ * How a failed or warning check can be fixed.
+ */
+export type DoctorFix = { "kind": "auto", applied: boolean, } | { "kind": "command", command: string, } | { "kind": "manual" };
+
+/**
+ * The host the checks ran on.
+ */
+export type DoctorHost = { os: string, distro?: string, arch: string, wsl: boolean, };
+
+/**
+ * Result of `doctor.run` (core §11).
+ */
+export type DoctorReport = { russet: DoctorBuild, host: DoctorHost, checks: Array<DoctorCheck>, summary: DoctorSummary, };
+
+/**
+ * Params of `doctor.run`.
+ */
+export type DoctorRunParams = { 
+/**
+ * Run only these check ids (`toolchain.linker`), or id prefixes ending in `.` (`toolchain.`).
+ */
+checks?: Array<string>, categories?: Array<DoctorCategory>, 
+/**
+ * The project root, for the project checks.
+ */
+project?: string, 
+/**
+ * The device, for the device checks.
+ */
+udid?: string, 
+/**
+ * Also run the checks that need the network.
+ */
+online?: boolean, 
+/**
+ * Apply the automatic fixes (class `system`).
+ */
+fix?: boolean, };
+
+/**
+ * A check's outcome.
+ */
+export type DoctorStatus = "pass" | "warn" | "fail" | "skip";
+
+/**
+ * Counts per status.
+ */
+export type DoctorSummary = { pass: number, warn: number, fail: number, skip: number, };
 
 /**
  * JSON-RPC `error.data` (ARCHITECTURE §13.1), camelCase on the wire; optional fields are omitted.
@@ -685,6 +872,12 @@ export type LeaseReleaseResult = Record<symbol, never>;
 export type LogStream = "stdout" | "stderr" | "info" | "warn";
 
 /**
+ * A component Russet downloads and installs itself (`toolchain.install`). Wave 1: `python-shared` and
+ * `darwin-tools`.
+ */
+export type ManagedComponent = "python-shared" | "darwin-tools" | "swift" | "llvm" | "flutter" | "xtool";
+
+/**
  * Message levels.
  */
 export type MessageLevel = "info" | "warning" | "error";
@@ -693,6 +886,15 @@ export type MessageLevel = "info" | "warning" | "error";
  * Permission classes (ARCHITECTURE §7.5). Wire values are kebab-case.
  */
 export type Permission = "none" | "read" | "device" | "build" | "project" | "account" | "account-destructive" | "publish" | "secrets" | "system";
+
+/**
+ * The pin manifest in use.
+ */
+export type PinsInfo = { id: string, 
+/**
+ * `embedded`, or the path of an updated manifest.
+ */
+source: string, };
 
 /**
  * `begin`, `report` or `end`.
@@ -732,6 +934,104 @@ export type ProtocolVersion = { major: number, minor: number, };
  * A JSON-RPC request id as `$/cancelRequest` carries it.
  */
 export type RequestIdValue = number | string;
+
+/**
+ * A Darwin SDK known to the registry (Russet imports and xtool bundles).
+ */
+export type SdkInfo = { 
+/**
+ * For example `xcode-27.0-27A266a`.
+ */
+id: string, xcodeVersion: string, xcodeBuild: string, iosSdk: string, swiftSdkName: string, bundle: string, darwinTools?: string, 
+/**
+ * The Swift `major.minor` the SDK needs (empty when the pins have no row for it).
+ */
+compatibleSwift: string, };
+
+/**
+ * Params of `sdk.list`.
+ */
+export type SdkListParams = Record<symbol, never>;
+
+/**
+ * Result of `sdk.list`: Russet's imports first, then xtool bundles read in place.
+ */
+export type SdkListResult = { sdks: Array<SdkInfo>, };
+
+/**
+ * The secret-store backend (`RUSSET_SECRETS_BACKEND`).
+ */
+export type SecretBackend = "keyring" | "passphrase" | "env" | "memory";
+
+/**
+ * What a secret is.
+ */
+export type SecretKind = "asc-key" | "signing-key" | "apple-id-session" | "apple-id-password" | "anisette-state" | "github-token" | "mcp-http-token" | "tcp-token";
+
+/**
+ * Metadata of one secret; never its value.
+ */
+export type SecretMeta = { 
+/**
+ * `<kind>/<name>`, for example `asc-key/2X9R4HXF34`.
+ */
+id: string, kind: SecretKind, name: string, label: string, backend: SecretBackend, 
+/**
+ * RFC 3339 UTC.
+ */
+createdAt: string, sizeBytes: number, };
+
+/**
+ * Params of `secrets.delete`.
+ */
+export type SecretsDeleteParams = { 
+/**
+ * `<kind>/<name>`.
+ */
+id: string, };
+
+/**
+ * Result of `secrets.delete`.
+ */
+export type SecretsDeleteResult = { deleted: boolean, };
+
+/**
+ * Params of `secrets.list`.
+ */
+export type SecretsListParams = { kind?: SecretKind, };
+
+/**
+ * Result of `secrets.list`.
+ */
+export type SecretsListResult = { items: Array<SecretMeta>, };
+
+/**
+ * Params of `secrets.set`.
+ */
+export type SecretsSetParams = { 
+/**
+ * `<kind>/<name>`.
+ */
+id: string, label?: string, 
+/**
+ * The absolute path of a local file whose content becomes the secret; the value never travels over IPC.
+ */
+fromFile: string, };
+
+/**
+ * Params of `secrets.status`.
+ */
+export type SecretsStatusParams = Record<symbol, never>;
+
+/**
+ * Result of `secrets.status`.
+ */
+export type SecretsStatusResult = { backend: SecretBackend, available: boolean, locked: boolean, reason?: string, 
+/**
+ * The keyring entry holding the master key (`master-key` or `master-key-<sha256(RUSSET_HOME)[..8]>`), so a
+ * removed worktree's entry can be deleted (PLAN §14) [D 83].
+ */
+keyringEntry?: string, };
 
 /**
  * What the daemon serves (`initialize.result.capabilities`).
@@ -823,6 +1123,88 @@ export type SubscriptionCancelResult = Record<symbol, never>;
  * A subscription (`sub_…`, ARCHITECTURE §6.4).
  */
 export type SubscriptionId = string;
+
+/**
+ * A toolchain component.
+ */
+export type ToolComponent = "swift" | "darwin-sdk" | "linker" | "lldb" | "lldb-dap" | "libpython" | "xtool" | "flutter" | "gen-snapshot-ios" | "llvm";
+
+/**
+ * A resolved tool.
+ */
+export type ToolInfo = { component: ToolComponent, version: string, path: string, provenance: ToolProvenance, 
+/**
+ * Environment every launcher must apply (ARCHITECTURE §16.2).
+ */
+env: { [key in string]: string }, ok: boolean, problems: Array<string>, };
+
+/**
+ * Where a resolved tool came from.
+ */
+export type ToolProvenance = { "kind": "managed", pin: string, } | { "kind": "system" } | { "kind": "uv" } | { "kind": "xtool-bundle", bundle: string, } | { "kind": "user" } | { "kind": "project-pin" };
+
+/**
+ * Params of the `toolchain.changed` notification (to every connection).
+ */
+export type ToolchainChangedParams = { components: Array<ToolComponent>, };
+
+/**
+ * Params of `toolchain.gc`.
+ */
+export type ToolchainGcParams = { dryRun?: boolean, };
+
+/**
+ * Result of `toolchain.gc`.
+ */
+export type ToolchainGcResult = { freedBytes: number, removed: Array<string>, };
+
+/**
+ * Params of `toolchain.install`.
+ */
+export type ToolchainInstallParams = { component: ManagedComponent, 
+/**
+ * The pinned version; omitted = the pin manifest's version.
+ */
+version?: string, };
+
+/**
+ * Params of `toolchain.list`.
+ */
+export type ToolchainListParams = { 
+/**
+ * The project root, for its `[toolchain]` and `[debug]` pins: candidates they exclude are listed with
+ * `ok: false` and the reason in `problems`, and a tool the project names by path comes first.
+ */
+project?: string, 
+/**
+ * Re-run every probe instead of using the probe cache.
+ */
+refresh?: boolean, };
+
+/**
+ * Result of `toolchain.list`: every candidate of every component, in resolution order; the first `ok` candidate
+ * of a component is the one `toolchain.resolve` picks (for the given project).
+ */
+export type ToolchainListResult = { tools: Array<ToolInfo>, sdks: Array<SdkInfo>, pins: PinsInfo, };
+
+/**
+ * Params of `toolchain.resolve`.
+ */
+export type ToolchainResolveParams = { component: ToolComponent, 
+/**
+ * The project root, for `[toolchain]` and `[debug] lldb`.
+ */
+project?: string, };
+
+/**
+ * Params of `toolchain.uninstall`.
+ */
+export type ToolchainUninstallParams = { component: ManagedComponent, version: string, };
+
+/**
+ * Result of `toolchain.uninstall`.
+ */
+export type ToolchainUninstallResult = { freedBytes: number, };
 
 /**
  * The daemon's own log levels (tracing's, not Apple's `LogLevel`).
@@ -930,26 +1312,26 @@ export interface Methods {
   "approval.grant": { params: ApprovalGrantParams; result: Approval };
   "approval.deny": { params: ApprovalDenyParams; result: Approval };
   "audit.tail": { params: AuditTailParams; result: AuditTailResult };
-  "config.get": { params: Unspecified; result: Unspecified };
-  "config.set": { params: Unspecified; result: Unspecified };
-  "config.unset": { params: Unspecified; result: Unspecified };
-  "config.schema": { params: Unspecified; result: Unspecified };
-  "secrets.status": { params: Unspecified; result: Unspecified };
-  "secrets.list": { params: Unspecified; result: Unspecified };
-  "secrets.set": { params: Unspecified; result: Unspecified };
-  "secrets.delete": { params: Unspecified; result: Unspecified };
-  "toolchain.list": { params: Unspecified; result: Unspecified };
-  "toolchain.resolve": { params: Unspecified; result: Unspecified };
-  "toolchain.install": { params: Unspecified; result: Unspecified };
-  "toolchain.uninstall": { params: Unspecified; result: Unspecified };
-  "toolchain.gc": { params: Unspecified; result: Unspecified };
+  "config.get": { params: ConfigGetParams; result: ConfigGetResult };
+  "config.set": { params: ConfigSetParams; result: ConfigSetResult };
+  "config.unset": { params: ConfigUnsetParams; result: ConfigSetResult };
+  "config.schema": { params: ConfigSchemaParams; result: ConfigSchemaResult };
+  "secrets.status": { params: SecretsStatusParams; result: SecretsStatusResult };
+  "secrets.list": { params: SecretsListParams; result: SecretsListResult };
+  "secrets.set": { params: SecretsSetParams; result: SecretMeta };
+  "secrets.delete": { params: SecretsDeleteParams; result: SecretsDeleteResult };
+  "toolchain.list": { params: ToolchainListParams; result: ToolchainListResult };
+  "toolchain.resolve": { params: ToolchainResolveParams; result: ToolInfo };
+  "toolchain.install": { params: ToolchainInstallParams; result: ToolInfo };
+  "toolchain.uninstall": { params: ToolchainUninstallParams; result: ToolchainUninstallResult };
+  "toolchain.gc": { params: ToolchainGcParams; result: ToolchainGcResult };
   "toolchain.pins.update": { params: Unspecified; result: Unspecified };
-  "sdk.list": { params: Unspecified; result: Unspecified };
+  "sdk.list": { params: SdkListParams; result: SdkListResult };
   "sdk.import": { params: Unspecified; result: Unspecified };
   "sdk.remove": { params: Unspecified; result: Unspecified };
   "sdk.deviceSupport.check": { params: Unspecified; result: Unspecified };
   "sdk.deviceSupport.fetch": { params: Unspecified; result: Unspecified };
-  "doctor.run": { params: Unspecified; result: Unspecified };
+  "doctor.run": { params: DoctorRunParams; result: DoctorReport };
   "device.list": { params: Unspecified; result: Unspecified };
   "device.watch": { params: Unspecified; result: Unspecified };
   "device.info": { params: Unspecified; result: Unspecified };
@@ -1116,8 +1498,8 @@ export interface Notifications {
   "approval.requested": ApprovalRequestedParams;
   "approval.resolved": ApprovalResolvedParams;
   "ui.showMessage": UiShowMessageParams;
-  "config.changed": Unspecified;
-  "toolchain.changed": Unspecified;
+  "config.changed": ConfigChangedParams;
+  "toolchain.changed": ToolchainChangedParams;
   "device.changed": Unspecified;
   "app.output": Unspecified;
   "app.exited": Unspecified;

@@ -326,9 +326,8 @@ impl Services {
         };
         install(&s.config, &env, provided.take(), |env| Ok(Arc::new(russet_config::ConfigService::load(&env.dirs)?)));
         install(&s.secrets, &env, provided.take(), |env| russet_secrets::open_default(&env.dirs, &secrets_config()));
-        install(&s.toolchains, &env, provided.take(), |_| {
-            Err(Error::not_implemented("russet-toolchain has no constructor yet (W3, CORE-10)")
-                .with_hint("The toolchain service lands with W3; see docs/PLAN.md §4.3."))
+        install(&s.toolchains, &env, provided.take(), |env| {
+            Ok(Arc::new(russet_toolchain::Toolchains::load(&env.dirs)?))
         });
         install(&s.debug, &env, provided.take(), |env| {
             let services: Arc<dyn russet_debug::DeviceServices> = Arc::new(env.devices.clone());
@@ -533,9 +532,9 @@ mod tests {
         let devices = DeviceSlot::new(DeviceBackend::None, LiveState::NotLive, "/nope".into());
         let mut r = Router::<DaemonCtx>::new();
         provide::<russet_toolchain::Toolchains>(&mut r, |env| {
-            // A factory reaches the other slots through its env (here: a config that cannot start).
-            let e = env.config().expect_err("ConfigService::load is an F0 stub");
-            Err(e.with_hint("provided"))
+            // A factory reaches the other slots through its env (the config under a missing home still loads).
+            let _config = env.config();
+            Err(Error::new(codes::core::NOT_IMPLEMENTED, "toolchains are not wired in this test").with_hint("provided"))
         });
         let factories = r.extensions_mut().remove::<ServiceFactories>().expect("registered");
         let services = Services::wire(&dirs, &devices, factories);

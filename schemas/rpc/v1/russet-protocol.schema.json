@@ -624,6 +624,292 @@
       ],
       "type": "object"
     },
+    "ConfigChangedParams": {
+      "description": "Params of the `config.changed` notification (to every connection).",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigWriteScope"
+        }
+      },
+      "required": [
+        "scope",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ConfigFileInfo": {
+      "description": "A candidate file of the requested scope (`russet config path`).",
+      "properties": {
+        "exists": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigWriteScope"
+        }
+      },
+      "required": [
+        "scope",
+        "path",
+        "exists"
+      ],
+      "type": "object"
+    },
+    "ConfigFileKind": {
+      "description": "The configuration files with a schema.",
+      "oneOf": [
+        {
+          "const": "project",
+          "description": "`russet.toml` and `russet.local.toml`.",
+          "type": "string"
+        },
+        {
+          "const": "global",
+          "description": "`config.toml`.",
+          "type": "string"
+        },
+        {
+          "const": "accounts",
+          "description": "`accounts.toml`.",
+          "type": "string"
+        },
+        {
+          "const": "mcp-policy",
+          "description": "`mcp-policy.toml`.",
+          "type": "string"
+        },
+        {
+          "const": "provision-policy",
+          "description": "`provision-policy.toml`.",
+          "type": "string"
+        }
+      ]
+    },
+    "ConfigGetParams": {
+      "description": "Params of `config.get`.",
+      "properties": {
+        "key": {
+          "description": "A dotted key in TOML syntax (`daemon.idle-timeout`); omitted = the whole view.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "description": "The project root (absolute); needed for the project and local scopes and for project keys.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigReadScope",
+          "default": "effective"
+        }
+      },
+      "type": "object"
+    },
+    "ConfigGetResult": {
+      "description": "Result of `config.get`.",
+      "properties": {
+        "files": {
+          "default": [],
+          "description": "The candidate files of the scope and whether they exist.",
+          "items": {
+            "$ref": "#/$defs/ConfigFileInfo"
+          },
+          "type": "array"
+        },
+        "sources": {
+          "default": [],
+          "description": "Where the value came from, highest precedence first.",
+          "items": {
+            "$ref": "#/$defs/ConfigSource"
+          },
+          "type": "array"
+        },
+        "value": {
+          "description": "The value; omitted when the requested file does not set the key."
+        }
+      },
+      "type": "object"
+    },
+    "ConfigReadScope": {
+      "description": "The view `config.get` reads.",
+      "oneOf": [
+        {
+          "const": "effective",
+          "description": "The precedence of ARCHITECTURE §14.1, built-in defaults filled in.",
+          "type": "string"
+        },
+        {
+          "const": "global",
+          "description": "`config.toml` as written.",
+          "type": "string"
+        },
+        {
+          "const": "project",
+          "description": "`russet.toml` as written.",
+          "type": "string"
+        },
+        {
+          "const": "local",
+          "description": "`russet.local.toml` as written.",
+          "type": "string"
+        }
+      ]
+    },
+    "ConfigSchemaParams": {
+      "description": "Params of `config.schema`.",
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/ConfigFileKind"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "ConfigSchemaResult": {
+      "description": "Result of `config.schema`: the file's JSON Schema (draft 2020-12).",
+      "properties": {
+        "schema": true
+      },
+      "required": [
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ConfigSetParams": {
+      "description": "Params of `config.set`.",
+      "properties": {
+        "key": {
+          "description": "A dotted key in TOML syntax.",
+          "type": "string"
+        },
+        "project": {
+          "description": "The project root (absolute); needed for the project and local scopes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigWriteScope"
+        },
+        "value": {
+          "description": "The new value; strings are converted to the key's type (`\"2\"` → `2`). Omitted or `null` unsets."
+        }
+      },
+      "required": [
+        "scope",
+        "key"
+      ],
+      "type": "object"
+    },
+    "ConfigSetResult": {
+      "description": "Result of `config.set` and `config.unset`.",
+      "properties": {
+        "changed": {
+          "description": "Whether the file changed.",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "The file that was (or would have been) written.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "changed"
+      ],
+      "type": "object"
+    },
+    "ConfigSource": {
+      "description": "One source of a value.",
+      "properties": {
+        "path": {
+          "description": "The file, for file scopes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigSourceScope"
+        },
+        "var": {
+          "description": "The environment variable, for `env`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
+    "ConfigSourceScope": {
+      "description": "Where a value came from (ARCHITECTURE §14.1, highest precedence first).",
+      "enum": [
+        "env",
+        "local",
+        "project",
+        "global",
+        "default"
+      ],
+      "type": "string"
+    },
+    "ConfigUnsetParams": {
+      "description": "Params of `config.unset`.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigWriteScope"
+        }
+      },
+      "required": [
+        "scope",
+        "key"
+      ],
+      "type": "object"
+    },
+    "ConfigWriteScope": {
+      "description": "The file `config.set`/`config.unset` edit.",
+      "oneOf": [
+        {
+          "const": "global",
+          "description": "`config.toml` (class `system`).",
+          "type": "string"
+        },
+        {
+          "const": "project",
+          "description": "`russet.toml` (class `project`).",
+          "type": "string"
+        },
+        {
+          "const": "local",
+          "description": "`russet.local.toml` (class `project`).",
+          "type": "string"
+        }
+      ]
+    },
     "ConnectionRef": {
       "description": "A client connection: `{kind, name, connectionId}` (approvals' `requestedBy` and `grantedBy`, owners of jobs\nand leases).",
       "properties": {
@@ -958,6 +1244,295 @@
       },
       "required": [
         "shuttingDown"
+      ],
+      "type": "object"
+    },
+    "DoctorBuild": {
+      "description": "The Russet build that ran the checks.",
+      "properties": {
+        "buildId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "buildId"
+      ],
+      "type": "object"
+    },
+    "DoctorCategory": {
+      "description": "Report grouping.",
+      "enum": [
+        "host",
+        "daemon",
+        "config",
+        "secrets",
+        "usbmux",
+        "device",
+        "toolchain",
+        "account",
+        "network",
+        "platform"
+      ],
+      "type": "string"
+    },
+    "DoctorCheck": {
+      "description": "One check's result.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/DoctorCategory"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DoctorFix"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable id, for example `toolchain.linker`.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/DoctorStatus"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "title",
+        "status",
+        "message",
+        "durationMs"
+      ],
+      "type": "object"
+    },
+    "DoctorFix": {
+      "description": "How a failed or warning check can be fixed.",
+      "oneOf": [
+        {
+          "description": "`doctor.run {fix: true}` can fix it without root; `applied` says whether this run did.",
+          "properties": {
+            "applied": {
+              "default": false,
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "auto",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A command for the user to run (for example one that needs root).",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "command"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The user has to act; the hint says how.",
+          "properties": {
+            "kind": {
+              "const": "manual",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DoctorHost": {
+      "description": "The host the checks ran on.",
+      "properties": {
+        "arch": {
+          "type": "string"
+        },
+        "distro": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "os": {
+          "type": "string"
+        },
+        "wsl": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "os",
+        "arch",
+        "wsl"
+      ],
+      "type": "object"
+    },
+    "DoctorReport": {
+      "description": "Result of `doctor.run` (core §11).",
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/DoctorCheck"
+          },
+          "type": "array"
+        },
+        "host": {
+          "$ref": "#/$defs/DoctorHost"
+        },
+        "russet": {
+          "$ref": "#/$defs/DoctorBuild"
+        },
+        "summary": {
+          "$ref": "#/$defs/DoctorSummary"
+        }
+      },
+      "required": [
+        "russet",
+        "host",
+        "checks",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "DoctorRunParams": {
+      "description": "Params of `doctor.run`.",
+      "properties": {
+        "categories": {
+          "items": {
+            "$ref": "#/$defs/DoctorCategory"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "checks": {
+          "description": "Run only these check ids (`toolchain.linker`), or id prefixes ending in `.` (`toolchain.`).",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "fix": {
+          "description": "Apply the automatic fixes (class `system`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "online": {
+          "description": "Also run the checks that need the network.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "project": {
+          "description": "The project root, for the project checks.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "description": "The device, for the device checks.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DoctorStatus": {
+      "description": "A check's outcome.",
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "skip"
+      ],
+      "type": "string"
+    },
+    "DoctorSummary": {
+      "description": "Counts per status.",
+      "properties": {
+        "fail": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pass": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "skip": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warn": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pass",
+        "warn",
+        "fail",
+        "skip"
       ],
       "type": "object"
     },
@@ -2058,6 +2633,30 @@
       ],
       "type": "string"
     },
+    "ManagedComponent": {
+      "description": "A component Russet downloads and installs itself (`toolchain.install`). Wave 1: `python-shared` and\n`darwin-tools`.",
+      "oneOf": [
+        {
+          "enum": [
+            "swift",
+            "llvm",
+            "flutter",
+            "xtool"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "python-shared",
+          "description": "python-build-standalone, the libpython of Swift's LLDB.",
+          "type": "string"
+        },
+        {
+          "const": "darwin-tools",
+          "description": "The darwin-tools linker (`ld64.lld`, LLD 21.1.6 patched for `arm64e.x1` TBDs).",
+          "type": "string"
+        }
+      ]
+    },
     "MessageLevel": {
       "description": "Message levels.",
       "enum": [
@@ -2082,6 +2681,23 @@
         "system"
       ],
       "type": "string"
+    },
+    "PinsInfo": {
+      "description": "The pin manifest in use.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "description": "`embedded`, or the path of an updated manifest.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source"
+      ],
+      "type": "object"
     },
     "ProgressKind": {
       "description": "`begin`, `report` or `end`.",
@@ -2190,6 +2806,265 @@
         }
       ],
       "description": "A JSON-RPC request id as `$/cancelRequest` carries it."
+    },
+    "SdkInfo": {
+      "description": "A Darwin SDK known to the registry (Russet imports and xtool bundles).",
+      "properties": {
+        "bundle": {
+          "type": "string"
+        },
+        "compatibleSwift": {
+          "description": "The Swift `major.minor` the SDK needs (empty when the pins have no row for it).",
+          "type": "string"
+        },
+        "darwinTools": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "For example `xcode-27.0-27A266a`.",
+          "type": "string"
+        },
+        "iosSdk": {
+          "type": "string"
+        },
+        "swiftSdkName": {
+          "type": "string"
+        },
+        "xcodeBuild": {
+          "type": "string"
+        },
+        "xcodeVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "xcodeVersion",
+        "xcodeBuild",
+        "iosSdk",
+        "swiftSdkName",
+        "bundle",
+        "compatibleSwift"
+      ],
+      "type": "object"
+    },
+    "SdkListParams": {
+      "description": "Params of `sdk.list`.",
+      "type": "object"
+    },
+    "SdkListResult": {
+      "description": "Result of `sdk.list`: Russet's imports first, then xtool bundles read in place.",
+      "properties": {
+        "sdks": {
+          "items": {
+            "$ref": "#/$defs/SdkInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sdks"
+      ],
+      "type": "object"
+    },
+    "SecretBackend": {
+      "description": "The secret-store backend (`RUSSET_SECRETS_BACKEND`).",
+      "oneOf": [
+        {
+          "const": "keyring",
+          "description": "The master key in the OS keyring (Secret Service, Credential Manager).",
+          "type": "string"
+        },
+        {
+          "const": "passphrase",
+          "description": "The master key derived from `RUSSET_SECRETS_PASSPHRASE`.",
+          "type": "string"
+        },
+        {
+          "const": "env",
+          "description": "Read-only CI variables.",
+          "type": "string"
+        },
+        {
+          "const": "memory",
+          "description": "Tests.",
+          "type": "string"
+        }
+      ]
+    },
+    "SecretKind": {
+      "description": "What a secret is.",
+      "enum": [
+        "asc-key",
+        "signing-key",
+        "apple-id-session",
+        "apple-id-password",
+        "anisette-state",
+        "github-token",
+        "mcp-http-token",
+        "tcp-token"
+      ],
+      "type": "string"
+    },
+    "SecretMeta": {
+      "description": "Metadata of one secret; never its value.",
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/SecretBackend"
+        },
+        "createdAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "id": {
+          "description": "`<kind>/<name>`, for example `asc-key/2X9R4HXF34`.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SecretKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "label",
+        "backend",
+        "createdAt",
+        "sizeBytes"
+      ],
+      "type": "object"
+    },
+    "SecretsDeleteParams": {
+      "description": "Params of `secrets.delete`.",
+      "properties": {
+        "id": {
+          "description": "`<kind>/<name>`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "SecretsDeleteResult": {
+      "description": "Result of `secrets.delete`.",
+      "properties": {
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleted"
+      ],
+      "type": "object"
+    },
+    "SecretsListParams": {
+      "description": "Params of `secrets.list`.",
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SecretKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SecretsListResult": {
+      "description": "Result of `secrets.list`.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SecretMeta"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "SecretsSetParams": {
+      "description": "Params of `secrets.set`.",
+      "properties": {
+        "fromFile": {
+          "description": "The absolute path of a local file whose content becomes the secret; the value never travels over IPC.",
+          "type": "string"
+        },
+        "id": {
+          "description": "`<kind>/<name>`.",
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "fromFile"
+      ],
+      "type": "object"
+    },
+    "SecretsStatusParams": {
+      "description": "Params of `secrets.status`.",
+      "type": "object"
+    },
+    "SecretsStatusResult": {
+      "description": "Result of `secrets.status`.",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "backend": {
+          "$ref": "#/$defs/SecretBackend"
+        },
+        "keyringEntry": {
+          "description": "The keyring entry holding the master key (`master-key` or `master-key-<sha256(RUSSET_HOME)[..8]>`), so a\nremoved worktree's entry can be deleted (PLAN §14) [D 83].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend",
+        "available",
+        "locked"
+      ],
+      "type": "object"
     },
     "ServerCapabilities": {
       "description": "What the daemon serves (`initialize.result.capabilities`).",
@@ -2370,6 +3245,318 @@
     "SubscriptionId": {
       "pattern": "^sub_[0-9A-HJKMNP-TV-Z]{26}$",
       "type": "string"
+    },
+    "ToolComponent": {
+      "description": "A toolchain component.",
+      "enum": [
+        "swift",
+        "darwin-sdk",
+        "linker",
+        "lldb",
+        "lldb-dap",
+        "libpython",
+        "xtool",
+        "flutter",
+        "gen-snapshot-ios",
+        "llvm"
+      ],
+      "type": "string"
+    },
+    "ToolInfo": {
+      "description": "A resolved tool.",
+      "properties": {
+        "component": {
+          "$ref": "#/$defs/ToolComponent"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment every launcher must apply (ARCHITECTURE §16.2).",
+          "type": "object"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "problems": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/ToolProvenance"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "component",
+        "version",
+        "path",
+        "provenance",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "ToolProvenance": {
+      "description": "Where a resolved tool came from.",
+      "oneOf": [
+        {
+          "description": "Installed by Russet; `pin` is `<component>@<version>`.",
+          "properties": {
+            "kind": {
+              "const": "managed",
+              "type": "string"
+            },
+            "pin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "pin"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Found on the system (`PATH`, `ldconfig`).",
+          "properties": {
+            "kind": {
+              "const": "system",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An existing uv-managed python-build-standalone.",
+          "properties": {
+            "kind": {
+              "const": "uv",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Inside an xtool SDK bundle, read in place.",
+          "properties": {
+            "bundle": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "xtool-bundle",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "bundle"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Installed by the user elsewhere (swiftly).",
+          "properties": {
+            "kind": {
+              "const": "user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Named by the project (`[toolchain] linker = \"<path>\"`, `[debug] lldb = \"<path>\"`).",
+          "properties": {
+            "kind": {
+              "const": "project-pin",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolchainChangedParams": {
+      "description": "Params of the `toolchain.changed` notification (to every connection).",
+      "properties": {
+        "components": {
+          "items": {
+            "$ref": "#/$defs/ToolComponent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "components"
+      ],
+      "type": "object"
+    },
+    "ToolchainGcParams": {
+      "description": "Params of `toolchain.gc`.",
+      "properties": {
+        "dryRun": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ToolchainGcResult": {
+      "description": "Result of `toolchain.gc`.",
+      "properties": {
+        "freedBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "freedBytes",
+        "removed"
+      ],
+      "type": "object"
+    },
+    "ToolchainInstallParams": {
+      "description": "Params of `toolchain.install`.",
+      "properties": {
+        "component": {
+          "$ref": "#/$defs/ManagedComponent"
+        },
+        "version": {
+          "description": "The pinned version; omitted = the pin manifest's version.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "component"
+      ],
+      "type": "object"
+    },
+    "ToolchainListParams": {
+      "description": "Params of `toolchain.list`.",
+      "properties": {
+        "project": {
+          "description": "The project root, for its `[toolchain]` and `[debug]` pins: candidates they exclude are listed with\n`ok: false` and the reason in `problems`, and a tool the project names by path comes first.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refresh": {
+          "description": "Re-run every probe instead of using the probe cache.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ToolchainListResult": {
+      "description": "Result of `toolchain.list`: every candidate of every component, in resolution order; the first `ok` candidate\nof a component is the one `toolchain.resolve` picks (for the given project).",
+      "properties": {
+        "pins": {
+          "$ref": "#/$defs/PinsInfo"
+        },
+        "sdks": {
+          "items": {
+            "$ref": "#/$defs/SdkInfo"
+          },
+          "type": "array"
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools",
+        "sdks",
+        "pins"
+      ],
+      "type": "object"
+    },
+    "ToolchainResolveParams": {
+      "description": "Params of `toolchain.resolve`.",
+      "properties": {
+        "component": {
+          "$ref": "#/$defs/ToolComponent"
+        },
+        "project": {
+          "description": "The project root, for `[toolchain]` and `[debug] lldb`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "component"
+      ],
+      "type": "object"
+    },
+    "ToolchainUninstallParams": {
+      "description": "Params of `toolchain.uninstall`.",
+      "properties": {
+        "component": {
+          "$ref": "#/$defs/ManagedComponent"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "component",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ToolchainUninstallResult": {
+      "description": "Result of `toolchain.uninstall`.",
+      "properties": {
+        "freedBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "freedBytes"
+      ],
+      "type": "object"
     },
     "TraceLevel": {
       "description": "The daemon's own log levels (tracing's, not Apple's `LogLevel`).",
@@ -3134,11 +4321,11 @@
       "longRunning": false,
       "namespace": "config",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigGetParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigGetResult"
       }
     },
     "config.schema": {
@@ -3147,11 +4334,11 @@
       "longRunning": false,
       "namespace": "config",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigSchemaParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigSchemaResult"
       }
     },
     "config.set": {
@@ -3160,11 +4347,11 @@
       "longRunning": false,
       "namespace": "config",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigSetParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigSetResult"
       }
     },
     "config.unset": {
@@ -3173,11 +4360,11 @@
       "longRunning": false,
       "namespace": "config",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigUnsetParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigSetResult"
       }
     },
     "crash.fetch": {
@@ -3628,11 +4815,11 @@
       "longRunning": false,
       "namespace": "doctor",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DoctorRunParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DoctorReport"
       }
     },
     "files.list": {
@@ -4616,11 +5803,11 @@
       "longRunning": false,
       "namespace": "sdk",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SdkListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SdkListResult"
       }
     },
     "sdk.remove": {
@@ -4642,11 +5829,11 @@
       "longRunning": false,
       "namespace": "secrets",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SecretsDeleteParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SecretsDeleteResult"
       }
     },
     "secrets.list": {
@@ -4655,11 +5842,11 @@
       "longRunning": false,
       "namespace": "secrets",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SecretsListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SecretsListResult"
       }
     },
     "secrets.set": {
@@ -4668,11 +5855,11 @@
       "longRunning": false,
       "namespace": "secrets",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SecretsSetParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SecretMeta"
       }
     },
     "secrets.status": {
@@ -4681,11 +5868,11 @@
       "longRunning": false,
       "namespace": "secrets",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SecretsStatusParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SecretsStatusResult"
       }
     },
     "ship.archive": {
@@ -5175,11 +6362,11 @@
       "longRunning": false,
       "namespace": "toolchain",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainGcParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainGcResult"
       }
     },
     "toolchain.install": {
@@ -5188,11 +6375,11 @@
       "longRunning": true,
       "namespace": "toolchain",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainInstallParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolInfo"
       }
     },
     "toolchain.list": {
@@ -5201,11 +6388,11 @@
       "longRunning": false,
       "namespace": "toolchain",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainListResult"
       }
     },
     "toolchain.pins.update": {
@@ -5227,11 +6414,11 @@
       "longRunning": false,
       "namespace": "toolchain",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainResolveParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolInfo"
       }
     },
     "toolchain.uninstall": {
@@ -5240,11 +6427,11 @@
       "longRunning": false,
       "namespace": "toolchain",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainUninstallParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainUninstallResult"
       }
     }
   },
@@ -5282,7 +6469,7 @@
     "config.changed": {
       "namespace": "config",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ConfigChangedParams"
       }
     },
     "daemon.logBatch": {
@@ -5366,7 +6553,7 @@
     "toolchain.changed": {
       "namespace": "toolchain",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ToolchainChangedParams"
       }
     },
     "ui.showMessage": {

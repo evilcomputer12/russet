@@ -121,16 +121,16 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `config.get` | read |  | plain | `Unspecified` | `Unspecified` |
-| `config.set` | system (per call) |  | plain | `Unspecified` | `Unspecified` |
-| `config.unset` | system (per call) |  | plain | `Unspecified` | `Unspecified` |
-| `config.schema` | read |  | plain | `Unspecified` | `Unspecified` |
+| `config.get` | read |  | plain | `ConfigGetParams` | `ConfigGetResult` |
+| `config.set` | system (per call) |  | plain | `ConfigSetParams` | `ConfigSetResult` |
+| `config.unset` | system (per call) |  | plain | `ConfigUnsetParams` | `ConfigSetResult` |
+| `config.schema` | read |  | plain | `ConfigSchemaParams` | `ConfigSchemaResult` |
 
 Notifications:
 
 | Notification | Params |
 |---|---|
-| `config.changed` | `Unspecified` |
+| `config.changed` | `ConfigChangedParams` |
 
 ## `secrets` (module `secrets`)
 
@@ -138,10 +138,10 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `secrets.status` | read |  | plain | `Unspecified` | `Unspecified` |
-| `secrets.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `secrets.set` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `secrets.delete` | secrets |  | plain | `Unspecified` | `Unspecified` |
+| `secrets.status` | read |  | plain | `SecretsStatusParams` | `SecretsStatusResult` |
+| `secrets.list` | read |  | plain | `SecretsListParams` | `SecretsListResult` |
+| `secrets.set` | secrets |  | plain | `SecretsSetParams` | `SecretMeta` |
+| `secrets.delete` | secrets |  | plain | `SecretsDeleteParams` | `SecretsDeleteResult` |
 
 ## `toolchain` (module `toolchain`)
 
@@ -149,18 +149,18 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `toolchain.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `toolchain.resolve` | read |  | plain | `Unspecified` | `Unspecified` |
-| `toolchain.install` | system | L | plain | `Unspecified` | `Unspecified` |
-| `toolchain.uninstall` | system |  | plain | `Unspecified` | `Unspecified` |
-| `toolchain.gc` | system |  | plain | `Unspecified` | `Unspecified` |
+| `toolchain.list` | read |  | plain | `ToolchainListParams` | `ToolchainListResult` |
+| `toolchain.resolve` | read |  | plain | `ToolchainResolveParams` | `ToolInfo` |
+| `toolchain.install` | system | L | plain | `ToolchainInstallParams` | `ToolInfo` |
+| `toolchain.uninstall` | system |  | plain | `ToolchainUninstallParams` | `ToolchainUninstallResult` |
+| `toolchain.gc` | system |  | plain | `ToolchainGcParams` | `ToolchainGcResult` |
 | `toolchain.pins.update` | system |  | plain | `Unspecified` | `Unspecified` |
 
 Notifications:
 
 | Notification | Params |
 |---|---|
-| `toolchain.changed` | `Unspecified` |
+| `toolchain.changed` | `ToolchainChangedParams` |
 
 ## `sdk` (module `sdk`)
 
@@ -168,7 +168,7 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `sdk.list` | read |  | plain | `Unspecified` | `Unspecified` |
+| `sdk.list` | read |  | plain | `SdkListParams` | `SdkListResult` |
 | `sdk.import` | system | L | plain | `Unspecified` | `Unspecified` |
 | `sdk.remove` | system |  | plain | `Unspecified` | `Unspecified` |
 | `sdk.deviceSupport.check` | read |  | plain | `Unspecified` | `Unspecified` |
@@ -180,7 +180,7 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `doctor.run` | system (per call) |  | plain | `Unspecified` | `Unspecified` |
+| `doctor.run` | system (per call) |  | plain | `DoctorRunParams` | `DoctorReport` |
 
 ## `device` (module `device`)
 

@@ -308,7 +308,7 @@ impl DaemonState {
     }
 }
 
-/// Daemon doctor checks (`russetd.json`, socket, live-device lock), for the doctor seam.
+/// Daemon doctor checks (live-device lock), for the doctor seam; `dirs.private` is russet-doctor's host check.
 pub fn checks() -> Vec<std::sync::Arc<dyn russet_doctor::Check>> {
     async_trait_shim::checks()
 }
@@ -325,65 +325,11 @@ mod async_trait_shim {
     use super::lock::{live_device_lock_path, read_holder};
 
     pub(super) fn checks() -> Vec<Arc<dyn Check>> {
-        vec![Arc::new(PrivateDirs), Arc::new(LiveDeviceLock)]
+        vec![Arc::new(LiveDeviceLock)]
     }
 
     fn result(status: Status, summary: impl Into<String>, hint: Option<&str>) -> CheckResult {
         CheckResult { status, summary: summary.into(), detail: None, hint: hint.map(str::to_owned) }
-    }
-
-    /// `dirs.private`: the five directories exist, belong to the user and are private (core §11).
-    struct PrivateDirs;
-
-    #[async_trait]
-    impl Check for PrivateDirs {
-        fn id(&self) -> &'static str {
-            "dirs.private"
-        }
-        fn title(&self) -> &'static str {
-            "Russet's directories are private"
-        }
-        fn category(&self) -> Category {
-            Category::Daemon
-        }
-        fn requires(&self) -> Requires {
-            Requires::default()
-        }
-        async fn run(&self, _cx: &CheckCx) -> CheckResult {
-            let dirs = match russet_core::dirs::RussetDirs::from_env() {
-                Ok(d) => d,
-                Err(e) => return result(Status::Fail, e.message(), e.hint()),
-            };
-            let mut problems = Vec::new();
-            for d in [&dirs.config, &dirs.data, &dirs.state, &dirs.cache, &dirs.runtime] {
-                match std::fs::metadata(d) {
-                    Err(_) => problems.push(format!("{} is missing", d.display())),
-                    #[cfg(unix)]
-                    Ok(m) => {
-                        use std::os::unix::fs::{MetadataExt, PermissionsExt};
-                        if m.uid() != russet_core::platform::current_uid() {
-                            problems.push(format!("{} belongs to another user", d.display()));
-                        } else if m.permissions().mode() & 0o077 != 0 {
-                            problems.push(format!("{} is readable by others", d.display()));
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    Ok(_) => {}
-                }
-            }
-            if problems.is_empty() {
-                result(Status::Pass, "config, data, state, cache and runtime are private", None)
-            } else {
-                result(
-                    Status::Warn,
-                    problems.join("; "),
-                    Some("Run `russet doctor --fix` to create and restrict them."),
-                )
-            }
-        }
-        async fn fix(&self, _cx: &CheckCx) -> russet_core::Result<()> {
-            russet_core::dirs::RussetDirs::from_env()?.ensure()
-        }
     }
 
     /// `daemon.live-device-lock`: which daemon owns the phone (ARCHITECTURE §3.3 item 7).

@@ -204,10 +204,10 @@ async fn jobs_persist_and_a_crash_leaves_them_interrupted() {
 async fn long_running_methods_are_jobs_and_background_returns_the_job_id() {
     let home = Home::new("job-layer");
     let (daemon, cli) = start(home.options()).await;
-    // toolchain.install is long-running (W3 lands its body): its call runs as a job that fails with
-    // core.notImplemented, and the request waits for it.
+    // toolchain.install is long-running: installing swift is not available in Wave 1, so its call runs as a
+    // job that fails with core.notImplemented (and downloads nothing), and the request waits for it.
     let e = cli
-        .call_raw("toolchain.install", json!({"component": "darwin-tools", "version": "1.1.0"}), CallOptions::default())
+        .call_raw("toolchain.install", json!({"component": "swift", "version": "6.4"}), CallOptions::default())
         .await
         .expect_err("not implemented yet");
     assert_eq!(e.to_error().code(), codes::core::NOT_IMPLEMENTED);
@@ -220,7 +220,7 @@ async fn long_running_methods_are_jobs_and_background_returns_the_job_id() {
     let v = cli
         .call_raw(
             "toolchain.install",
-            json!({"component": "darwin-tools", "version": "1.1.0", "background": true}),
+            json!({"component": "swift", "version": "6.4", "background": true}),
             CallOptions::default(),
         )
         .await

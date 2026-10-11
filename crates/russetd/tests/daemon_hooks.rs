@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use russet_core::async_trait;
-use russet_core::error::{Result, codes};
+use russet_core::error::Result;
 use russet_core::rpc::ClientKind;
 use russet_ipc::Router;
 use russet_protocol::job::{JobInfo, JobState};
@@ -67,10 +67,10 @@ async fn provided_factories_construct_their_slots_and_the_rest_keep_f0() {
     assert!(cx.secrets.try_get().is_none(), "nothing is constructed before its first use");
     let store = cx.secrets.get().expect("the provided store");
     assert_eq!(store.backend().reason.as_deref(), Some("test"));
-    // No constructor for Toolchains yet (W3 provides it); F0 stubs answer core.notImplemented, not a panic.
-    assert_eq!(cx.toolchains.get().expect_err("nobody provides it").code(), codes::core::NOT_IMPLEMENTED);
-    let e = cx.config.get().expect_err("ConfigService::load is an F0 stub");
-    assert_eq!(e.code(), codes::core::NOT_IMPLEMENTED);
+    // Slots nobody provided keep their default constructor (W3's toolchain service).
+    cx.toolchains.get().expect("the default toolchain service");
+    // W3's ConfigService loads from the daemon's own directories.
+    cx.config.get().expect("the configuration loads");
     daemon.stop().await.expect("stop");
 }
 
