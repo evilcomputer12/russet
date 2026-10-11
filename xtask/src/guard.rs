@@ -632,12 +632,15 @@ fn secrets(root: &Path, files: Option<&[String]>, opts: &Options) -> Result<Chec
     if !opts.builtin_only {
         if crate::ci::has_program("gitleaks") {
             let mut cmd = Command::new("gitleaks");
+            let common = ["--no-banner", "--no-color", "--redact", "--verbose", "--exit-code", "1"];
             match files {
+                // The history of the checked-out branch only: a local repository shared by several worktrees
+                // holds every card's branches, and gitleaks would otherwise read them all.
                 Some(_) => {
-                    cmd.args(["git", "--no-banner", "--redact", "--exit-code", "1"]).arg(root);
+                    cmd.arg("git").args(common).arg("--log-opts=HEAD").arg(root);
                 }
                 None => {
-                    cmd.args(["dir", "--no-banner", "--redact", "--exit-code", "1"]);
+                    cmd.arg("dir").args(common);
                     cmd.args(opts.artifacts.iter().filter(|d| d.exists()));
                 }
             }
@@ -846,6 +849,11 @@ fn private_keys(text: &str) -> Vec<Hit> {
         let header_end = text[at..].find('\n').map_or(text.len(), |e| at + e);
         let header = &text[at..header_end];
         if !header.contains("PRIVATE KEY-----") || header.len() > 120 {
+            continue;
+        }
+        // An allow marker on the line where the block starts suppresses it, as gitleaks does.
+        let line_start = text[..at].rfind('\n').map_or(0, |n| n + 1);
+        if ALLOW_MARKERS.iter().any(|m| text[line_start..header_end].contains(m)) {
             continue;
         }
         let Some(end_off) = text[header_end..].find(end) else { continue };
@@ -1384,6 +1392,8 @@ mod tests {
         // Inline suppression, for reviewed false positives only.
         let allowed = format!("{}{} # gitleaks:allow", "AKIA", "Q".repeat(16));
         assert!(scan_secrets(&allowed, none).is_empty());
+        assert_eq!(scan_secrets(&fake_pem(), none).len(), 1);
+        assert!(scan_secrets(&format!("// gitleaks:allow (test key) {}", fake_pem()), none).is_empty());
         // A longer run of key characters is not an AWS key id.
         let longer = format!("{}{}", "AKIA", "Q".repeat(20));
         assert!(scan_secrets(&longer, none).is_empty());
