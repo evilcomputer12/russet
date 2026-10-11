@@ -1,0 +1,5386 @@
+{
+  "$defs": {
+    "Approval": {
+      "description": "An approval record (ARCHITECTURE §6.5).",
+      "properties": {
+        "approvalId": {
+          "$ref": "#/$defs/ApprovalId"
+        },
+        "createdAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expiresAt": {
+          "description": "RFC 3339 UTC: pending approvals expire 10 min after creation.",
+          "type": "string"
+        },
+        "grantedBy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "description": "Why it was denied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestedBy": {
+          "$ref": "#/$defs/ConnectionRef"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ApprovalState"
+        },
+        "subject": {
+          "$ref": "#/$defs/ApprovalSubject"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "tier": {
+          "description": "The MCP tier (2 or 3; 0 for a recorded confirmation).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "approvalId",
+        "state",
+        "requestedBy",
+        "subject",
+        "tier",
+        "summary",
+        "createdAt",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "ApprovalDenyParams": {
+      "description": "Params of `approval.deny` (same restriction as `approval.grant`).",
+      "properties": {
+        "approvalId": {
+          "$ref": "#/$defs/ApprovalId"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "approvalId"
+      ],
+      "type": "object"
+    },
+    "ApprovalGetParams": {
+      "description": "Params of `approval.get`.",
+      "properties": {
+        "approvalId": {
+          "$ref": "#/$defs/ApprovalId"
+        },
+        "waitMs": {
+          "description": "Wait up to this long while the approval is pending.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "approvalId"
+      ],
+      "type": "object"
+    },
+    "ApprovalGrantParams": {
+      "description": "Params of `approval.grant` (`ide` connections, or `cli` with `interactive`).",
+      "properties": {
+        "approvalId": {
+          "$ref": "#/$defs/ApprovalId"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Default: `session` for tier 2, `once` for tier 3 (which never allows `session`)."
+        }
+      },
+      "required": [
+        "approvalId"
+      ],
+      "type": "object"
+    },
+    "ApprovalId": {
+      "pattern": "^apr_[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "ApprovalListParams": {
+      "description": "Params of `approval.list`.",
+      "properties": {
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ApprovalListResult": {
+      "description": "Result of `approval.list`.",
+      "properties": {
+        "approvals": {
+          "items": {
+            "$ref": "#/$defs/Approval"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "approvals"
+      ],
+      "type": "object"
+    },
+    "ApprovalRequestedParams": {
+      "description": "Params of the `approval.requested` notification (to `ide` and interactive `cli` connections).",
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/Approval"
+        }
+      },
+      "required": [
+        "approval"
+      ],
+      "type": "object"
+    },
+    "ApprovalRequiredDetails": {
+      "description": "`details` of `perm.approvalRequired` (1204, ARCHITECTURE §11.3).",
+      "properties": {
+        "approvalId": {
+          "$ref": "#/$defs/ApprovalId"
+        },
+        "approveWith": {
+          "description": "`russet approve apr_… (or Approve in Russet IDE)`.",
+          "type": "string"
+        },
+        "argsDigest": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "tier": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tool": {
+          "description": "The MCP tool, when the bridge named it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "approvalId",
+        "tier",
+        "summary",
+        "argsDigest",
+        "approveWith",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "ApprovalResolvedParams": {
+      "description": "Params of the `approval.resolved` notification (the same, plus the requester).",
+      "properties": {
+        "approvalId": {
+          "$ref": "#/$defs/ApprovalId"
+        },
+        "state": {
+          "$ref": "#/$defs/ApprovalState"
+        }
+      },
+      "required": [
+        "approvalId",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ApprovalScope": {
+      "description": "How long a grant lasts (ARCHITECTURE §11.3).",
+      "oneOf": [
+        {
+          "const": "once",
+          "description": "One call (tier 3, and the default).",
+          "type": "string"
+        },
+        {
+          "const": "session",
+          "description": "Every call of the method from the requesting MCP session (tier 2) [D 67].",
+          "type": "string"
+        }
+      ]
+    },
+    "ApprovalState": {
+      "description": "Approval states.",
+      "enum": [
+        "pending",
+        "granted",
+        "denied",
+        "expired",
+        "used"
+      ],
+      "type": "string"
+    },
+    "ApprovalSubject": {
+      "description": "What an approval allows.",
+      "oneOf": [
+        {
+          "description": "One method call; `paramsDigest` is the SHA-256 of the canonical JSON params without `approval`.",
+          "properties": {
+            "kind": {
+              "const": "method",
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "paramsDigest": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "method",
+            "paramsDigest"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A provisioning plan (`provision.apply`, W12).",
+          "properties": {
+            "kind": {
+              "const": "plan",
+              "type": "string"
+            },
+            "planDigest": {
+              "type": "string"
+            },
+            "planId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "planId",
+            "planDigest"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ArtifactKind": {
+      "description": "Artifact kinds (`JobEvent` kind `artifact`, field `artifactKind`).",
+      "enum": [
+        "app",
+        "ipa",
+        "dsym",
+        "archive",
+        "report"
+      ],
+      "type": "string"
+    },
+    "AuditEntry": {
+      "description": "One line of `state/audit.jsonl` (ARCHITECTURE §6.5).",
+      "properties": {
+        "approvalId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "client": {
+          "$ref": "#/$defs/ClientRef"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/AuditKind"
+        },
+        "method": {
+          "type": "string"
+        },
+        "outcome": {
+          "description": "`ok`, or the `russetCode` of the error (`perm.denied`, …), or an approval state for `approval` entries.",
+          "type": "string"
+        },
+        "paramsDigest": {
+          "description": "SHA-256 of the canonical JSON params without `approval`.",
+          "type": "string"
+        },
+        "paramsRedacted": {
+          "description": "The params with secrets masked (ARCHITECTURE §12.2)."
+        },
+        "tier": {
+          "description": "The MCP tier of the call.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tool": {
+          "description": "The MCP tool behind the call, when the bridge named it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ts": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts",
+        "kind",
+        "client",
+        "method",
+        "paramsDigest",
+        "paramsRedacted",
+        "outcome",
+        "durationMs"
+      ],
+      "type": "object"
+    },
+    "AuditKind": {
+      "description": "What an audit entry records.",
+      "oneOf": [
+        {
+          "const": "rpc",
+          "description": "A call (or a refused call).",
+          "type": "string"
+        },
+        {
+          "const": "approval",
+          "description": "An approval was requested, granted, denied or used.",
+          "type": "string"
+        },
+        {
+          "const": "account-mutation",
+          "description": "A change on Apple's side (`account`, `account-destructive`, `publish`).",
+          "type": "string"
+        }
+      ]
+    },
+    "AuditTailParams": {
+      "description": "Params of `audit.tail`.",
+      "properties": {
+        "client": {
+          "description": "Only this client name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kinds": {
+          "items": {
+            "$ref": "#/$defs/AuditKind"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "description": "The newest entries to return; default 50.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AuditTailResult": {
+      "description": "Result of `audit.tail`: oldest first.",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/AuditEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "AuthParams": {
+      "description": "`initialize.params.auth` (TCP only).",
+      "properties": {
+        "token": {
+          "$ref": "#/$defs/AuthToken"
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "type": "object"
+    },
+    "AuthToken": {
+      "description": "A secret token on the wire: serialized as its string, never printed by `Debug`.",
+      "type": "string"
+    },
+    "BackgroundJob": {
+      "description": "What a long-running method returns with `background: true` [D 65].",
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/JobId"
+        }
+      },
+      "required": [
+        "jobId"
+      ],
+      "type": "object"
+    },
+    "BuildMismatchDetails": {
+      "description": "`details` of `ipc.buildMismatch` (1107; development builds).",
+      "properties": {
+        "clientBuildId": {
+          "type": "string"
+        },
+        "restartable": {
+          "description": "The daemon was idle and accepted `daemon.shutdown {reason: \"upgrade\"}`.",
+          "type": "boolean"
+        },
+        "serverBuildId": {
+          "type": "string"
+        },
+        "serverExecutable": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "serverBuildId",
+        "clientBuildId",
+        "serverExecutable",
+        "restartable"
+      ],
+      "type": "object"
+    },
+    "CancelParams": {
+      "description": "Params of the LSP built-in notification `$/cancelRequest` (ARCHITECTURE §7.6).",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestIdValue"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ClientCapabilities": {
+      "description": "What the client can do when the daemon asks (ARCHITECTURE §7.4, §9.3).",
+      "properties": {
+        "approvals": {
+          "default": false,
+          "description": "Wants `approval.requested` and `approval.resolved`.",
+          "type": "boolean"
+        },
+        "confirm": {
+          "default": false,
+          "description": "Answers `ui.confirm`.",
+          "type": "boolean"
+        },
+        "ideDebug": {
+          "default": false,
+          "description": "Serves the IDE reverse requests of ARCHITECTURE §9.4.",
+          "type": "boolean"
+        },
+        "interactive": {
+          "default": false,
+          "description": "True only when a CLI's stdin is a TTY; approval grants require it (ARCHITECTURE §7.4, §11.3).",
+          "type": "boolean"
+        },
+        "openUrl": {
+          "default": false,
+          "description": "Answers `ui.openUrl`.",
+          "type": "boolean"
+        },
+        "prompt": {
+          "default": false,
+          "description": "Answers `ui.prompt`.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ClientDescriptor": {
+      "description": "`initialize.params.client`.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ClientKind"
+        },
+        "name": {
+          "description": "For MCP bridges, the `--client` id (ARCHITECTURE §11.2).",
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "version": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ClientKind": {
+      "description": "Client kinds (`initialize.params.client.kind`).",
+      "enum": [
+        "cli",
+        "ide",
+        "mcp",
+        "flutter-device",
+        "test"
+      ],
+      "type": "string"
+    },
+    "ClientRef": {
+      "description": "A client as other clients see it: `{kind, name}` (`ui.confirm.requestedBy`, audit entries).",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ClientKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ConnectionRef": {
+      "description": "A client connection: `{kind, name, connectionId}` (approvals' `requestedBy` and `grantedBy`, owners of jobs\nand leases).",
+      "properties": {
+        "connectionId": {
+          "description": "`c-<n>`.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ClientKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "connectionId"
+      ],
+      "type": "object"
+    },
+    "ConnectionSummary": {
+      "description": "One connection in `daemon.status`.",
+      "properties": {
+        "id": {
+          "description": "`c-<n>`.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ClientKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "DaemonLogBatchParams": {
+      "description": "Params of the `daemon.logBatch` notification (to subscribers).",
+      "properties": {
+        "dropped": {
+          "description": "Records lost to a slow consumer since the previous batch (ARCHITECTURE §6.4).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/DaemonLogRecord"
+          },
+          "type": "array"
+        },
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "records"
+      ],
+      "type": "object"
+    },
+    "DaemonLogRecord": {
+      "description": "One daemon log record (already redacted, ARCHITECTURE §12.2).",
+      "properties": {
+        "fields": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "level": {
+          "$ref": "#/$defs/TraceLevel"
+        },
+        "message": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "ts": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts",
+        "level",
+        "target",
+        "message"
+      ],
+      "type": "object"
+    },
+    "DaemonLogsSubscribeParams": {
+      "description": "Params of `daemon.logs.subscribe`.",
+      "properties": {
+        "minLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceLevel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Default `info`."
+        }
+      },
+      "type": "object"
+    },
+    "DaemonLogsSubscribeResult": {
+      "description": "Result of `daemon.logs.subscribe`; records follow as `daemon.logBatch`.",
+      "properties": {
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId"
+      ],
+      "type": "object"
+    },
+    "DaemonPingParams": {
+      "description": "Params of `daemon.ping`: `{}`.",
+      "type": "object"
+    },
+    "DaemonPingResult": {
+      "description": "Result of `daemon.ping`: `{}`.",
+      "type": "object"
+    },
+    "DaemonSetLogFilterParams": {
+      "description": "Params of `daemon.setLogFilter`: an `EnvFilter` directive such as `info,russetd=debug`.",
+      "properties": {
+        "filter": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "filter"
+      ],
+      "type": "object"
+    },
+    "DaemonSetLogFilterResult": {
+      "description": "Result of `daemon.setLogFilter`.",
+      "properties": {
+        "previous": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "previous"
+      ],
+      "type": "object"
+    },
+    "DaemonShutdownParams": {
+      "description": "Params of `daemon.shutdown`.",
+      "properties": {
+        "force": {
+          "default": false,
+          "description": "Stop even with active jobs and leases, and skip the 10 s job grace.",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShutdownReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Default `request`. With `upgrade` the daemon accepts only when it is idle apart from the requester\n(ARCHITECTURE §3.3 item 3)."
+        }
+      },
+      "type": "object"
+    },
+    "DaemonShutdownResult": {
+      "description": "Result of `daemon.shutdown`.",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "activeSessions": {
+          "description": "Running or queued jobs plus leases that kept (or would have kept) the daemon alive.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "accepted",
+        "activeSessions"
+      ],
+      "type": "object"
+    },
+    "DaemonShuttingDownParams": {
+      "description": "Params of the `daemon.shuttingDown` notification (to all connections).",
+      "properties": {
+        "graceMs": {
+          "description": "How long jobs get before their process trees are killed.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "$ref": "#/$defs/ShutdownReason"
+        }
+      },
+      "required": [
+        "reason",
+        "graceMs"
+      ],
+      "type": "object"
+    },
+    "DaemonStatusParams": {
+      "description": "Params of `daemon.status`: `{}`.",
+      "type": "object"
+    },
+    "DaemonStatusResult": {
+      "description": "Result of `daemon.status` (ARCHITECTURE §8.1).",
+      "properties": {
+        "buildId": {
+          "type": "string"
+        },
+        "connections": {
+          "items": {
+            "$ref": "#/$defs/ConnectionSummary"
+          },
+          "type": "array"
+        },
+        "deviceBackend": {
+          "description": "The device backend (`live`, `scripted:<file>`, …, `none`).",
+          "type": "string"
+        },
+        "devices": {
+          "description": "Devices the device plane knows (0 until it starts, ARCHITECTURE §3.3 item 7).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "endpoint": {
+          "description": "`unix:/…/russetd.sock`, `pipe:\\\\.\\pipe\\…`, `tcp://127.0.0.1:<port>` or `inproc`.",
+          "type": "string"
+        },
+        "jobs": {
+          "$ref": "#/$defs/JobCounts"
+        },
+        "leases": {
+          "items": {
+            "$ref": "#/$defs/LeaseInfo"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rssBytes": {
+          "description": "The daemon's resident set size (0 where the platform does not report it).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startedAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "uptimeMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        },
+        "web": {
+          "description": "The web endpoint, once started.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "buildId",
+        "pid",
+        "uptimeMs",
+        "endpoint",
+        "connections",
+        "jobs",
+        "leases",
+        "devices",
+        "rssBytes",
+        "startedAt",
+        "deviceBackend"
+      ],
+      "type": "object"
+    },
+    "ErrorData": {
+      "description": "JSON-RPC `error.data` (ARCHITECTURE §13.1), camelCase on the wire; optional fields are omitted.",
+      "properties": {
+        "chain": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "details": true,
+        "docs": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "russetCode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "russetCode"
+      ],
+      "type": "object"
+    },
+    "ExecutableId": {
+      "description": "`{dev, ino, mtimeNs, size}` of the daemon's executable (Windows: volume serial and file index).",
+      "properties": {
+        "dev": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ino": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mtimeNs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dev",
+        "ino",
+        "mtimeNs",
+        "size"
+      ],
+      "type": "object"
+    },
+    "Grant": {
+      "description": "A connection's permissions (ARCHITECTURE §7.4 `grant`, §7.5): which classes run, which need a\nconfirmation, which need an out-of-band approval, and which are denied. `none` is always allowed.",
+      "properties": {
+        "allow": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Permission"
+          },
+          "type": "array"
+        },
+        "approval": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Permission"
+          },
+          "type": "array"
+        },
+        "confirm": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Permission"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Permission"
+          },
+          "type": "array"
+        },
+        "profile": {
+          "description": "`cli`, `ide`, `mcp`, `flutter-device` or `test`.",
+          "type": "string"
+        },
+        "tierMax": {
+          "description": "MCP connections only (ARCHITECTURE §11.3).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "type": "object"
+    },
+    "InitializeParams": {
+      "description": "Params of `initialize` (ARCHITECTURE §7.4).",
+      "properties": {
+        "auth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "TCP connections only (ARCHITECTURE §7.1)."
+        },
+        "capabilities": {
+          "$ref": "#/$defs/ClientCapabilities",
+          "default": {
+            "approvals": false,
+            "confirm": false,
+            "ideDebug": false,
+            "interactive": false,
+            "openUrl": false,
+            "prompt": false
+          }
+        },
+        "client": {
+          "$ref": "#/$defs/ClientDescriptor"
+        },
+        "protocol": {
+          "$ref": "#/$defs/ProtocolVersion"
+        },
+        "sharedLease": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LeaseId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A device reservation this connection shares (ARCHITECTURE §6.3; `RUSSET_LEASE`)."
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Workspace"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocol",
+        "client"
+      ],
+      "type": "object"
+    },
+    "InitializeResult": {
+      "description": "Result of `initialize` (ARCHITECTURE §7.4).",
+      "properties": {
+        "capabilities": {
+          "$ref": "#/$defs/ServerCapabilities"
+        },
+        "connectionId": {
+          "description": "`c-<n>`.",
+          "type": "string"
+        },
+        "endpoints": {
+          "$ref": "#/$defs/ServerEndpoints"
+        },
+        "grant": {
+          "$ref": "#/$defs/Grant"
+        },
+        "protocol": {
+          "$ref": "#/$defs/ProtocolVersion"
+        },
+        "server": {
+          "$ref": "#/$defs/ServerInfo"
+        }
+      },
+      "required": [
+        "protocol",
+        "server",
+        "connectionId",
+        "grant",
+        "capabilities",
+        "endpoints"
+      ],
+      "type": "object"
+    },
+    "JobCancelParams": {
+      "description": "Params of `job.cancel`.",
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/JobId"
+        }
+      },
+      "required": [
+        "jobId"
+      ],
+      "type": "object"
+    },
+    "JobCancelResult": {
+      "description": "Result of `job.cancel`: the state after the request (`cancelled`, or the terminal state it already had).",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/JobState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "JobCounts": {
+      "description": "Job counts in `daemon.status`.",
+      "properties": {
+        "queued": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "running": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "queued",
+        "running"
+      ],
+      "type": "object"
+    },
+    "JobEvent": {
+      "description": "One structured job event (ARCHITECTURE §9.2): `{seq, ts, kind, …}`.",
+      "oneOf": [
+        {
+          "description": "A line of output (every job).",
+          "properties": {
+            "kind": {
+              "const": "log",
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "stream": {
+              "$ref": "#/$defs/LogStream"
+            }
+          },
+          "required": [
+            "kind",
+            "stream",
+            "line"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Progress (every job).",
+          "properties": {
+            "done": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "fraction": {
+              "description": "0.0–1.0.",
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "progress",
+              "type": "string"
+            },
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "total": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pipeline stage (build, run).",
+          "properties": {
+            "kind": {
+              "const": "stage",
+              "type": "string"
+            },
+            "stage": {
+              "$ref": "#/$defs/Stage"
+            },
+            "state": {
+              "$ref": "#/$defs/StepState"
+            }
+          },
+          "required": [
+            "kind",
+            "stage",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One build task (build).",
+          "properties": {
+            "durationMs": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "task",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/StepState"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "taskId",
+            "title",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A compiler, signer or validator diagnostic (build, sign, ship).",
+          "properties": {
+            "code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "column": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "diagnostic",
+              "type": "string"
+            },
+            "line": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "severity": {
+              "$ref": "#/$defs/Severity"
+            },
+            "tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "severity",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A produced file (build, ship). `artifactKind`, never `kind` [D 96].",
+          "properties": {
+            "artifactKind": {
+              "$ref": "#/$defs/ArtifactKind"
+            },
+            "kind": {
+              "const": "artifact",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "artifactKind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A non-fatal problem with a code (`build.warn.lint`, `debug.warn.slowLink`, …; ARCHITECTURE §13.3).",
+          "properties": {
+            "hint": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "warning",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "russetCode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "russetCode",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Bytes moved (install, upload, symbols, toolchain).",
+          "properties": {
+            "bytesDone": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "bytesTotal": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "transfer",
+              "type": "string"
+            },
+            "part": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "bytesDone",
+            "bytesTotal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The escape hatch; each use is documented in its area doc.",
+          "properties": {
+            "data": true,
+            "kind": {
+              "const": "custom",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "data"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "seq": {
+          "description": "Starts at 1 and grows by one per event of the job.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ts": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "ts"
+      ],
+      "type": "object"
+    },
+    "JobEventsParams": {
+      "description": "Params of the `job.events` notification (batched for at most 50 ms).",
+      "properties": {
+        "dropped": {
+          "description": "Events lost to a slow consumer since the previous batch (ARCHITECTURE §6.4).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/JobEvent"
+          },
+          "type": "array"
+        },
+        "jobId": {
+          "$ref": "#/$defs/JobId"
+        },
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "jobId",
+        "events"
+      ],
+      "type": "object"
+    },
+    "JobGetParams": {
+      "description": "Params of `job.get`.",
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/JobId"
+        }
+      },
+      "required": [
+        "jobId"
+      ],
+      "type": "object"
+    },
+    "JobId": {
+      "pattern": "^job_[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "JobInfo": {
+      "description": "One job (`job.list`, `job.get`, `job.updated`).",
+      "properties": {
+        "background": {
+          "description": "Survives its owner's disconnect [D 65].",
+          "type": "boolean"
+        },
+        "createdAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "device": {
+          "description": "The device's UDID.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When `failed` (or `cancelled`, `interrupted`)."
+        },
+        "jobId": {
+          "$ref": "#/$defs/JobId"
+        },
+        "kind": {
+          "description": "`build`, `install`, `toolchain.install`, … (ARCHITECTURE §6.2).",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectionRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The requesting connection; jobs the daemon starts itself have none."
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobProgress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project": {
+          "description": "The absolute project root.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/JobState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "waitingFor": {
+          "description": "While `queued`: what it waits for (a lock or a free slot).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "jobId",
+        "kind",
+        "title",
+        "state",
+        "background",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "JobListParams": {
+      "description": "Params of `job.list`.",
+      "properties": {
+        "kinds": {
+          "description": "Job kinds (`build`, …).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "description": "Newest first; default 50.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "states": {
+          "items": {
+            "$ref": "#/$defs/JobState"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "JobListResult": {
+      "description": "Result of `job.list`.",
+      "properties": {
+        "jobs": {
+          "items": {
+            "$ref": "#/$defs/JobInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "jobs"
+      ],
+      "type": "object"
+    },
+    "JobLogParams": {
+      "description": "Params of `job.log`.",
+      "properties": {
+        "afterSeq": {
+          "description": "Only events with a larger `seq`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "jobId": {
+          "$ref": "#/$defs/JobId"
+        },
+        "kinds": {
+          "description": "Only these event kinds (`log`, `diagnostic`, …; ARCHITECTURE §9.2).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tail": {
+          "description": "Only the last `tail` matching events.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "jobId"
+      ],
+      "type": "object"
+    },
+    "JobLogResult": {
+      "description": "Result of `job.log`.",
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/JobEvent"
+          },
+          "type": "array"
+        },
+        "nextSeq": {
+          "description": "Pass as `afterSeq` to continue.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "events",
+        "nextSeq"
+      ],
+      "type": "object"
+    },
+    "JobProgress": {
+      "description": "The latest progress of a job.",
+      "properties": {
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "percentage": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "JobState": {
+      "description": "Job states (ARCHITECTURE §6.2): `queued → running → succeeded | failed | cancelled`, plus `interrupted`\nafter a daemon crash.",
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "JobSubscribeParams": {
+      "description": "Params of `job.subscribe`.",
+      "properties": {
+        "includeEvents": {
+          "default": false,
+          "description": "Also stream `job.events`.",
+          "type": "boolean"
+        },
+        "jobId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "One job; omitted: every job."
+        },
+        "kinds": {
+          "description": "Only jobs of these kinds (`build`, …).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "JobSubscribeResult": {
+      "description": "Result of `job.subscribe`.",
+      "properties": {
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId"
+      ],
+      "type": "object"
+    },
+    "JobUpdatedParams": {
+      "description": "Params of the `job.updated` notification: every state change, including the result summary.",
+      "properties": {
+        "job": {
+          "$ref": "#/$defs/JobInfo"
+        },
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId",
+        "job"
+      ],
+      "type": "object"
+    },
+    "JobWaitParams": {
+      "description": "Params of `job.wait`.",
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/JobId"
+        },
+        "timeoutMs": {
+          "description": "Return the current state after this long even if the job still runs; default: wait until it ends.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "jobId"
+      ],
+      "type": "object"
+    },
+    "JobWaitResult": {
+      "description": "Result of `job.wait`: the job, plus its result or error once it ended.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorData"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "job": {
+          "$ref": "#/$defs/JobInfo"
+        },
+        "result": true
+      },
+      "required": [
+        "job"
+      ],
+      "type": "object"
+    },
+    "LeaseId": {
+      "pattern": "^lse_[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "LeaseInfo": {
+      "description": "One lease (`lease.list`, `daemon.status`).",
+      "properties": {
+        "createdAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "detached": {
+          "description": "Survives its owner (`sessionLease: detached`).",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/LeaseKind"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectionRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The connection that holds it; omitted for a detached lease whose owner is gone."
+        },
+        "purpose": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resource": {
+          "description": "What it pins: a UDID, a forward, a session id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sharedWith": {
+          "description": "Connections that presented this lease as `initialize.sharedLease` (device reservations).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "leaseId",
+        "kind",
+        "detached",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "LeaseKind": {
+      "description": "Lease kinds (ARCHITECTURE §6.3).",
+      "oneOf": [
+        {
+          "const": "device-reservation",
+          "description": "`device.reserve`: exclusive to its principal (the owner plus connections sharing it).",
+          "type": "string"
+        },
+        {
+          "const": "tunnel",
+          "description": "Internal: the device tunnel, kept warm for `device.keep-warm`.",
+          "type": "string"
+        },
+        {
+          "const": "forward",
+          "description": "`forward.open`, `flutter.device.forward`.",
+          "type": "string"
+        },
+        {
+          "const": "app-launch",
+          "description": "`app.launch`.",
+          "type": "string"
+        },
+        {
+          "const": "session",
+          "description": "`run.start`, `debug.prepare`, `debug.attach`, `flutter.run`.",
+          "type": "string"
+        },
+        {
+          "const": "mirror",
+          "description": "`screen.mirror.start`.",
+          "type": "string"
+        },
+        {
+          "const": "input",
+          "description": "`input.*` holds.",
+          "type": "string"
+        }
+      ]
+    },
+    "LeaseListParams": {
+      "description": "Params of `lease.list`: `{}`.",
+      "type": "object"
+    },
+    "LeaseListResult": {
+      "description": "Result of `lease.list`.",
+      "properties": {
+        "leases": {
+          "items": {
+            "$ref": "#/$defs/LeaseInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "leases"
+      ],
+      "type": "object"
+    },
+    "LeaseReleaseParams": {
+      "description": "Params of `lease.release`.",
+      "properties": {
+        "leaseId": {
+          "$ref": "#/$defs/LeaseId"
+        }
+      },
+      "required": [
+        "leaseId"
+      ],
+      "type": "object"
+    },
+    "LeaseReleaseResult": {
+      "description": "Result of `lease.release`: `{}`.",
+      "type": "object"
+    },
+    "LogStream": {
+      "description": "The stream a log line came from (`JobEvent` kind `log`).",
+      "enum": [
+        "stdout",
+        "stderr",
+        "info",
+        "warn"
+      ],
+      "type": "string"
+    },
+    "MessageLevel": {
+      "description": "Message levels.",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "type": "string"
+    },
+    "Permission": {
+      "description": "Permission classes (ARCHITECTURE §7.5). Wire values are kebab-case.",
+      "enum": [
+        "none",
+        "read",
+        "device",
+        "build",
+        "project",
+        "account",
+        "account-destructive",
+        "publish",
+        "secrets",
+        "system"
+      ],
+      "type": "string"
+    },
+    "ProgressKind": {
+      "description": "`begin`, `report` or `end`.",
+      "enum": [
+        "begin",
+        "report",
+        "end"
+      ],
+      "type": "string"
+    },
+    "ProgressParams": {
+      "description": "Params of the LSP built-in notification `$/progress` (not in the registry: its name is not `ns.event`).",
+      "properties": {
+        "token": {
+          "$ref": "#/$defs/ProgressToken"
+        },
+        "value": {
+          "$ref": "#/$defs/WorkDoneProgress"
+        }
+      },
+      "required": [
+        "token",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ProgressToken": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "The token of an LSP work-done progress (`$/progress`): a string or an integer."
+    },
+    "PromptKind": {
+      "description": "What `ui.prompt` asks for.",
+      "oneOf": [
+        {
+          "enum": [
+            "text",
+            "password",
+            "code"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "typed-confirmation",
+          "description": "The user types `expected` to confirm an account-destructive action or a review submission.",
+          "type": "string"
+        }
+      ]
+    },
+    "ProtocolMismatchDetails": {
+      "description": "`details` of `ipc.protocolMismatch` (1100).",
+      "properties": {
+        "clientProtocol": {
+          "$ref": "#/$defs/ProtocolVersion"
+        },
+        "restartable": {
+          "description": "The daemon is idle and shuts down so the client can start its own build (ARCHITECTURE §3.3 item 3).",
+          "type": "boolean"
+        },
+        "serverProtocol": {
+          "$ref": "#/$defs/ProtocolVersion"
+        }
+      },
+      "required": [
+        "serverProtocol",
+        "clientProtocol",
+        "restartable"
+      ],
+      "type": "object"
+    },
+    "ProtocolVersion": {
+      "description": "`{major, minor}` as exchanged in `initialize`.",
+      "properties": {
+        "major": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "minor": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "major",
+        "minor"
+      ],
+      "type": "object"
+    },
+    "RequestIdValue": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "A JSON-RPC request id as `$/cancelRequest` carries it."
+    },
+    "ServerCapabilities": {
+      "description": "What the daemon serves (`initialize.result.capabilities`).",
+      "properties": {
+        "features": {
+          "$ref": "#/$defs/ServerFeatures"
+        },
+        "methods": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "notifications": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "methods",
+        "notifications",
+        "features"
+      ],
+      "type": "object"
+    },
+    "ServerEndpoints": {
+      "description": "Side-channel endpoints (`initialize.result.endpoints`).",
+      "properties": {
+        "web": {
+          "description": "The web endpoint (`http://127.0.0.1:<port>`), once it has started (ARCHITECTURE §6.6).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ServerFeatures": {
+      "description": "Optional daemon features.",
+      "properties": {
+        "mcpHttp": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mirror": {
+          "default": false,
+          "type": "boolean"
+        },
+        "wifiDevices": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ServerInfo": {
+      "description": "The daemon's identity (`initialize.result.server`).",
+      "properties": {
+        "arch": {
+          "description": "`x86_64`, `aarch64`.",
+          "type": "string"
+        },
+        "buildId": {
+          "description": "`<version>+g<sha>[-dirty]`.",
+          "type": "string"
+        },
+        "deviceBackend": {
+          "description": "`live`, `scripted:<file>`, `replay:<trace>`, `mock:<addr>` or `none` (ARCHITECTURE §3.3, §14.9).",
+          "type": "string"
+        },
+        "executable": {
+          "description": "The executable the daemon was started from.",
+          "type": "string"
+        },
+        "executableId": {
+          "$ref": "#/$defs/ExecutableId",
+          "description": "Recorded once at daemon start (ARCHITECTURE §3.3 item 3)."
+        },
+        "name": {
+          "description": "`russetd`.",
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "platform": {
+          "description": "`linux`, `windows`, `macos`.",
+          "type": "string"
+        },
+        "startedAt": {
+          "description": "RFC 3339 UTC.",
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "buildId",
+        "pid",
+        "executable",
+        "executableId",
+        "startedAt",
+        "platform",
+        "arch",
+        "deviceBackend"
+      ],
+      "type": "object"
+    },
+    "Severity": {
+      "description": "Diagnostic severities.",
+      "enum": [
+        "error",
+        "warning",
+        "note"
+      ],
+      "type": "string"
+    },
+    "ShutdownReason": {
+      "description": "Why the daemon stops (`daemon.shutdown`, `daemon.shuttingDown`).",
+      "enum": [
+        "idle",
+        "request",
+        "upgrade",
+        "signal"
+      ],
+      "type": "string"
+    },
+    "Stage": {
+      "description": "Pipeline stages (`JobEvent` kind `stage`).",
+      "enum": [
+        "resolve",
+        "prepare",
+        "compile",
+        "resources",
+        "assemble",
+        "lint",
+        "package",
+        "sign",
+        "install",
+        "launch",
+        "attach"
+      ],
+      "type": "string"
+    },
+    "StepState": {
+      "description": "The state of a stage or task.",
+      "enum": [
+        "started",
+        "finished",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "SubscriptionCancelParams": {
+      "description": "Params of `subscription.cancel`.",
+      "properties": {
+        "subscriptionId": {
+          "$ref": "#/$defs/SubscriptionId"
+        }
+      },
+      "required": [
+        "subscriptionId"
+      ],
+      "type": "object"
+    },
+    "SubscriptionCancelResult": {
+      "description": "Result of `subscription.cancel`: `{}`.",
+      "type": "object"
+    },
+    "SubscriptionId": {
+      "pattern": "^sub_[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "TraceLevel": {
+      "description": "The daemon's own log levels (tracing's, not Apple's `LogLevel`).",
+      "enum": [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ],
+      "type": "string"
+    },
+    "UiConfirmParams": {
+      "description": "Params of `ui.confirm` (served by `cli` with a TTY or `--yes`, and `ide`).",
+      "properties": {
+        "danger": {
+          "description": "Destructive: the client shows it as dangerous.",
+          "type": "boolean"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "requestedBy": {
+          "$ref": "#/$defs/ClientRef"
+        },
+        "timeoutMs": {
+          "description": "Unanswered after this long counts as declined.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "message",
+        "danger",
+        "requestedBy",
+        "timeoutMs"
+      ],
+      "type": "object"
+    },
+    "UiConfirmResult": {
+      "description": "Result of `ui.confirm`.",
+      "properties": {
+        "confirmed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "confirmed"
+      ],
+      "type": "object"
+    },
+    "UiOpenUrlParams": {
+      "description": "Params of `ui.openUrl`.",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "UiOpenUrlResult": {
+      "description": "Result of `ui.openUrl`.",
+      "properties": {
+        "opened": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "opened"
+      ],
+      "type": "object"
+    },
+    "UiPromptParams": {
+      "description": "Params of `ui.prompt` (`cli` and `ide` only).",
+      "properties": {
+        "expected": {
+          "description": "For `typed-confirmation`: the text to type.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/PromptKind"
+        },
+        "message": {
+          "type": "string"
+        },
+        "requestedBy": {
+          "$ref": "#/$defs/ClientRef"
+        },
+        "secret": {
+          "description": "Do not echo; never sent to `mcp`.",
+          "type": "boolean"
+        },
+        "timeoutMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "message",
+        "kind",
+        "secret",
+        "requestedBy",
+        "timeoutMs"
+      ],
+      "type": "object"
+    },
+    "UiPromptResult": {
+      "description": "Result of `ui.prompt`. `Debug` never prints the value (it may be a password).",
+      "properties": {
+        "cancelled": {
+          "type": "boolean"
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "cancelled"
+      ],
+      "type": "object"
+    },
+    "UiShowMessageParams": {
+      "description": "Params of the `ui.showMessage` notification (to the target client).",
+      "properties": {
+        "actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "level": {
+          "$ref": "#/$defs/MessageLevel"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "message"
+      ],
+      "type": "object"
+    },
+    "Unspecified": {
+      "description": "Placeholder DTO of a method whose shape is not written yet (freeze F0): any JSON object, unknown fields\nignored. The owning area replaces its `…Params`/`…Result` aliases with real structs.",
+      "type": "object"
+    },
+    "WorkDoneProgress": {
+      "description": "The value of `$/progress` (ARCHITECTURE §7.6): LSP work-done progress plus Russet's `jobId`.",
+      "properties": {
+        "cancellable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "jobId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The job behind the request, on `begin` (ARCHITECTURE §7.6)."
+        },
+        "kind": {
+          "$ref": "#/$defs/ProgressKind"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "percentage": {
+          "description": "0–100.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Workspace": {
+      "description": "`initialize.params.workspace`.",
+      "properties": {
+        "roots": {
+          "default": [],
+          "description": "Absolute project roots.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "urn:russet:rpc:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "clientMethods": {
+    "ide.breakpoints.add": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ide",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ide.breakpoints.remove": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ide",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ide.debug.start": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ide",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ide.reveal": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ide",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ui.confirm": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ui",
+      "params": {
+        "$ref": "#/$defs/UiConfirmParams"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/UiConfirmResult"
+      }
+    },
+    "ui.openUrl": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ui",
+      "params": {
+        "$ref": "#/$defs/UiOpenUrlParams"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/UiOpenUrlResult"
+      }
+    },
+    "ui.prompt": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ui",
+      "params": {
+        "$ref": "#/$defs/UiPromptParams"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/UiPromptResult"
+      }
+    }
+  },
+  "conventions": {
+    "errors": "error.data is ErrorData; error.code is the Russet number (1000-9999) or a JSON-RPC code",
+    "longRunning": "long-running methods also accept `progressToken` (string or integer) and `background` (boolean); with `background: true` the result is BackgroundJob ({jobId})"
+  },
+  "methods": {
+    "account.addAscKey": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.anisette.fetchLibraries": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.anisette.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.appleId.begin": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.appleId.requestCode": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.appleId.submitCode": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.importXtool": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.remove": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.setDefault": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "account.verify": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "app.icon": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "app",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "app.install": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "app",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "app.launch": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "app",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "app.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "app",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "app.terminate": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "app",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "app.uninstall": {
+      "confirm": "plain",
+      "dynamicPermission": true,
+      "longRunning": false,
+      "namespace": "app",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "approval.deny": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "approval",
+      "params": {
+        "$ref": "#/$defs/ApprovalDenyParams"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Approval"
+      }
+    },
+    "approval.get": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "approval",
+      "params": {
+        "$ref": "#/$defs/ApprovalGetParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Approval"
+      }
+    },
+    "approval.grant": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "approval",
+      "params": {
+        "$ref": "#/$defs/ApprovalGrantParams"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Approval"
+      }
+    },
+    "approval.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "approval",
+      "params": {
+        "$ref": "#/$defs/ApprovalListParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/ApprovalListResult"
+      }
+    },
+    "asc.get": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "asc",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "assets.appIcon": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "assets",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "project",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "assets.compile": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "assets",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "build",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "assets.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "assets",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "assets.render": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "assets",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "audit.tail": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "audit",
+      "params": {
+        "$ref": "#/$defs/AuditTailParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/AuditTailResult"
+      }
+    },
+    "build.clean": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "build",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "build",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "build.inspect": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "build",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "build.plan": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "build",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "build.settings": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "build",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "build.start": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "build",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "build",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "config.get": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "config",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "config.schema": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "config",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "config.set": {
+      "confirm": "plain",
+      "dynamicPermission": true,
+      "longRunning": false,
+      "namespace": "config",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "config.unset": {
+      "confirm": "plain",
+      "dynamicPermission": true,
+      "longRunning": false,
+      "namespace": "config",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "crash.fetch": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "crash",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "crash.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "crash",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "crash.symbolicate": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "crash",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "daemon.logs.subscribe": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "daemon",
+      "params": {
+        "$ref": "#/$defs/DaemonLogsSubscribeParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/DaemonLogsSubscribeResult"
+      }
+    },
+    "daemon.ping": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "daemon",
+      "params": {
+        "$ref": "#/$defs/DaemonPingParams"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/DaemonPingResult"
+      }
+    },
+    "daemon.setLogFilter": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "daemon",
+      "params": {
+        "$ref": "#/$defs/DaemonSetLogFilterParams"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/DaemonSetLogFilterResult"
+      }
+    },
+    "daemon.shutdown": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "daemon",
+      "params": {
+        "$ref": "#/$defs/DaemonShutdownParams"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/DaemonShutdownResult"
+      }
+    },
+    "daemon.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "daemon",
+      "params": {
+        "$ref": "#/$defs/DaemonStatusParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/DaemonStatusResult"
+      }
+    },
+    "debug.attach": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.breakpoint.remove": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.breakpoint.set": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.control": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.evaluate": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.inspect": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.jitStats": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.prepare": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.symbols.fetch": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.symbols.plan": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.symbols.prune": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "debug.symbols.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "debug",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.alias.set": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.ddi.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.ddi.mount": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.ddi.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.developerMode.reveal": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.info": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.pair": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.prepare": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.readiness": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.reserve": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.unpair": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.watch": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "device.wifi.enable": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "doctor.run": {
+      "confirm": "plain",
+      "dynamicPermission": true,
+      "longRunning": false,
+      "namespace": "doctor",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "files.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "files",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "files.pull": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "files",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "files.push": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "files",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "files.remove": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "files",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "flutter.attach": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "flutter",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "flutter.device.forward": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "flutter",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "flutter.device.install": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "flutter",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "flutter.device.runDebug": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "flutter",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "flutter.genSnapshot.ensure": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "flutter",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "flutter.register": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "flutter",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "flutter.run": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "flutter",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "forward.close": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "forward",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "forward.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "forward",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "forward.open": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "forward",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ib.compile": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ib",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "build",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ib.dump": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ib",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "identity.exportP12": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "identity",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "identity.importP12": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "identity",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "identity.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "identity",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "initialize": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "initialize",
+      "params": {
+        "$ref": "#/$defs/InitializeParams"
+      },
+      "permission": "none",
+      "result": {
+        "$ref": "#/$defs/InitializeResult"
+      }
+    },
+    "input.button": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "input",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "input.key": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "input",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "input.swipe": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "input",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "input.tap": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "input",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "input.text": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "input",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "job.cancel": {
+      "confirm": "plain",
+      "dynamicPermission": true,
+      "longRunning": false,
+      "namespace": "job",
+      "params": {
+        "$ref": "#/$defs/JobCancelParams"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/JobCancelResult"
+      }
+    },
+    "job.get": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "job",
+      "params": {
+        "$ref": "#/$defs/JobGetParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/JobInfo"
+      }
+    },
+    "job.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "job",
+      "params": {
+        "$ref": "#/$defs/JobListParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/JobListResult"
+      }
+    },
+    "job.log": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "job",
+      "params": {
+        "$ref": "#/$defs/JobLogParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/JobLogResult"
+      }
+    },
+    "job.subscribe": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "job",
+      "params": {
+        "$ref": "#/$defs/JobSubscribeParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/JobSubscribeResult"
+      }
+    },
+    "job.wait": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "job",
+      "params": {
+        "$ref": "#/$defs/JobWaitParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/JobWaitResult"
+      }
+    },
+    "lease.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "lease",
+      "params": {
+        "$ref": "#/$defs/LeaseListParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/LeaseListResult"
+      }
+    },
+    "lease.release": {
+      "confirm": "plain",
+      "dynamicPermission": true,
+      "longRunning": false,
+      "namespace": "lease",
+      "params": {
+        "$ref": "#/$defs/LeaseReleaseParams"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/LeaseReleaseResult"
+      }
+    },
+    "location.clear": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "location",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "location.set": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "location",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "logs.subscribe": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "logs",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "logs.tail": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "logs",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "mcp.http.set": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "mcp",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "mcp.install": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "mcp",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "mcp.policy.get": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "mcp",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "mcp.policy.set": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "mcp",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "mcp.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "mcp",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "mcp.uninstall": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "mcp",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "perf.export": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "perf",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "perf.subscribe": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "perf",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "portal.bundleIds.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "portal",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "portal.certificates.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "portal",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "portal.certificates.revoke": {
+      "confirm": "typed",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "portal",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "account-destructive",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "portal.devices.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "portal",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "portal.devices.register": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "portal",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "account",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "portal.profiles.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "portal",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "process.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "process",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "process.signal": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "process",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "project.detect": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "project",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "project.info": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "project",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "project.infoPlist": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "project",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "project.init": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "project",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "project",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "provision.apply": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "provision",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "account",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "provision.capabilities": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "provision",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "provision.plan": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "provision",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.hotReload": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.output.query": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.relaunch": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.start": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.stop": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.subscribe": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "screen.elements": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "screen",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "screen.mirror.start": {
+      "confirm": "plain",
+      "dynamicPermission": true,
+      "longRunning": false,
+      "namespace": "screen",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "screen.mirror.stop": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "screen",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "screen.press": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "screen",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "screen.screenshot": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "screen",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sdk.deviceSupport.check": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "sdk",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sdk.deviceSupport.fetch": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "sdk",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sdk.import": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "sdk",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sdk.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "sdk",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sdk.remove": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "sdk",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "secrets.delete": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "secrets",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "secrets.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "secrets",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "secrets.set": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "secrets",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "secrets",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "secrets.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "secrets",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.archive": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "build",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.builds.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.ci.dispatch": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.ci.fetch": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.ci.init": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "project",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.ci.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.compare": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.crashes.get": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.crashes.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.ipa": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "build",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.metadata.apply": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.metadata.plan": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.metadata.pull": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.review.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.review.submit": {
+      "confirm": "typed",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.stamp.apply": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "project",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.stamp.plan": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.testflight.addTesters": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.testflight.betaReview.submit": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.testflight.distribute": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.testflight.groups": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.testflight.groups.create": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.testflight.removeTesters": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.testflight.testers": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.upload": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.upload.resume": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.upload.status": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.validate": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.version.apply": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "publish",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ship.version.plan": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "ship",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sign.inspect": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "sign",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sign.lint": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "sign",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sign.run": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "sign",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "build",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "sign.verify": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "sign",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "subscription.cancel": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "subscription",
+      "params": {
+        "$ref": "#/$defs/SubscriptionCancelParams"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/SubscriptionCancelResult"
+      }
+    },
+    "test.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "test",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "test.run": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "test",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "device",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "toolchain.gc": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "toolchain",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "toolchain.install": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": true,
+      "namespace": "toolchain",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "toolchain.list": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "toolchain",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "toolchain.pins.update": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "toolchain",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "toolchain.resolve": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "toolchain",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "read",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "toolchain.uninstall": {
+      "confirm": "plain",
+      "dynamicPermission": false,
+      "longRunning": false,
+      "namespace": "toolchain",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      },
+      "permission": "system",
+      "result": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    }
+  },
+  "notifications": {
+    "account.event": {
+      "namespace": "account",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "app.exited": {
+      "namespace": "app",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "app.output": {
+      "namespace": "app",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "approval.requested": {
+      "namespace": "approval",
+      "params": {
+        "$ref": "#/$defs/ApprovalRequestedParams"
+      }
+    },
+    "approval.resolved": {
+      "namespace": "approval",
+      "params": {
+        "$ref": "#/$defs/ApprovalResolvedParams"
+      }
+    },
+    "config.changed": {
+      "namespace": "config",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "daemon.logBatch": {
+      "namespace": "daemon",
+      "params": {
+        "$ref": "#/$defs/DaemonLogBatchParams"
+      }
+    },
+    "daemon.shuttingDown": {
+      "namespace": "daemon",
+      "params": {
+        "$ref": "#/$defs/DaemonShuttingDownParams"
+      }
+    },
+    "device.changed": {
+      "namespace": "device",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "job.events": {
+      "namespace": "job",
+      "params": {
+        "$ref": "#/$defs/JobEventsParams"
+      }
+    },
+    "job.updated": {
+      "namespace": "job",
+      "params": {
+        "$ref": "#/$defs/JobUpdatedParams"
+      }
+    },
+    "logs.entries": {
+      "namespace": "logs",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "mcp.toolCall": {
+      "namespace": "mcp",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "perf.samples": {
+      "namespace": "perf",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.exited": {
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.jit": {
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.output": {
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "run.state": {
+      "namespace": "run",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "screen.mirror.ended": {
+      "namespace": "screen",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "toolchain.changed": {
+      "namespace": "toolchain",
+      "params": {
+        "$ref": "#/$defs/Unspecified"
+      }
+    },
+    "ui.showMessage": {
+      "namespace": "ui",
+      "params": {
+        "$ref": "#/$defs/UiShowMessageParams"
+      }
+    }
+  },
+  "protocol": {
+    "major": 1,
+    "minor": 0
+  },
+  "title": "russet/1: the JSON-RPC protocol of russetd (ARCHITECTURE §7-§9)",
+  "types": {
+    "ApprovalRequiredDetails": {
+      "$ref": "#/$defs/ApprovalRequiredDetails"
+    },
+    "BackgroundJob": {
+      "$ref": "#/$defs/BackgroundJob"
+    },
+    "BuildMismatchDetails": {
+      "$ref": "#/$defs/BuildMismatchDetails"
+    },
+    "CancelParams": {
+      "$ref": "#/$defs/CancelParams"
+    },
+    "ErrorData": {
+      "$ref": "#/$defs/ErrorData"
+    },
+    "ProgressParams": {
+      "$ref": "#/$defs/ProgressParams"
+    },
+    "ProtocolMismatchDetails": {
+      "$ref": "#/$defs/ProtocolMismatchDetails"
+    }
+  },
+  "x-generated": "cargo xtask schema; do not edit"
+}
