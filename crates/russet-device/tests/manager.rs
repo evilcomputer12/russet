@@ -212,3 +212,27 @@ async fn unix_forwards_are_private_and_named_after_the_lease() {
     }
     assert!(!path.exists());
 }
+
+/// Canary (PLAN §0 DoD: no secrets in logs): device errors never carry a UDID, only its redacted form.
+#[tokio::test]
+async fn errors_never_carry_a_udid() {
+    const CANARY: &str = "00008101-CA4A2700CA4A2700";
+    let (_tmp, conn, m) = start(vec![FakeDevice::iphone12(UDID_A)]).await;
+    let err = m.get(&DeviceSelector::Udid(Udid(CANARY.into()))).expect_err("not attached");
+    let rendered =
+        format!("{} {:?} {}", err.message(), err.to_data(), serde_json::to_string(&err.to_data()).expect("json"));
+    assert!(!rendered.contains(CANARY), "{rendered}");
+    assert!(rendered.contains("00008101-…"), "{rendered}");
+    // The same for a device that goes away while a reservation is checked.
+    conn.attach(FakeDevice::iphone12(CANARY));
+    let mut rx = m.events();
+    let h = loop {
+        if let Ok(h) = m.get(&DeviceSelector::Udid(Udid(CANARY.into()))) {
+            break h;
+        }
+        let _ = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
+    };
+    m.reserve(&h, "c-1", "canary").expect("reserve");
+    let err = m.check_access(h.udid(), "c-2", None).expect_err("reserved");
+    assert!(!format!("{} {:?}", err.message(), err.to_data()).contains(CANARY));
+}
