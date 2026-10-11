@@ -6,7 +6,9 @@
 //! russet-config, russet-secrets and russet-toolchain are layer L2 and may not depend on russet-doctor
 //! (ARCHITECTURE §5.2), so their checks live here; the doctor seam (`doctor_registry.rs`) registers them [D 100].
 //! They reach the daemon's services through `CheckCx` extensions, which [`run`] inserts: `Arc<ConfigService>`,
-//! [`SecretsHandle`] and `Arc<Toolchains>`. A check whose service is missing reports `skip`.
+//! [`SecretsHandle`] and `Arc<Toolchains>`. A check whose service did not start fails with the service's error
+//! (a secret store sealed by another backend, say), and the other checks still run; a check whose service is
+//! not in the context at all reports `skip`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -21,14 +23,14 @@ use russet_secrets::SecretStore;
 use russet_toolchain::{Component, Provenance, Toolchains};
 use tokio_util::sync::CancellationToken;
 
-use super::config::project_root;
+use super::config::{config_of, project_root, secrets_of, toolchains_of};
 use super::toolchain::{LogProgress, requirement};
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::DoctorRun, _, _>(|cx: DaemonCtx, _rq, params| async move {
-        let services = DoctorServices::from_env(&cx.dirs, cx.config.clone(), cx.secrets.clone(), cx.toolchains.clone());
+        let services = DoctorServices::from_env(&cx.dirs, config_of(&cx), secrets_of(&cx), toolchains_of(&cx));
         run(&crate::doctor_registry::registry(), &services, params).await
     });
 }
@@ -36,12 +38,13 @@ pub fn register(r: &mut Router<DaemonCtx>) {
 /// The secret store as a `CheckCx` extension (a trait object cannot be one directly).
 pub struct SecretsHandle(pub Arc<dyn SecretStore>);
 
-/// What `doctor.run` hands the checks.
+/// What `doctor.run` hands the checks. A service that did not start is its error: the checks that need it fail
+/// with that error, and the rest still run.
 pub struct DoctorServices {
     pub dirs: RussetDirs,
-    pub config: Arc<ConfigService>,
-    pub secrets: Arc<dyn SecretStore>,
-    pub toolchains: Arc<Toolchains>,
+    pub config: Result<Arc<ConfigService>>,
+    pub secrets: Result<Arc<dyn SecretStore>>,
+    pub toolchains: Result<Arc<Toolchains>>,
     /// The daemon's device backend (`RUSSET_DEVICE_BACKEND`, default `live`).
     pub device_backend: String,
     /// Whether this development build refuses the `live` backend (no `RUSSET_LANE=A`, ARCHITECTURE §3.3 item 7).
@@ -55,9 +58,9 @@ impl DoctorServices {
     /// `RUSSET_DEVICE_BACKEND` when it is spawned, ARCHITECTURE §14.9).
     pub fn from_env(
         dirs: &RussetDirs,
-        config: Arc<ConfigService>,
-        secrets: Arc<dyn SecretStore>,
-        toolchains: Arc<Toolchains>,
+        config: Result<Arc<ConfigService>>,
+        secrets: Result<Arc<dyn SecretStore>>,
+        toolchains: Result<Arc<Toolchains>>,
     ) -> Self {
         let var = |v: &str| std::env::var(v).ok().filter(|s| !s.is_empty());
         let device_backend = var("RUSSET_DEVICE_BACKEND").unwrap_or_else(|| "live".into());
@@ -125,12 +128,23 @@ pub async fn run(registry: &Registry, s: &DoctorServices, params: p::DoctorRunPa
         device_backend: Some(s.device_backend.clone()),
         live_refused: s.live_refused,
         usbmux_address: s.usbmux_address.clone(),
-        min_free_space: Some(s.config.global().storage.min_free_space.bytes()),
+        min_free_space: s.config.as_ref().ok().map(|c| c.global().storage.min_free_space.bytes()),
         extensions: Default::default(),
     };
-    cx.insert(s.config.clone());
-    cx.insert(Arc::new(SecretsHandle(s.secrets.clone())));
-    cx.insert(s.toolchains.clone());
+    let mut unavailable = Unavailable::default();
+    match &s.config {
+        Ok(c) => cx.insert(c.clone()),
+        Err(e) => unavailable.add(CONFIG, e),
+    }
+    match &s.secrets {
+        Ok(store) => cx.insert(Arc::new(SecretsHandle(store.clone()))),
+        Err(e) => unavailable.add(SECRETS, e),
+    }
+    match &s.toolchains {
+        Ok(t) => cx.insert(t.clone()),
+        Err(e) => unavailable.add(TOOLCHAINS, e),
+    }
+    cx.insert(Arc::new(unavailable));
     let filter = Filter {
         checks: params.checks.clone().unwrap_or_default(),
         categories: params.categories.clone().unwrap_or_default().into_iter().map(category_from_wire).collect(),
@@ -169,8 +183,27 @@ pub async fn run(registry: &Registry, s: &DoctorServices, params: p::DoctorRunPa
     })
 }
 
-fn missing_service(what: &str) -> CheckResult {
-    CheckResult::skip(format!("{what} is not available in this context"))
+const CONFIG: &str = "the configuration";
+const SECRETS: &str = "the secret store";
+const TOOLCHAINS: &str = "the toolchain manager";
+
+/// The services that did not start, as a `CheckCx` extension.
+#[derive(Default)]
+struct Unavailable(Vec<(&'static str, CheckResult)>);
+
+impl Unavailable {
+    fn add(&mut self, what: &'static str, e: &Error) {
+        let mut r = CheckResult::from_error(Status::Fail, e);
+        r.summary = format!("{what} did not start: {}", r.summary);
+        self.0.push((what, r));
+    }
+}
+
+/// The result of a check whose service is not in `cx`: the service's start error, else `skip`.
+fn missing_service(cx: &CheckCx, what: &'static str) -> CheckResult {
+    cx.extension::<Unavailable>()
+        .and_then(|u| u.0.iter().find(|(w, _)| *w == what).map(|(_, r)| r.clone()))
+        .unwrap_or_else(|| CheckResult::skip(format!("{what} is not available in this context")))
 }
 
 /// A check over one daemon service.
@@ -237,7 +270,7 @@ fn no_fix() -> Result<()> {
 
 impl ConfigGlobal {
     async fn check(cx: &CheckCx) -> CheckResult {
-        let Some(config) = cx.extension::<ConfigService>() else { return missing_service("the configuration") };
+        let Some(config) = cx.extension::<ConfigService>() else { return missing_service(cx, CONFIG) };
         let global = match config.global_loaded() {
             Ok(g) => g,
             Err(e) => return CheckResult::from_error(Status::Fail, &e),
@@ -263,7 +296,7 @@ impl ConfigGlobal {
 
 impl ConfigProject {
     async fn check(cx: &CheckCx) -> CheckResult {
-        let Some(config) = cx.extension::<ConfigService>() else { return missing_service("the configuration") };
+        let Some(config) = cx.extension::<ConfigService>() else { return missing_service(cx, CONFIG) };
         let Some(root) = cx.project.as_deref() else { return CheckResult::skip("no project") };
         match config.project(root) {
             Ok(p) if p.committed.is_none() && p.local.is_none() => {
@@ -284,7 +317,7 @@ impl ConfigProject {
 
 impl SecretsBackend {
     async fn check(cx: &CheckCx) -> CheckResult {
-        let Some(h) = cx.extension::<SecretsHandle>() else { return missing_service("the secret store") };
+        let Some(h) = cx.extension::<SecretsHandle>() else { return missing_service(cx, SECRETS) };
         let info = h.0.status().await;
         let backend = info.kind.as_str();
         let entry = info.keyring_entry.map(|e| format!(", entry {e}")).unwrap_or_default();
@@ -327,7 +360,7 @@ async fn tool_requirement(
 
 impl ToolchainSwift {
     async fn check(cx: &CheckCx) -> CheckResult {
-        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service("the toolchain manager") };
+        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
         let req = match tool_requirement(cx, Component::Swift).await {
             Ok(r) => r,
             Err(r) => return r,
@@ -361,7 +394,7 @@ impl ToolchainSwift {
 
 impl ToolchainSdk {
     async fn check(cx: &CheckCx) -> CheckResult {
-        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service("the toolchain manager") };
+        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
         match tc.sdks().await {
             Ok(sdks) if sdks.is_empty() => CheckResult::fail("no Darwin SDK is imported").with_hint(
                 "Import the Xcode 27 SDK: `russet sdk import <Xcode_27.xip>` (W16b), or use xtool's bundle.",
@@ -391,7 +424,7 @@ impl ToolchainSdk {
 
 impl ToolchainLinker {
     async fn check(cx: &CheckCx) -> CheckResult {
-        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service("the toolchain manager") };
+        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
         let req = match tool_requirement(cx, Component::Linker).await {
             Ok(r) => r,
             Err(r) => return r,
@@ -450,7 +483,7 @@ async fn install(cx: &CheckCx, c: Component) -> Result<()> {
 }
 
 async fn lldb_check(cx: &CheckCx, c: Component) -> CheckResult {
-    let Some(tc) = cx.extension::<Toolchains>() else { return missing_service("the toolchain manager") };
+    let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
     let req = match tool_requirement(cx, c).await {
         Ok(r) => r,
         Err(r) => return r,
@@ -504,7 +537,7 @@ impl ToolchainLldbDap {
 
 impl ToolchainXtool {
     async fn check(cx: &CheckCx) -> CheckResult {
-        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service("the toolchain manager") };
+        let Some(tc) = cx.extension::<Toolchains>() else { return missing_service(cx, TOOLCHAINS) };
         match tc.resolve(Component::Xtool, &russet_toolchain::Requirement::any()).await {
             Ok(t) => CheckResult::pass(format!("xtool {} at {}", t.version, t.path.display())),
             Err(e) if e.code() == codes::toolchain::MISSING => {

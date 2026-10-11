@@ -164,9 +164,9 @@ async fn doctor_passes_toolchain_and_secrets_and_skips_usbmux_in_lane_d() {
     let dirs = RussetDirs::under(&home);
     let services = DoctorServices {
         dirs: dirs.clone(),
-        config: Arc::new(ConfigService::with_env(&dirs, EnvOverrides::default()).expect("config")),
-        secrets: Arc::new(MemoryStore::new()),
-        toolchains: Arc::new(toolchains(&home, fixture(tmp.path()))),
+        config: Ok(Arc::new(ConfigService::with_env(&dirs, EnvOverrides::default()).expect("config"))),
+        secrets: Ok(Arc::new(MemoryStore::new())),
+        toolchains: Ok(Arc::new(toolchains(&home, fixture(tmp.path())))),
         device_backend: "none".into(),
         live_refused: false,
         usbmux_address: Some(format!("unix:{}", tmp.path().join("no-mux").display())),
@@ -223,9 +223,9 @@ async fn an_lldb_without_remote_ios_fails_with_an_automatic_fix() {
     let dirs = RussetDirs::under(&home);
     let services = DoctorServices {
         dirs: dirs.clone(),
-        config: Arc::new(ConfigService::with_env(&dirs, EnvOverrides::default()).expect("config")),
-        secrets: Arc::new(MemoryStore::new()),
-        toolchains: Arc::new(toolchains(&home, host)),
+        config: Ok(Arc::new(ConfigService::with_env(&dirs, EnvOverrides::default()).expect("config"))),
+        secrets: Ok(Arc::new(MemoryStore::new())),
+        toolchains: Ok(Arc::new(toolchains(&home, host))),
         device_backend: "scripted:/tmp/s.toml".into(),
         live_refused: false,
         usbmux_address: None,

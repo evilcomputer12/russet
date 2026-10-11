@@ -8,20 +8,54 @@
 //! `ConfigService::subscribe`; the daemon core (W2) forwards each [`changed_params`] to every connection.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use russet_config::{ConfigFile, ConfigScope, ConfigService, ReadScope, SourceScope};
 use russet_core::error::{Error, Result, codes};
 use russet_ipc::Router;
 use russet_protocol::config as p;
+use russet_secrets::SecretStore;
+use russet_toolchain::Toolchains;
 
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
-    r.request::<p::ConfigGet, _, _>(|cx: DaemonCtx, _rq, params| async move { get(&cx.config, params) });
-    r.request::<p::ConfigSet, _, _>(|cx: DaemonCtx, _rq, params| async move { set(&cx.config, params) });
-    r.request::<p::ConfigUnset, _, _>(|cx: DaemonCtx, _rq, params| async move { unset(&cx.config, params) });
-    r.request::<p::ConfigSchema, _, _>(|cx: DaemonCtx, _rq, params| async move { Ok(schema(&cx.config, params)) });
+    r.request::<p::ConfigGet, _, _>(|cx: DaemonCtx, _rq, params| async move { get(&*config_of(&cx)?, params) });
+    r.request::<p::ConfigSet, _, _>(|cx: DaemonCtx, _rq, params| async move { set(&*config_of(&cx)?, params) });
+    r.request::<p::ConfigUnset, _, _>(|cx: DaemonCtx, _rq, params| async move { unset(&*config_of(&cx)?, params) });
+    r.request::<p::ConfigSchema, _, _>(
+        |cx: DaemonCtx, _rq, params| async move { Ok(schema(&*config_of(&cx)?, params)) },
+    );
+}
+
+/// The configuration service of the daemon context.
+pub fn config_of(cx: &DaemonCtx) -> Result<Arc<ConfigService>> {
+    cx.config.get()
+}
+
+/// The secret store of the daemon context.
+pub fn secrets_of(cx: &DaemonCtx) -> Result<Arc<dyn SecretStore>> {
+    cx.secrets.get()
+}
+
+/// The toolchain manager of the daemon context.
+pub fn toolchains_of(cx: &DaemonCtx) -> Result<Arc<Toolchains>> {
+    cx.toolchains.get()
+}
+
+/// Reads a service from its `DaemonCtx` slot. The F0 context holds the services as plain `Arc`s; the daemon
+/// runtime (W2) turns the slots into lazily started `Service`s, whose inherent `get()` takes precedence over this
+/// trait, so the accessors above compile against both. Delete it once W2 is on main.
+#[allow(dead_code)] // unused once the slots are W2's `Service`s
+trait Slot<T: ?Sized> {
+    fn get(&self) -> Result<Arc<T>>;
+}
+
+impl<T: ?Sized> Slot<T> for Arc<T> {
+    fn get(&self) -> Result<Arc<T>> {
+        Ok(Arc::clone(self))
+    }
 }
 
 /// A project root from the wire: absolute, and an existing directory.

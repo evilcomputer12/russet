@@ -17,17 +17,24 @@ use russet_protocol::secrets as p;
 use russet_secrets::{BackendKind, SecretBytes, SecretId, SecretKind, SecretMeta, SecretStore};
 use time::format_description::well_known::Rfc3339;
 
+use super::config::secrets_of;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
-    r.request::<p::SecretsStatus, _, _>(|cx: DaemonCtx, _rq, _params| async move { Ok(status(&*cx.secrets).await) });
-    r.request::<p::SecretsList, _, _>(|cx: DaemonCtx, _rq, params| async move { list(&*cx.secrets, params).await });
+    r.request::<p::SecretsStatus, _, _>(
+        |cx: DaemonCtx, _rq, _params| async move { Ok(status(&*secrets_of(&cx)?).await) },
+    );
+    r.request::<p::SecretsList, _, _>(
+        |cx: DaemonCtx, _rq, params| async move { list(&*secrets_of(&cx)?, params).await },
+    );
     r.request::<p::SecretsSet, _, _>(|cx: DaemonCtx, rq: russet_ipc::RequestCtx, params| async move {
         let conn = rq.peer.connection().clone();
-        set(&*cx.secrets, &conn, params).await
+        set(&*secrets_of(&cx)?, &conn, params).await
     });
-    r.request::<p::SecretsDelete, _, _>(|cx: DaemonCtx, _rq, params| async move { delete(&*cx.secrets, params).await });
+    r.request::<p::SecretsDelete, _, _>(|cx: DaemonCtx, _rq, params| async move {
+        delete(&*secrets_of(&cx)?, params).await
+    });
 }
 
 /// The wire backend.

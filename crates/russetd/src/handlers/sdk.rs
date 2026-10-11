@@ -10,13 +10,14 @@ use russet_ipc::Router;
 use russet_protocol::sdk as p;
 use russet_toolchain::Toolchains;
 
+use super::config::toolchains_of;
 use super::not_implemented;
 use super::toolchain::wire_sdk;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
-    r.request::<p::SdkList, _, _>(|cx: DaemonCtx, _rq, _params| async move { list(&cx.toolchains).await });
+    r.request::<p::SdkList, _, _>(|cx: DaemonCtx, _rq, _params| async move { list(&*toolchains_of(&cx)?).await });
     r.request::<p::SdkImport, _, _>(not_implemented::<p::SdkImport>);
     r.request::<p::SdkRemove, _, _>(not_implemented::<p::SdkRemove>);
     r.request::<p::SdkDeviceSupportCheck, _, _>(not_implemented::<p::SdkDeviceSupportCheck>);

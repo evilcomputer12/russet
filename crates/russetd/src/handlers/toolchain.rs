@@ -15,23 +15,27 @@ use russet_protocol::toolchain as p;
 use russet_toolchain::{Component, Provenance, Requirement, SdkInfo, ToolInfo, Toolchains};
 use tokio_util::sync::CancellationToken;
 
-use super::config::project_root;
+use super::config::{config_of, project_root, toolchains_of};
 use super::not_implemented;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
-    r.request::<p::ToolchainList, _, _>(|cx: DaemonCtx, _rq, params| async move { list(&cx.toolchains, params).await });
+    r.request::<p::ToolchainList, _, _>(|cx: DaemonCtx, _rq, params| async move {
+        list(&*toolchains_of(&cx)?, params).await
+    });
     r.request::<p::ToolchainResolve, _, _>(|cx: DaemonCtx, _rq, params| async move {
-        resolve(&cx.toolchains, &cx.config, params).await
+        resolve(&*toolchains_of(&cx)?, &*config_of(&cx)?, params).await
     });
     r.request::<p::ToolchainInstall, _, _>(|cx: DaemonCtx, rq: russet_ipc::RequestCtx, params| async move {
-        install(&cx.toolchains, &cx.config, params, &LogProgress, &rq.cancel).await
+        install(&*toolchains_of(&cx)?, &*config_of(&cx)?, params, &LogProgress, &rq.cancel).await
     });
     r.request::<p::ToolchainUninstall, _, _>(|cx: DaemonCtx, _rq, params| async move {
-        uninstall(&cx.toolchains, params).await
+        uninstall(&*toolchains_of(&cx)?, params).await
     });
-    r.request::<p::ToolchainGc, _, _>(|cx: DaemonCtx, _rq, params| async move { gc(&cx.toolchains, params).await });
+    r.request::<p::ToolchainGc, _, _>(
+        |cx: DaemonCtx, _rq, params| async move { gc(&*toolchains_of(&cx)?, params).await },
+    );
     r.request::<p::ToolchainPinsUpdate, _, _>(not_implemented::<p::ToolchainPinsUpdate>);
 }
 
