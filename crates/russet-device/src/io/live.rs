@@ -546,7 +546,13 @@ async fn watch_once(
     tx: &tokio::sync::mpsc::Sender<DeviceEvent>,
 ) -> Result<()> {
     let mut listen = MuxClient::connect(endpoint).await?.listen().await?;
-    while let Some(ev) = listen.next().await {
+    loop {
+        // Stop listening as soon as nobody watches (the manager is gone), not at the next mux event.
+        let ev = tokio::select! {
+            _ = tx.closed() => return Ok(()),
+            ev = listen.next() => ev,
+        };
+        let Some(ev) = ev else { break };
         match ev? {
             MuxEvent::Attached(d) => {
                 let known = devices.lock().map(|m| m.contains_key(&d.udid)).unwrap_or(false);
