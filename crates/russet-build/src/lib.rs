@@ -27,7 +27,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use camino::{Utf8Path, Utf8PathBuf};
 use plist::{Dictionary, Value};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
@@ -54,6 +53,7 @@ pub mod report;
 pub mod resources;
 pub mod stack;
 
+pub use camino::{Utf8Path, Utf8PathBuf};
 pub use events::{BuildEvent, NullSink, Stage};
 pub use macho::{MachOSummary, MachOTool, RussetMachO};
 pub use manifest::{Backend, PackageKind, Stack};
@@ -1617,6 +1617,27 @@ impl Builder {
     pub fn inspect(&self, path: &Utf8Path) -> Result<inspect::InspectReport> {
         inspect::inspect(path, self.env.macho.as_ref())
     }
+}
+
+/// What [`package_ipa`] wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackagedIpa {
+    pub path: Utf8PathBuf,
+    pub entries: usize,
+    pub bytes: u64,
+    pub sha256: String,
+}
+
+/// Packs an existing `.app` into an IPA (`russet package ipa`; build §4.8): `store` deflates and is meant for
+/// uploads, otherwise entries are stored. `build.packageFailed` (4007) on failure.
+pub fn package_ipa(app: &Utf8Path, out: &Utf8Path, store: bool) -> Result<PackagedIpa> {
+    let mode = if store { russet_ipa::IpaMode::Store } else { russet_ipa::IpaMode::Dev };
+    let r = russet_ipa::write(app, out, russet_ipa::IpaOptions::new(mode)).map_err(|e| {
+        Error::new(codes::build::PACKAGE_FAILED, format!("cannot package {app}: {e}"))
+            .with_hint("Pass an .app directory and a writable output path.")
+            .caused_by(e)
+    })?;
+    Ok(PackagedIpa { path: r.path, entries: r.entries, bytes: r.bytes, sha256: r.sha256 })
 }
 
 /// Build doctor checks, for russetd's doctor seam. The SDK and toolchain checks live in russet-sdk

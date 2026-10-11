@@ -39,7 +39,7 @@ pub mod toolset;
 pub mod view;
 mod xtool;
 
-pub use xtool::XtoolBundleProvider;
+pub use xtool::{DefaultSdkProvider, XtoolBundleProvider};
 
 /// An Apple-style version (`27.0`, `6.4`, `17.0`, `27.0.99`); not semver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]

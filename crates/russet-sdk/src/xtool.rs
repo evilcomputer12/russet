@@ -193,6 +193,32 @@ impl XtoolBundleProvider {
     }
 }
 
+/// The daemon's SDK resolution order (ARCHITECTURE §16.1): Russet-imported bundles (W16b), then xtool's bundles
+/// read in place. The host toolchain is probed on each resolve (W3's resolver replaces the probe), so creating
+/// the provider costs nothing.
+#[derive(Debug, Clone)]
+pub struct DefaultSdkProvider {
+    data_dir: Utf8PathBuf,
+    tool: Option<Utf8PathBuf>,
+}
+
+impl DefaultSdkProvider {
+    /// Views and toolsets go under `data_dir/sdk/<id>/`; `russet_tool` is linked into the views when given.
+    pub fn new(data_dir: impl Into<Utf8PathBuf>, russet_tool: Option<Utf8PathBuf>) -> Self {
+        Self { data_dir: data_dir.into(), tool: russet_tool }
+    }
+}
+
+#[async_trait]
+impl SdkProvider for DefaultSdkProvider {
+    async fn resolve(&self, sel: &SdkSelector) -> Result<SdkFacts> {
+        let host = tokio::task::spawn_blocking(HostToolchain::probe)
+            .await
+            .map_err(|e| Error::new(codes::core::INTERNAL, format!("toolchain probe panicked: {e}")))??;
+        XtoolBundleProvider::new(&self.data_dir, host).with_tool(self.tool.clone()).resolve(sel).await
+    }
+}
+
 /// `sdk.buildFacts`: an iOS SDK bundle that has every file the build plane needs (ARCHITECTURE §16.3).
 pub(crate) struct BuildFactsCheck;
 

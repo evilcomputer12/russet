@@ -295,6 +295,11 @@ fn expand_value(v: Value, settings: &SettingsStack) -> std::result::Result<Value
     })
 }
 
+/// The JSON form of a dictionary (see [`to_json`]).
+pub fn dict_to_json(d: &Dictionary) -> serde_json::Value {
+    serde_json::Value::Object(d.iter().map(|(k, v)| (k.clone(), to_json(v))).collect())
+}
+
 /// The JSON form of a plist value (`project.infoPlist`, `build.inspect`): dictionaries, arrays, strings, numbers
 /// and booleans map directly; dates become RFC 3339 strings and data base64 strings.
 pub fn to_json(v: &Value) -> serde_json::Value {
