@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Stub (QA-03; PLAN W8). The release workflow of QA §4.2 and §5: on a `v*` tag, the build matrix (an
+# `ubuntu:22.04` container on ubuntu-24.04, and windows-2025), packages, smoke installs, SBOM, checksums, minisign
+# and a draft release. W26 fills it (QA-18). Until then a tag push or a dispatch fails at once, so nothing that
+# looks like a release is ever produced by a stub.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  release:
+    name: release (stub until W26)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Not implemented yet
+        run: |
+          echo "::error title=release.yml::a stub until W26 (QA-18): no release pipeline yet (QA §5)"
+          exit 1

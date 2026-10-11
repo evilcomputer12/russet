@@ -12,8 +12,15 @@
 # runs both jobs, and the DCO check joins rust-linux.
 #
 # The guards run inside rust-linux rather than in a job of their own: each job is billed rounded up to whole
-# minutes and pays its own setup, and QA §4.8 budgets about 20 minutes per main push. `cargo xtask ci-budget`
-# measures the month's use and warns at 80 %.
+# minutes and pays its own setup, and QA §4.8 budgets about 20 minutes per main push. For the same reason the
+# docs-only path filter (QA §4.1) lives inside the job: when every file of the push or pull request is
+# documentation, `--changed-since` skips fmt, clippy, tests and deny, and the guards, check-layers, check-paths and
+# schema drift still run. `cargo xtask ci-budget` measures the month's use and warns at 80 %.
+#
+# No Apple file may enter an artifact or a cache (QA §4.1 principle 2): uploads go through upload-safe, and what
+# rust-cache saves is guarded before the job ends (rust-cache saves only after a successful job): the target
+# directories it keeps and ~/.cargo/bin (the installed tools). The cargo registry and git caches hold compressed
+# crates.io and git archives pinned by Cargo.lock's checksums, so they are not scanned.
 #
 # Actions are pinned to full commit SHAs (Dependabot keeps them current); `permissions: {}` at the top, raised
 # per job; checkout never persists credentials; untrusted values reach scripts only through `env`. zizmor audits
@@ -89,13 +96,25 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          # The commit check covers the pull request's commits, or the commits of this push.
+          # The commit check covers the pull request's commits, or the commits of this push; the same range decides
+          # whether the change is documentation only. A dispatch or a new branch runs everything.
+          range=()
           case "$EVENT" in
             pull_request) base="origin/$BASE_REF" ;;
             push) if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then base="$BEFORE"; else base=HEAD; fi ;;
             *) base=HEAD ;;
           esac
-          cargo xtask ci --profile pr --require-tools --guard-base "$base"
+          if [ "$base" != HEAD ]; then range=(--changed-since "$base"); fi
+          cargo xtask ci --profile pr --require-tools --guard-base "$base" "${range[@]}"
+      - name: zizmor online audits (impostor commits, known-vulnerable actions)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo xtask guard zizmor --zizmor-online --require-tools
+      - name: Guard the cache (apple-files)
+        if: github.ref == 'refs/heads/main'
+        run: >-
+          cargo xtask guard apple-files --if-missing ignore --artifacts "$HOME/.cargo/bin"
+          --artifacts target/debug/deps --artifacts target/debug/build --artifacts target/debug/.fingerprint
       - name: DCO (public phase)
         if: github.event_name == 'pull_request' && vars.RUSSET_PUBLIC == 'true'
         env:
@@ -138,3 +157,8 @@ jobs:
           tool: cargo-nextest@0.9.148
       - name: cargo xtask ci --profile windows
         run: cargo xtask ci --profile windows --require-tools
+      - name: Guard the cache (apple-files)
+        shell: bash
+        run: >-
+          cargo xtask guard apple-files --if-missing ignore --artifacts "$HOME/.cargo/bin"
+          --artifacts target/debug/deps --artifacts target/debug/build --artifacts target/debug/.fingerprint
