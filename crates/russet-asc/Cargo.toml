@@ -15,8 +15,19 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
 p256.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 russet-core.workspace = true
 russet-doctor.workspace = true
+rustls.workspace = true
 secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["time"] }
+url.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+wiremock = "0.6.5"
