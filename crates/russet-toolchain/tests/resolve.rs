@@ -53,6 +53,10 @@ async fn a_project_pin_that_the_host_does_not_have_is_a_version_mismatch() {
     assert_eq!(env.sdk.id, "xcode-27.0-27A266a");
     assert_eq!(env.linker.version, "21.1.6");
     assert!(matches!(env.linker.provenance, Provenance::XtoolBundle { .. }));
+    let by_build = tc.resolve(Component::DarwinSdk, &Requirement::version("27A266a")).await.expect("by build");
+    assert_eq!(by_build.version, "27.0");
+    assert!(tc.resolve(Component::DarwinSdk, &Requirement::version("27.0")).await.is_ok());
+    assert!(tc.resolve(Component::DarwinSdk, &Requirement::version("26A100")).await.is_err());
     let pinned_sdk = ToolchainSection { xcode_sdk: Some("26.0".into()), ..ToolchainSection::default() };
     assert_eq!(tc.resolve_build_env(&pinned_sdk).await.map_err(|e| e.code()).err(), Some(codes::sdk::MISSING));
 }
@@ -79,6 +83,13 @@ async fn an_old_darwin_tools_bundle_and_an_old_system_lld_are_linker_unsupported
     assert_eq!((lld.version.as_str(), &lld.provenance), ("23.1.3", &Provenance::System));
     let err = tc.resolve(Component::Linker, &Requirement::flavor("darwin-tools@1.1.0")).await.expect_err("none");
     assert_eq!(err.code(), codes::toolchain::LINKER_UNSUPPORTED);
+    // Malformed flavors are configuration errors, never "any version".
+    for bad in ["darwin-tools@>=1.1.x", "llvm@latest", "gold"] {
+        let err = tc.resolve(Component::Linker, &Requirement::flavor(bad)).await.expect_err(bad);
+        assert_eq!(err.code(), codes::config::INVALID, "{bad}");
+    }
+    let err = tc.resolve(Component::Lldb, &Requirement::flavor("gdb")).await.expect_err("gdb");
+    assert_eq!(err.code(), codes::config::INVALID);
 }
 
 /// Builds `<root>/usr/lib/liblldb.so` with a real `DT_NEEDED` on `libpython3.12.so.1.0` (needs a C compiler).

@@ -111,15 +111,28 @@ pub enum VersionReq {
 impl FromStr for VersionReq {
     type Err = String;
 
+    /// Strict: the version after the operator is digits and dots only (`>=1.1.x` and `latest` are refused).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let t = s.trim();
-        if let Some(v) = t.strip_prefix(">=") {
-            Ok(Self::AtLeast(v.parse()?))
+        let (op, v) = if let Some(v) = t.strip_prefix(">=") {
+            (">=", v)
         } else if let Some(v) = t.strip_prefix('=') {
-            Ok(Self::Exact(v.parse()?))
+            ("=", v)
         } else {
-            Ok(Self::Prefix(t.parse()?))
+            ("", t)
+        };
+        let v = v.trim();
+        let numeric =
+            !v.is_empty() && v.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+        if !numeric {
+            return Err(format!("`{s}` is not a version requirement (write 6.4, =6.4.0 or >=23.1.3)"));
         }
+        let version: Version = v.parse()?;
+        Ok(match op {
+            ">=" => Self::AtLeast(version),
+            "=" => Self::Exact(version),
+            _ => Self::Prefix(version),
+        })
     }
 }
 
@@ -172,6 +185,9 @@ mod tests {
         assert!(req.matches(&v("6.4.0")) && req.matches(&v("6.4.1")) && !req.matches(&v("6.3")));
         let req: VersionReq = "=1.1.0".parse().expect("req");
         assert!(req.matches(&v("1.1")) && !req.matches(&v("1.1.1")));
+        for bad in [">=1.1.x", "latest", "", "1..2", ">=", "6.4-dev"] {
+            assert!(bad.parse::<VersionReq>().is_err(), "{bad}");
+        }
     }
 
     #[test]

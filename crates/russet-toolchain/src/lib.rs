@@ -390,6 +390,15 @@ impl Toolchains {
             return self.explicit_tool(c, path).await;
         }
         let candidates = self.candidates(c, req).await;
+        // `[toolchain] xcode-sdk` may name an Xcode build (`27A266a`) or an SDK id instead of a version.
+        if c == Component::DarwinSdk
+            && let Some(v) = req.version.as_deref().filter(|v| v.parse::<VersionReq>().is_err())
+        {
+            let bundles: Vec<PathBuf> =
+                self.sdks_now().into_iter().filter(|s| s.xcode_build == v || s.id == v).map(|s| s.bundle).collect();
+            let matching: Vec<ToolInfo> = candidates.into_iter().filter(|t| bundles.contains(&t.path)).collect();
+            return self.pick(c, matching, &Requirement::any(), None);
+        }
         self.pick(c, candidates, req, flavor)
     }
 

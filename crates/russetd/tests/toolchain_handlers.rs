@@ -128,6 +128,12 @@ async fn list_resolve_and_sdk_list() {
     std::fs::write(project.join("russet.toml"), "[debug]\nlldb = \"llvm\"\n").expect("flavor");
     let err = th::resolve(&tc, &svc, params(p::ToolComponent::Lldb)).await.expect_err("no llvm lldb");
     assert_eq!(err.code(), codes::toolchain::MISSING);
+    // A relative tool path in russet.toml is relative to the project, not to the daemon's directory.
+    script(&project.join("tools/ld64.lld"), "echo 'LLD 23.1.4'");
+    std::fs::write(project.join("russet.toml"), "[toolchain]\nlinker = \"tools/ld64.lld\"\n").expect("path");
+    let linker = th::resolve(&tc, &svc, params(p::ToolComponent::Linker)).await.expect("project linker");
+    assert_eq!(linker.path, project.join("tools/ld64.lld").display().to_string());
+    assert_eq!((linker.version.as_str(), linker.provenance), ("23.1.4", p::ToolProvenance::ProjectPin));
 }
 
 #[tokio::test]
