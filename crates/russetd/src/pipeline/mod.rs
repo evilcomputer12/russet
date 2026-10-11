@@ -9,8 +9,8 @@
 //! - the ports over the daemon's real services: [`live`];
 //! - `run.subscribe`'s notification forwarder: [`subscribe`].
 //!
-//! [`lldb`] re-exports russet-debug's LLDB plans for the CLI, which may not depend on an L3 crate directly
-//! (ARCHITECTURE §5.2) but reaches it through russetd.
+//! [`lldb`] and [`logs`] re-export russet-debug's LLDB plans and timestamp helpers for the CLI, which may not
+//! depend on an L3 crate directly (ARCHITECTURE §5.2) but reaches it through russetd.
 //!
 //! Pre-created by W1 (PLAN §3 [D 86]); W7 owns it.
 
@@ -19,4 +19,4 @@ pub mod live;
 pub mod run;
 pub mod subscribe;
 
-pub use russet_debug::lldb;
+pub use russet_debug::{lldb, logs};

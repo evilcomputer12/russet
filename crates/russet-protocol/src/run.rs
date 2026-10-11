@@ -81,6 +81,11 @@ pub struct RunStartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub session_lease: Option<SessionLease>,
+    /// The RPC flag of every long-running method (§7.6): return `{jobId}` at once; the job survives the
+    /// requester. Read by the job layer; it says nothing about the session's lifetime (`sessionLease`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub background: Option<bool>,
 }
 
 /// Result of `run.start`. `sessionId` and `pid` are absent with `launch: none`.
