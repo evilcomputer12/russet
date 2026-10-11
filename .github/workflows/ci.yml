@@ -113,7 +113,7 @@ jobs:
       - name: Guard the cache (apple-files)
         if: github.ref == 'refs/heads/main'
         run: >-
-          cargo xtask guard apple-files --if-missing ignore --artifacts "$HOME/.cargo/bin"
+          cargo xtask guard apple-files --if-missing ignore --artifacts "${CARGO_HOME:-$HOME/.cargo}/bin"
           --artifacts target/debug/deps --artifacts target/debug/build --artifacts target/debug/.fingerprint
       - name: DCO (public phase)
         if: github.event_name == 'pull_request' && vars.RUSSET_PUBLIC == 'true'
@@ -159,6 +159,7 @@ jobs:
         run: cargo xtask ci --profile windows --require-tools
       - name: Guard the cache (apple-files)
         shell: bash
+        # USERPROFILE is a Windows path a native xtask.exe reads as is; Git Bash's $HOME is a POSIX one.
         run: >-
-          cargo xtask guard apple-files --if-missing ignore --artifacts "$HOME/.cargo/bin"
+          cargo xtask guard apple-files --if-missing ignore --artifacts "${CARGO_HOME:-$USERPROFILE/.cargo}/bin"
           --artifacts target/debug/deps --artifacts target/debug/build --artifacts target/debug/.fingerprint
