@@ -10,7 +10,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -185,6 +184,55 @@ async fn upload_file(afc: &mut AfcClient, bytes: &[u8], remote: &str) -> Result<
     res.and(closed).map_err(|e| from_idevice(e, &format!("AFC write {remote}")))
 }
 
+/// Uploads `pkg` to `remote` in `PublicStaging` and returns the `installation_proxy` options for it. A `.app`
+/// directory is mirrored file by file (the first half of the progress); an `.ipa` is one file.
+async fn upload_package(
+    afc: &mut AfcClient,
+    pkg: &Path,
+    is_dir: bool,
+    remote: &str,
+    bundle_id: &str,
+    uploaded: &AtomicU64,
+    p: &dyn ProgressSink,
+) -> Result<plist::Dictionary> {
+    let mut opts = plist::Dictionary::new();
+    if !is_dir {
+        let bytes = tokio::fs::read(pkg).await.map_err(|e| invalid_argument(format!("{}: {e}", pkg.display())))?;
+        upload_file(afc, &bytes, remote).await?;
+        uploaded.fetch_add(bytes.len() as u64, Ordering::SeqCst);
+        p.report(Some("uploaded"), Some(50));
+        opts.insert("CFBundleIdentifier".into(), bundle_id.into());
+        return Ok(opts);
+    }
+    let items = plan_dir_upload(pkg, remote)?;
+    let total: u64 = items.iter().map(|i| if let UploadItem::File { size, .. } = i { *size } else { 0 }).sum();
+    for item in items {
+        match item {
+            UploadItem::Dir(d) => {
+                if afc.get_file_info(d.as_str()).await.is_err() {
+                    afc.mk_dir(d.as_str()).await.map_err(|e| from_idevice(e, &format!("AFC mkdir {d}")))?;
+                }
+            }
+            UploadItem::Symlink { target, remote } => {
+                afc.link(target.as_str(), remote.as_str(), LinkType::Symlink)
+                    .await
+                    .map_err(|e| from_idevice(e, &format!("AFC symlink {remote}")))?;
+            }
+            UploadItem::File { local, remote, size } => {
+                let bytes =
+                    tokio::fs::read(&local).await.map_err(|e| invalid_argument(format!("{}: {e}", local.display())))?;
+                upload_file(afc, &bytes, &remote).await?;
+                let done = uploaded.fetch_add(size, Ordering::SeqCst) + size;
+                if let Some(pct) = (done * 50).checked_div(total) {
+                    p.report(Some("uploading"), Some(pct as u8));
+                }
+            }
+        }
+    }
+    opts.insert("PackageType".into(), "Developer".into());
+    Ok(opts)
+}
+
 /// Installs a `.app` directory or an `.ipa` (device.md §6.4).
 pub async fn install(h: &DeviceHandle, pkg: &Path, o: InstallOptions, p: &dyn ProgressSink) -> Result<InstalledApp> {
     let started = Instant::now();
@@ -197,63 +245,29 @@ pub async fn install(h: &DeviceHandle, pkg: &Path, o: InstallOptions, p: &dyn Pr
         afc.mk_dir(PUBLIC_STAGING).await.map_err(|e| from_idevice(e, "creating PublicStaging"))?;
     }
     let stage = format!("{PUBLIC_STAGING}/russet-{}", uuid::Uuid::new_v4().simple());
-    let uploaded = Arc::new(AtomicU64::new(0));
-    let (remote_package, mut options) = if is_dir {
-        let remote = format!("{stage}.app");
-        let items = plan_dir_upload(pkg, &remote)?;
-        let total: u64 = items.iter().map(|i| if let UploadItem::File { size, .. } = i { *size } else { 0 }).sum();
-        for item in items {
-            match item {
-                UploadItem::Dir(d) => {
-                    if afc.get_file_info(d.as_str()).await.is_err() {
-                        afc.mk_dir(d.as_str()).await.map_err(|e| from_idevice(e, &format!("AFC mkdir {d}")))?;
-                    }
-                }
-                UploadItem::Symlink { target, remote } => {
-                    afc.link(target.as_str(), remote.as_str(), LinkType::Symlink)
-                        .await
-                        .map_err(|e| from_idevice(e, &format!("AFC symlink {remote}")))?;
-                }
-                UploadItem::File { local, remote, size } => {
-                    let bytes = tokio::fs::read(&local)
-                        .await
-                        .map_err(|e| invalid_argument(format!("{}: {e}", local.display())))?;
-                    upload_file(&mut afc, &bytes, &remote).await?;
-                    let done = uploaded.fetch_add(size, Ordering::SeqCst) + size;
-                    if let Some(pct) = (done * 50).checked_div(total) {
-                        p.report(Some("uploading"), Some(pct as u8));
-                    }
-                }
-            }
+    let remote_package = format!("{stage}.{}", if is_dir { "app" } else { "ipa" });
+    let uploaded = AtomicU64::new(0);
+    let res = async {
+        let mut options =
+            upload_package(&mut afc, pkg, is_dir, &remote_package, &bundle.bundle_id, &uploaded, p).await?;
+        for (k, v) in o.client_options {
+            options.insert(k, v.into());
         }
-        let mut opts = plist::Dictionary::new();
-        opts.insert("PackageType".into(), "Developer".into());
-        (remote, opts)
-    } else {
-        let remote = format!("{stage}.ipa");
-        let bytes = tokio::fs::read(pkg).await.map_err(|e| invalid_argument(format!("{}: {e}", pkg.display())))?;
-        upload_file(&mut afc, &bytes, &remote).await?;
-        uploaded.fetch_add(bytes.len() as u64, Ordering::SeqCst);
-        p.report(Some("uploaded"), Some(50));
-        let mut opts = plist::Dictionary::new();
-        opts.insert("CFBundleIdentifier".into(), bundle.bundle_id.clone().into());
-        (remote, opts)
-    };
-    for (k, v) in o.client_options {
-        options.insert(k, v.into());
+        let mut ip = instproxy(h).await?;
+        // installation_proxy reports its own 0–100; the upload was the first half.
+        let progress_cb = |(pct, ()): (u64, ())| {
+            p.report(Some("installing"), Some((50 + pct.min(100) / 2) as u8));
+            std::future::ready(())
+        };
+        ip.install_with_callback(remote_package.clone(), Some(plist::Value::Dictionary(options)), progress_cb, ())
+            .await
+            .map_err(|e| h.note_error(from_idevice(e, &format!("installing {}", bundle.bundle_id))))
     }
-    let mut ip = instproxy(h).await?;
-    // installation_proxy reports its own 0–100; the upload was the first half.
-    let progress_cb = |(pct, ()): (u64, ())| {
-        p.report(Some("installing"), Some((50 + pct.min(100) / 2) as u8));
-        std::future::ready(())
-    };
-    let res = ip
-        .install_with_callback(remote_package.clone(), Some(plist::Value::Dictionary(options)), progress_cb, ())
-        .await;
-    // installd empties PublicStaging after an IPA; a developer directory may stay behind.
+    .await;
+    // installd empties PublicStaging after an IPA; a developer directory may stay behind, and so does a partial
+    // upload when the upload or the install failed.
     let _ = afc.remove_all(remote_package.as_str()).await;
-    res.map_err(|e| h.note_error(from_idevice(e, &format!("installing {}", bundle.bundle_id))))?;
+    res?;
     p.report(Some("installed"), Some(100));
     let installed_path = lookup(h, &bundle.bundle_id).await.ok().flatten().and_then(|a| a.path);
     p.end(Some("installed"));
