@@ -144,6 +144,20 @@ async fn run() -> russet_core::Result<()> {
             eprintln!("ddi status in {:?}", t.elapsed());
             show("ddi", serde_json::to_value(russet_device::wire::ddi_status(&s)).unwrap_or_default());
         }
+        "prepare" => {
+            // device.prepare on a ready phone must be a no-op (DEV-13 acceptance: < 1 s). Refuses to run when no DDI is
+            // mounted, so it can never start a mount by surprise.
+            let h = mgr.get(&sel)?;
+            if !h.ddi_status().await?.mounted {
+                return Err(russet_device::error::invalid_argument(
+                    "no DDI is mounted: prepare would mount one (that is DC-28's job)",
+                ));
+            }
+            let t = Instant::now();
+            let r = h.prepare(Default::default()).await?;
+            eprintln!("device.prepare in {:?}", t.elapsed());
+            show("readiness", serde_json::to_value(russet_device::wire::readiness(&r)).unwrap_or_default());
+        }
         "ddi-mount" => {
             let h = mgr.get(&sel)?;
             let dir = args.get(1).cloned().ok_or_else(|| russet_device::error::invalid_argument("ddi-mount <dir>"))?;

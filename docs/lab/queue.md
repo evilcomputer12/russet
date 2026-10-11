@@ -55,7 +55,10 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
     `OS_ACTIVITY_DT_MODE=YES` (or `1`, `enable`) does **not** mirror os_log to the console on iOS 27.0.
   - Exit after SIGKILL: seen through the console's end in 18–42 ms.
   - DDI status: mounted, `cryptex1`, version `27.1.5228.8`, `productBuild 27A5228h`, `source: unknown` (the spike's
-    mirror DDI; Russet has no mount record for it): W4's acceptance item.
+    mirror DDI; Russet has no mount record for it): W4's acceptance item. `device.prepare` on this ready phone is a
+    no-op in 182 ms (nothing mounted, no mount record written; DEV-13 asks for < 1 s).
+  - DVT fallback launch (`--dvt`): pid in 451 ms, no console; the exit poll saw a SIGKILL after 695 ms.
+  - Uninstall of the test app, a second uninstall (`app.notInstalled`, 3100, with its hint) and a reinstall.
   - The M1 LLDB sequence over Russet's own `com.apple.internal.dt.remote.debugproxy` forward (0600 Unix socket) and
     Russet's suspended CoreDevice launch stopped at `ContentView.swift:6:31` in
     `closure #1 () in ContentView.body.getter`, with no pymobiledevice3 on `PATH` (`devlab debug-session` plus the
