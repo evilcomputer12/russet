@@ -119,16 +119,19 @@ pub trait DeviceServices: Send + Sync {
     /// Launches through CoreDevice (DVT fallback), keeping the launch channel open in [`Launched::channel`].
     async fn launch(&self, udid: &Udid, spec: &LaunchSpec) -> Result<Launched> {
         let d = self.device(udid).await?;
-        let process = d
-            .launch(LaunchRequest {
-                bundle_id: spec.bundle_id.clone(),
-                args: spec.args.clone(),
-                env: spec.env.clone(),
-                suspended: spec.suspended,
-                kill_existing: spec.kill_existing,
-                console: spec.console,
-            })
-            .await?;
+        // F0's request has only these fields; W4's F2 adds more (the CoreDevice/DVT choice), whose defaults apply
+        // until they are mapped here.
+        #[allow(clippy::needless_update)]
+        let request = LaunchRequest {
+            bundle_id: spec.bundle_id.clone(),
+            args: spec.args.clone(),
+            env: spec.env.clone(),
+            suspended: spec.suspended,
+            kill_existing: spec.kill_existing,
+            console: spec.console,
+            ..LaunchRequest::default()
+        };
+        let process = d.launch(request).await?;
         let mut launched = Launched::pid_only(process.pid);
         launched.executable = Some(process.executable.clone());
         launched.strategy = spec.strategy;
@@ -843,5 +846,28 @@ pub async fn broker_endpoint_probe(runtime: &Path) -> russet_doctor::CheckResult
                     .to_owned(),
             ),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_broker_endpoint_check_passes_in_a_writable_runtime_dir_and_fails_otherwise() {
+        let base = std::env::temp_dir().join(format!("russet-doctor-{}", std::process::id()));
+        let ok = broker_endpoint_probe(&base.join("runtime")).await;
+        assert_eq!(ok.status, russet_doctor::Status::Pass, "{ok:?}");
+        assert!(ok.detail.as_deref().is_some_and(|d| d.starts_with("unix-connect://") || d.starts_with("connect://")));
+        // A runtime "directory" that is a file cannot hold the socket.
+        std::fs::write(base.join("file"), b"x").unwrap_or_else(|e| panic!("{e}"));
+        let bad = broker_endpoint_probe(&base.join("file")).await;
+        if cfg!(unix) {
+            assert_eq!(bad.status, russet_doctor::Status::Fail, "{bad:?}");
+            assert!(bad.hint.is_some());
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        let ids: Vec<&str> = checks().iter().map(|c| c.id()).collect();
+        assert_eq!(ids, ["debug.brokerEndpoint"]);
     }
 }
