@@ -18,7 +18,8 @@ dist/
 *.mobileprovision
 .build/
 xtool/
-.orchard/
+.russet/
+russet.local.toml
 
 # Editors / OS
 .DS_Store

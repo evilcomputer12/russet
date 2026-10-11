@@ -1,0 +1,167 @@
+{
+ "verdict": "Revise before W1 starts. A lot of this is solid. Every pin I checked exists exactly as written: idevice 0.1.68, jktcp 0.1.7, apple-codesign 0.29.0, rmcp 3.5.1, reqwest 0.13.5, keyring-core 1.0.0, symbolic 13.9.0, zip 9.0.1, vscode-jsonrpc 9.0.3, @agentclientprotocol/sdk 1.8.0, VSCodium 1.135.06055 / Code-OSS 1.135.0 (08d4889f), python-build-standalone (PBS) 20261009 / CPython 3.12.15, Flutter 3.47.7 / Dart 3.13.5, LLVM 23.1.3, darwin-tools 1.1.0, xtool 1.21.0, MCP spec 2026-07-28, Claude Code 2.1.296, and llama-server's default port 9931. The idevice 0.1.68 source really does provide what the plan assumes: display_stream (HEVC over RTP), CoreDevice HID, openstdiosocket, an app-service launch with start_suspended and stdio_uuid, cryptexd install_ddi and Cryptex1Assets, copy_devices, sysmontap / energy / network / graphics, xctest, wda and remote_pairing. Jktcp's set_mss is public. Licences are compatible: ring is Apache-2.0 AND ISC, apple-codesign is MPL-2.0. The process model, IPC framing, permission/approval model and MCP layering hang together, and the device spike evidence is strong.\n\nThe plan is not ready for parallel implementation yet:\n- **One blocker:** no workstream can get a Developer Disk Image (DDI) without using Apple files from a third-party mirror. I confirmed read-only on the Mac that Xcode 27 keeps the iOS DDI only inside Contents/Resources/Packages/XcodeSystemResources.pkg, and nothing in the plan extracts it.\n- **Nine major issues:**\n  - The shared per-user daemon breaks the device rule across agent worktrees.\n  - There is no App Store version/submission method, even though the publishing panel is decided.\n  - Storyboard/XIB compilation has no task.\n  - W25 asks for title-bar buttons in the Tier-1 repack, which cannot have them.\n  - Flutter's TXM page-touching (TXM = Apple's code-signing monitor on A15+ chips) cannot be verified on the A14 test phone.\n  - The Apple-hardware CI template defaults to a runner that has no Xcode 27.\n  - The F1/F2 contract freezes are scheduled in the wrong order.\n  - Windows has no native SDK import.\n  - The Wave-1 gate depends on a DDI that pymobiledevice3 mounted earlier.\n- **Minor issues** can go into W1's contract PR.\n\nI deleted and changed nothing, and ran no device commands. My Mac use was read-only: ls, find, pkgutil, xar -t, hdiutil imageinfo and devicectl --help.",
+ "issues": [
+  {
+   "severity": "blocker",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a719 'Runtime-only Apple inputs' and \u00a78.2 device.ddi.mount {xcodeApp}; /home/martinv/russet/docs/design/device.md \u00a76.3 + OQ-3; /home/martinv/russet/docs/PLAN.md W10 (DEV-13), W16 (sdk.import)",
+   "issue": "The plan says DDIs come from the user's own Xcode, but no workstream extracts one, and device.md leaves the location open (OQ-3). I checked the Mac read-only:\n- Xcode 27.0's bundle has no BuildManifest.plist, .dmg or .trustcache outside the SDK cryptex directories.\n- The iOS DDI ships only inside Contents/Resources/Packages/XcodeSystemResources.pkg, a 146 MB xar flat package (PackageInfo/Scripts/Bom/Payload).\n- Its payload contains ./Library/Developer/CoreDevice/CandidateDDIs/iOS_DDI.dmg: 32.7 MB, UDZO format, an Apple_HFS partition.\n- On the Mac it is installed to /Library/Developer/CoreDevice/CandidateDDIs and promoted to /Library/Developer/DeveloperDiskImages/iOS_DDI (ProductBuildVersion 27A266a); `devicectl manage ddis update` installs from a directory of candidate DDIs.\n\nOn this box:\n- xtool's bundle keeps only Xcode.app/Contents/{Developer,Info.plist,version.plist}, and no Xcode*.xip is left under ~.\n- The DDI now mounted on the phone (27A5228h / cryptex 27.1.5228.8) came from pymobiledevice3's GitHub mirror, which serves Apple files with no licence.\n\nThe DDI must be re-mounted after every phone reboot, and CoreDevice launch, DVT, debugproxy, displayservice and HID all need it. So on a clean Linux or Windows machine Russet has no compliant DDI source in any wave. The only fallback is the opt-in third-party mirror, which contradicts K4 and the no-Mac promise.",
+   "fix": "- Add a permissive F-layer crate owned by W16, e.g. `russet-xar`: xar TOC, pbzx/gzip cpio payloads, a UDIF/UDZO reader and a read-only HFS+ reader.\n- Have `sdk.import` (from .xip or Xcode.app) extract XcodeSystemResources.pkg \u2192 iOS_DDI.dmg \u2192 data/ddi/<xcode-build>/iOS/{Restore,version.plist}. Do this before honouring deleteSourceAfter, because the DDI is lost once the XIP is gone.\n- When the source is xtool's bundle, report 'ddi: missing' and ask for the .xip once.\n- Make `DdiSource::Imported{build}` the default for W10's DEV-13.\n- Update \u00a719 and device \u00a76.3, and close OQ-3 with this path.\n- Add a device check: reboot the phone \u2192 mount from the imported DDI \u2192 launch and debug.\n- The same crate gives native Windows SDK import (see the Windows issue)."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a74 Wave-1 exit gate (items 3 and 5), \u00a74.4 W4 scope ('no DDI mount'), \u00a74.10 exit script",
+   "issue": "The Wave-1 gate bans pymobiledevice3 and requires a clean `russet doctor`, but DDI mounting is W10 (Wave 2). The slice works today only because pymobiledevice3's auto-mount mounted a mirror-sourced DDI earlier. If the phone reboots during Wave 1 (W4's HIL runs, W9's three consecutive runs), doctor fails, and CoreDevice launch and debugproxy disappear. The gate cannot then be met without breaking its own rule.",
+   "fix": "Move a minimal `device.ddi.status` and `device.ddi.mount {source:{dir}}` into W4, using idevice cryptexd::install_ddi from a Restore directory. device.md \u00a72.2 showed the existing ~/.local/share/pymobiledevice3/Xcode_iOS_DDI_Cryptex directory loads, so it can serve as the development source. Add an explicit `russet device prepare` step and precondition to \u00a74.10, and add a 'remount after reboot' device check."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a70 rule 4 and \u00a72; /home/martinv/russet/docs/ARCHITECTURE.md \u00a73.3, \u00a77.1, \u00a714.9; /home/martinv/russet/docs/design/device.md \u00a76.1",
+   "issue": "russetd runs one per OS user on a fixed socket ($XDG_RUNTIME_DIR/russet/russetd.sock), and every worktree agent runs as the same user. Whichever agent autostarts the daemon first decides the device backend and the code version for everyone. A lane-D agent running `russet build` (W5's own acceptance) therefore does one of two things:\n- It spawns a live-backend daemon. DeviceActor reads lockdown values and the amfi state on attach (device \u00a76.1), which means talking to the phone and breaks the device rule.\n- It silently connects to lane A's live daemon, built from another branch; the skew check only compares the protocol major.\n\nRUSSET_DEVICE_BACKEND matters only when a daemon is spawned.",
+   "fix": "- AGENTS.md and PLAN \u00a70: every worktree exports RUSSET_HOME=<worktree>/.russet-dev, which moves the socket, state and config. Lane-D worktrees also export RUSSET_DEVICE_BACKEND=scripted:\u2026.\n- The daemon refuses the `live` backend unless RUSSET_LANE=A (or an explicit flag) and records its backend in russetd.json.\n- Development CLIs refuse a daemon whose buildId differs from theirs.\n- DeviceActor reads identity lazily, only when a client asks.\n- Add a W8 test that a lane-D environment never opens /run/usbmuxd."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a78.4, \u00a78.7, \u00a711.5; /home/martinv/russet/docs/design/signing-accounts-publishing.md \u00a79.8, \u00a710, \u00a712; /home/martinv/russet/docs/PLAN.md W23",
+   "issue": "decisions.md requires a publishing panel for TestFlight and the App Store. No RPC, CLI command or acceptance test exists for creating an App Store version, attaching a build, setting export compliance or submitting for review. SIGN \u00a79.8 describes the appStoreVersions / reviewSubmissions / reviewSubmissionItems flow, and ARCH \u00a711.5 even names 'App Store review submission', but \u00a78.4 has only ship.metadata.* and testflight methods. W23's acceptance ends at TestFlight VALID.",
+   "fix": "- Add `ship.version.plan/apply` (create appStoreVersion, attach build, usesNonExemptEncryption).\n- Add `ship.review.submit {versionId, approval?}`: class publish, never exposed to MCP, typed confirmation.\n- Add CLI `russet ship submit` and the EXT-13 panel flow.\n- W23 acceptance: a dry run against wiremock emits exactly the expected POST/PATCH sequence; a live submission happens only with owner approval. Alternatively, record an owner-approved deferral."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/design/build.md \u00a75.4 (phase C NIB compiler) vs \u00a712 task list; /home/martinv/russet/docs/PLAN.md W28 and \u00a715",
+   "issue": "Stack 3 is 'Xcode projects (UIKit/ObjC, storyboards, \u2026)'. The only plan for compiling storyboards and XIBs, a 'phase C (M7+)' narrow NIB compiler, has no task id in B01\u2013B20 and no workstream. The ibtool shim returns assets.storyboardUnsupported. B16 / W28's acceptance (three real Xcode-project apps such as NetNewsWire) will hit UIKit storyboards or XIBs.",
+   "fix": "Add a task B21, 'russet-ib NIB compiler (NIBArchive encoder, UIKit subset) plus oracle corpus', to W28 or a new W28b, with acceptance against Xcode 27 ibtool output, and choose acceptance apps that exercise it. Otherwise record an explicit owner-approved deferral and narrow the decision text."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a77.3 W25 acceptance; /home/martinv/russet/docs/design/ide.md \u00a73.6, \u00a73.14 (line 552), V8",
+   "issue": "W25 requires 'the Tier-1 repack runs as Russet \u2026 title-bar Build/Run/Debug/Hot Reload'. The IDE design says Tier 1 cannot carry the 9xx patches ('no 9xx patches (no title-bar toolbar)'; repacked builds must never be published), and extensions cannot contribute to the title bar (V8). As written the criterion cannot pass, and it would block G6.",
+   "fix": "Check the title-bar toolbar only on the Tier-2 CI build (IDE-06, L6b smoke, E2E-19). In Tier 1, check the documented fallbacks instead (editor/title/run buttons and status-bar items). For DC-23, lane A downloads the CI-built package (about 250 MB) rather than repacking."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/design/run-debug.md \u00a77 (JIT servicer); /home/martinv/russet/docs/PLAN.md W18 / E2E-08, \u00a711 DC-16; /home/martinv/russet/docs/ARCHITECTURE.md \u00a721 Q20",
+   "issue": "The native RX/JIT servicer exists because TXM devices only accept debugger-touched executable pages (landscape: 'TXM monitor (A15 and later on iOS 26, nearly all devices on iOS 27)'). The only rig phone is an iPhone 12 (iPhone13,2, A14), which has no TXM. E2E-08 ('Dart execution mode: JIT', hot reload \u2264 2 s) can pass on the A14 even if page touching is wrong. Flutter debug could then ship broken for most iOS 26/27 devices.",
+   "fix": "- Reword Q20 to request an A15+ (TXM) device, or a loaned one for a device-check window.\n- Add host tests with a fake debugserver that rejects execution of any NOTIFY_DEBUGGER_ABOUT_RX_PAGES page the servicer did not write.\n- Gate M2 on a TXM run, and mark Flutter JIT 'unverified on TXM devices' in docs until then."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/design/signing-accounts-publishing.md \u00a79.9 (generated russet-release.yml); /home/martinv/russet/docs/ARCHITECTURE.md \u00a717.5; /home/martinv/russet/docs/PLAN.md W23, Q5",
+   "issue": "The template defaults to `runs-on: macos-26` and runs `xcode-select -s /Applications/Xcode_27.0.app`. GitHub's macos-26 image has only Xcode 26.0.1\u201326.6 (runner-images macos-26-arm64-Readme). Xcode 27.0 exists only on the preview image selected with `runs-on: xcode-27`: macOS 27, /Applications/Xcode_27.app with an Xcode_27.0.app symlink (actions/runner-images#14404). The default path therefore fails.\n\nTwo things are also unverified:\n- Whether cloud-managed distribution signing works with an App Manager key.\n- What happens on ephemeral runners: `xcodebuild archive -allowProvisioningUpdates` may mint a new development certificate on every run.",
+   "fix": "- Default to `xcode-27` and probe the Xcode path.\n- Archive with CODE_SIGNING_ALLOWED=NO (or manual signing with the imported development identity) and sign only at export with cloud signing.\n- Add an early, cheap CI smoke run of the template in Wave 2 instead of finding this in W23.\n- Add an owner question: Admin key, or the 'Access to Cloud Managed Distribution Certificate' permission."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a712 (F1/F2), \u00a74.2\u2013\u00a74.7 dependencies, \u00a72 scheduling note",
+   "issue": "The freeze points are inverted and circular:\n- F2 contract PRs are due on day 2 of W3\u2013W6, but they must compile against F1 types (Error/Result, ids, ProgressSink/EventSink/JobEventKind, CommandRunner) that land on W2's day 3.\n- F1's DaemonCtx in turn names F2 types (DeviceManager, DebugService, AccountService).\n- W5 and W6 also depend on W3's F2.\n\nWith seven parallel agents this guarantees rebase churn on the critical path. Separately, \u00a72 says W8 is not on the critical path, while W9 'depends on W2\u2013W8 merged'.",
+   "fix": "Have W1 land every \u00a75.3 public type and trait signature as compiling stubs (todo!() bodies), so F1 and F2 only refine them. Otherwise schedule F1 on day 2 and F2 on day 4, and state that W7 starts after F2. Fix the W8 critical-path wording."
+  },
+  {
+   "severity": "major",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a716.1 (xtool 'WSL only'), \u00a718; /home/martinv/russet/docs/PLAN.md W16 ('wrapping xtool sdk install'), W27; /home/martinv/russet/docs/design/build.md Q7",
+   "issue": "sdk.import wraps xtool, and xtool runs on Windows only under WSL. No task builds a native XIP/pkg extractor, so W27's 'M1 and M2 demos pass on Windows 11' silently depends on WSL2 split mode (build.md Q7 is still open). PLAN also does not say how a lane-A agent operates the physical PC (SSH or PowerShell remoting, who moves the phone). W27 is a single XL card (15+ agent-days) that makes up all of Wave 5.",
+   "fix": "- Implement native XIP import with the russet-xar crate from the DDI issue (xar, pbzx, cpio, XIP signature check) and use it on Windows with the junction view.\n- Settle Q7 explicitly.\n- Specify OpenSSH-to-PC access for lane A and the owner's phone hand-over steps.\n- Split W27 into three cards: core/IPC/device/debug; build plane + SDK; packaging, IDE and anisette."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/design/core.md \u00a74.1 (lines 150, 166); /home/martinv/russet/docs/ARCHITECTURE.md \u00a74, \u00a716.7; /home/martinv/russet/docs/PLAN.md W1",
+   "issue": "core.md says rust-toolchain.toml with `channel = \"1.99.0\"` 'selects the toolchain automatically'. In fact rustup treats `1.99.0` and the installed `stable` (rustc 1.99.0, 1.5 GiB including rust-docs) as different toolchains, and rustup 1.29.1 auto-installs. W1's first `cargo build` therefore installs a second copy: about 0.6 GiB with the minimal profile, about 1.5 GiB with the default profile, on a disk-constrained box.",
+   "fix": "Use `channel = \"stable\"` plus workspace `rust-version = \"1.99\"`, and pin CI to 1.99.0. Or keep 1.99.0 with `profile = \"minimal\"` and clippy/rustfmt, and have the owner remove the duplicate `stable` afterwards."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a714 and \u00a70 rule 8; /home/martinv/russet/docs/ARCHITECTURE.md \u00a721 Q16; /home/martinv/russet/docs/verified-facts.md; /home/martinv/russet/demo/m1-baseline.sh",
+   "issue": "The owner's relayed message ('delete stuff we don't need if they are setup') is the go-ahead \u00a714 is waiting for, but \u00a714 still says 'owner OK needed'. What I verified:\n- uv's PBS 3.12.15 is already installed at ~/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu: 111 MB, with lib/libpython3.12.so.1.0, which RD V1 showed works with Swift LLDB.\n- So ~/orchard-lab/build (361 MB) is redundant now, and ~/.local/opt/python-3.12 (297 MB) becomes redundant once PY312 and rule 8 point at the uv path.\n- verified-facts.md still says uv's builds are static, which RD V1 corrected.\n- xtool's credential files in ~/.config/xtool/data are still mode 0644.\n\nI deleted and changed nothing.",
+   "fix": "For the lead:\n- Point the m1-baseline.sh PY312 default and PLAN rule 8 at the uv path, then delete both trees.\n- chmod 600 ~/.config/xtool/data/*.\n- Correct verified-facts.md.\n- Have W3's resolver probe uv-managed PBS before downloading another copy.\n- Keep the remaining \u00a714 rows on their schedule."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a75.3 (rpc::Method const PERMISSION), \u00a77.5, \u00a78",
+   "issue": "`Method::PERMISSION` is a constant, but several rows have classes that depend on parameters or ownership:\n- config.set: project or system\n- doctor.run: fix \u2192 system\n- screen.mirror.start: input:true \u2192 device\n- lease.release and job.cancel: 'owner or system'\n- app.uninstall: restricted for MCP\n\nThe rpc_method! macro as specified cannot express these, so each owner will invent a workaround.",
+   "fix": "Add `fn permission(p: &Params, c: &ConnInfo) -> Permission`, defaulting to the constant, to the trait and macro in W1. Otherwise split the methods (doctor.fix, config.setGlobal, screen.input.attach)."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a77.6 vs \u00a78.7; /home/martinv/russet/docs/PLAN.md \u00a74.10",
+   "issue": "With RPC `detach: true`, a long-running method returns `{jobId}` at once. The exit script reads `.sessionId` from `russet run --json --detach`. Whether the CLI flag means job-detach or 'leave the session running' is undefined, so W7 and W9 can implement incompatible semantics. Also, PROBE_LINE is never set under `set -u`, so the script stops there.",
+   "fix": "Define the CLI's --detach as: wait for run.start's result, print {sessionId, pid, bundleId}, and exit leaving a detached session lease. Rename the RPC flag to `background` to avoid the clash. Export PROBE_LINE in the script."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a75.1, \u00a75.2; /home/martinv/russet/docs/PLAN.md \u00a73",
+   "issue": "- russet-cli implements `russet mcp serve`, but \u00a75.2 forbids a russet-cli \u2192 russet-mcp edge.\n- russet-tool (MIT) and russet-adi-host have no crate-table or layer row, so check-layers and the permissive-only rule for russet-tool are undefined.\n- No workstream owns the Cargo.toml of russet-protocol, russetd or russet-cli after W1.\n- The russet-testkit \u2194 russet-device dev-dependency cycle duplicates crate types in #[cfg(test)] unit tests.",
+   "fix": "- Add rows: russet-tool as an F-layer binary, MIT, F dependencies only; russet-adi-host as an L3 binary, GPL.\n- Add the cli \u2192 mcp edge.\n- Make those Cargo.toml files lead-owned.\n- Require testkit-based device tests to be integration tests under tests/."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md W20 / DC-18 and Wave-3 gate 3; /home/martinv/russet/docs/ARCHITECTURE.md \u00a721",
+   "issue": "decisions.md names Copilot, Cline, Continue and OpenHands (alongside Claude, Codex, Gemini and local models) as day-one targets. Acceptance covers only claude-agent-acp, gemini --acp, codex-acp, OpenCode and llama-server detection. No owner question covers the accounts DC-18 needs (Gemini, OpenAI/Codex, Copilot), and the box has no codex or gemini installed (IDE V2).",
+   "fix": "Extend DC-18 to Copilot CLI (--acp), Cline, Continue (MCP config), OpenHands CLI (ACP) and the OpenHands GUI (HTTP MCP from Docker), at least to 'tools/list plus one tier-0 call'. Add an owner question about accounts, and report agents without accounts as skipped with a reason."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a76 exit gate 2 vs \u00a77.1 (W23 owns EXT-13)",
+   "issue": "The Wave-3 gate says all first-build GUI features of decisions.md work, but the publishing panel is built in Wave 4.",
+   "fix": "Reword the gate, or move a read-only publishing panel (builds list, TestFlight groups) into W19."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md W14 acceptance; /home/martinv/russet/docs/design/ide.md V13, \u00a75.1",
+   "issue": "W14 tests only against the installed VS Code 1.141 (Microsoft build, Electron 43), while the IDE pins Code-OSS 1.135 on Electron 42. With @types/vscode 1.140 the extension can compile against APIs newer than its own `engines ^1.135.0`.",
+   "fix": "Pin @types/vscode to 1.135.x. Run L6a and DC-14 also in the Tier-1 VSCodium 1.135 repack, as EXT-01 in ide.md already intends."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md W19 ('glass to glass < 250 ms'), W14 ('p95 input latency')",
+   "issue": "An agent cannot measure glass-to-glass latency without a camera, so the number will be self-reported.",
+   "fix": "Add a RussetProbe mode that renders a device clock or QR code. The mirror test decodes it from received frames and compares it with the host clock, corrected by the device-time offset. Define the p95 input-latency measurement through VS Code test hooks."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a70 rules 6\u20137, \u00a72 slots vs /home/martinv/russet/docs/design/qa-delivery.md \u00a710",
+   "issue": "PLAN uses two cargo target slots, each 'capped' at 6 GiB only by a nightly sweep; QA designed one shared target directory. In AMBER (8\u201325 GiB), two slots plus Swift scratch and node_modules can push the box into RED. The plan also relaxes the brief's hard 'no downloads over 500 MB' rule to a tier check (Flutter SDK, private-track downloads [redacted 2026-10-11, PLAN \u00a75.9]).",
+   "fix": "- Use one slot in AMBER and two only from GREEN up.\n- Set CARGO_INCREMENTAL=0 locally too.\n- Run cargo through a wrapper that calls disk-guard first.\n- Require explicit owner OK, not just the tier, for any download over 500 MB."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/design/ide.md \u00a75.7 (device.reserve in every run); /home/martinv/russet/docs/ARCHITECTURE.md \u00a76.3, \u00a78.2",
+   "issue": "IDE runs take an exclusive device lease. Agents started from the IDE's own agent panel use separate `mcp` connections, so they get device.reserved for the whole run. That breaks the 'agent drives, human watches the mirror' flow.",
+   "fix": "Scope reservations to a principal: the IDE passes its leaseId to the `russet mcp serve` processes it spawns (e.g. env RUSSET_LEASE) so its agents share the lease. Alternatively, use reservations only for lab and E2E runs."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a77.3\u2013\u00a77.4, \u00a711.3, \u00a711.4, \u00a720 vs /home/martinv/russet/docs/design/ide.md \u00a75.4\u2013\u00a76.3, run-debug.md \u00a718, device.md \u00a75.3",
+   "issue": "Area docs still carry superseded payloads that implementers will copy:\n- input_tap.space defaults to `points` (D51 says `screenshot`).\n- debug_control uses `step_over`, not kebab-case.\n- plan_apply is tier '2 or 3'.\n- RUS-MCP-0403 / approval_request_id.\n- rpc.hello / events.subscribe.\n- LogEntry uses text/notice, and LogSource lacks syslog.\n- DeviceState is an externally tagged Rust enum, while the IDE expects a flat kebab-case state.\n\nWithin ARCHITECTURE itself, \u00a77.4's example sends null although \u00a77.3 says to omit optional fields. A tier-2 'once per MCP session' approval is undefined under stateless MCP 2026-07-28.",
+   "fix": "- Add a 'superseded fields' table to \u00a720 and a banner on the affected area-doc sections.\n- Add a serde rule for data-carrying enums: #[serde(tag = \"kind\", rename_all = \"kebab-case\")].\n- Define the wire shapes of LogEntry/LogSource and DeviceSummary in ARCHITECTURE.\n- Bind tier-2 'session' approvals to the bridge's connection id (stdio) or to bearer token plus TTL (HTTP)."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a720 D22; /home/martinv/russet/docs/PLAN.md W4 DEV-01",
+   "issue": "Diffing the crates.io idevice 0.1.68 against HEAD in ~/russet-lab/idevice shows that usbmuxd/mod.rs computes `u32 - 16` without a check. A short packet from a mock or netmuxd panics in debug builds or attempts a ~4 GiB allocation in release. QA's mock-usbmuxd fuzzing will hit it. D22 mentions only the non-Send listen workaround.",
+   "fix": "Carry a reviewed `[patch.crates-io]` to the fixed revision (or a vendored one-line fix) until 0.1.69, and record it in D22."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a74 gate item 2 vs P3; /home/martinv/russet/docs/ARCHITECTURE.md \u00a717.1",
+   "issue": "The gate requires 'attach (broker)', while legacy-async, which needs Python `script` lines in LLDB, is the safety net if device check D3 fails. In that case the gate cannot pass.",
+   "fix": "State which attach modes satisfy the gate. If only legacy-async passes, Wave 1 exits with P3 recorded as open."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md \u00a72 lanes and \u00a710.1 W31",
+   "issue": "W31 runs the private track's VM on the 8 GB M1 Mac as an RE oracle [wording redacted 2026-10-11, PLAN \u00a75.9]. A VM there is not 'light', and it competes with the W16/W21 oracle runs, but W31 is not in lane B's schedule.",
+   "fix": "Add W31 to lane B with exclusive, owner-approved windows that never overlap corpus runs."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/PLAN.md W28, W29; decisions.md stacks",
+   "issue": "'Test' is part of the product goal, yet `russet test` (XCTest on device) arrives only in Wave 6, even for stack 1 (SwiftPM). idevice already has an `xctest` feature. Separately, .NET MAUI is reduced to a go/no-go report (B20) without an owner question.",
+   "fix": "Split SwiftPM XCTest-on-device into Wave 3 or 4. Add an owner question that records MAUI as study-only for the first build."
+  },
+  {
+   "severity": "minor",
+   "where": "/home/martinv/russet/docs/ARCHITECTURE.md \u00a73.3, \u00a75.3 (proc::ProcessRunner)",
+   "issue": "PR_SET_PDEATHSIG fires when the spawning thread exits, not the process. Children spawned from tokio's blocking pool, whose threads are reaped after about 10 s idle, or from the dedicated listen runtime can be killed in the middle of a build.",
+   "fix": "Spawn every child from one long-lived spawner thread (or only from runtime worker threads) and document this in CommandRunner. Keep the process-group or Job Object kill as the primary cleanup."
+  }
+ ]
+}

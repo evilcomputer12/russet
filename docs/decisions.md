@@ -14,9 +14,12 @@ Decisions agreed with the project owner. Newest first.
     runners.
 - **Device tests.** No always-on self-hosted runner. Device suites run on demand,
   triggered by an agent in the working session; device access stays serialized.
-- **Test devices.** iPhone 12 (A14, iOS 27) only. Paths that need A15+/TXM behaviour are
-  validated against recorded traces and community reports until another device is
-  available.
+- **Test devices.** iPhone 12 (A14, iOS 27) only.
+  - Correction (2026-10-11, verified from the iPhone13,2 iOS 27.0 BuildManifest and
+    kernelcache): the A14 switched from PPL to SPTM/TXM at iOS 27.0 and runs the same TXM
+    image as A15+ devices.
+  - So the rig *does* exercise the TXM JIT path (Flutter debug on iOS 26/27). Only
+    behaviour specific to other SoCs needs recorded traces or community reports.
 - **xtool credential files** were locked down to 0600 (2026-10-11). Run
   `xtool auth logout` once Russet's own provisioning works.
 
