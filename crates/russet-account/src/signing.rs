@@ -144,7 +144,7 @@ impl AccountService {
                 )
             })
             .collect();
-        let loaded = self.identities().load(&identity.id).await?.into_inner();
+        let loaded = self.identities().load_async(&identity.id).await?.into_inner();
         let options = SignOptions {
             output: r.output.clone().map_or(SignOutput::InPlace, SignOutput::CopyTo),
             distribution: r.distribution,

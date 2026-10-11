@@ -172,6 +172,9 @@ pub struct FakeState {
     pub forbidden: Vec<String>,
     /// The issuer whose tokens are accepted.
     pub issuer: String,
+    /// Accept individual-key tokens (`sub: "user"`, no issuer) instead, and refuse them the provisioning
+    /// endpoints, as App Store Connect does (SIGN §5.2).
+    pub individual: bool,
 }
 
 pub struct FakeAsc {
@@ -185,6 +188,9 @@ impl FakeAsc {
     }
     pub fn count(&self) -> usize {
         self.requests.lock().unwrap().len()
+    }
+    pub fn paths(&self) -> Vec<String> {
+        self.requests.lock().unwrap().iter().map(|(_, p)| p.clone()).collect()
     }
 }
 
@@ -202,7 +208,12 @@ impl Respond for Responder {
         let token =
             req.headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
         let Some(claims) = token.and_then(russet_asc::unverified_claims) else { return err(401, "NOT_AUTHORIZED") };
-        if claims["iss"] != state.issuer.as_str() {
+        let authorized = if state.individual {
+            claims["sub"] == "user" && claims.get("iss").is_none()
+        } else {
+            claims["iss"] == state.issuer.as_str()
+        };
+        if !authorized {
             return err(401, "NOT_AUTHORIZED");
         }
         let want = match req.url.query() {
@@ -217,7 +228,8 @@ impl Respond for Responder {
             return err(405, "METHOD_NOT_ALLOWED");
         }
         let path = req.url.path().to_owned();
-        if state.forbidden.contains(&path) {
+        let provisioning = ["/v1/certificates", "/v1/devices", "/v1/bundleIds", "/v1/profiles"];
+        if state.forbidden.contains(&path) || (state.individual && provisioning.iter().any(|p| path.starts_with(p))) {
             return err(403, "FORBIDDEN_ERROR");
         }
         let q = |k: &str| req.url.query_pairs().find(|(n, _)| n == k).map(|(_, v)| v.into_owned());
@@ -260,7 +272,7 @@ impl Respond for Responder {
                     .collect();
                 ok(json!({"data": data, "included": included}))
             }
-            "/v1/profiles" | "/v1/builds" => ok(json!({"data": []})),
+            "/v1/profiles" | "/v1/builds" | "/v1/apps" => ok(json!({"data": []})),
             p if p.starts_with("/v1/bundleIds/") && p.ends_with("/profiles") => {
                 let bid = p.trim_start_matches("/v1/bundleIds/").trim_end_matches("/profiles");
                 ok(
@@ -312,6 +324,7 @@ pub fn xtool_team(bundle: &str) -> FakeState {
         }],
         forbidden: Vec::new(),
         issuer: ISSUER.into(),
+        individual: false,
     }
 }
 

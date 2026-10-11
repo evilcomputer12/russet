@@ -77,7 +77,8 @@ impl ProfileCache {
     pub fn put(&self, raw: &[u8], asc_id: Option<&str>) -> Result<(ProvisioningProfile, PathBuf)> {
         let p = ProvisioningProfile::parse(raw)?;
         if !p.uuid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') || p.uuid.is_empty() {
-            return Err(Error::new(codes::sign::PROFILE_INVALID, "the profile's UUID is not usable as a file name"));
+            return Err(Error::new(codes::sign::PROFILE_INVALID, "the profile's UUID is not usable as a file name")
+                .with_hint("The profile is malformed: download it again from the developer portal, or recreate it (`russet provision`)."));
         }
         let path = self.path_of(&p.uuid);
         write_private(&path, raw)?;

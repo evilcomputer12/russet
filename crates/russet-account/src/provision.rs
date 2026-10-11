@@ -57,7 +57,10 @@ impl BundleSpec {
                         .with_hint("The .entitlements file must be an XML or binary property list.")
                 })?
                 .into_dictionary()
-                .ok_or_else(|| Error::new(codes::config::INVALID, format!("{} is not a dictionary", p.display())))?,
+                .ok_or_else(|| {
+                    Error::new(codes::config::INVALID, format!("{} is not a dictionary", p.display()))
+                        .with_hint("An .entitlements file is a property list whose top level is a dictionary.")
+                })?,
             None => plist::Dictionary::new(),
         };
         Ok(Self { rel_path: rel_path.to_owned(), bundle_id: bundle_id.to_owned(), requested })
@@ -272,7 +275,8 @@ impl Provisioner {
             .with_hint("Add a team key (App Manager or Admin) with `russet account add-key --issuer-id …`."));
         }
         if r.bundles.is_empty() {
-            return Err(Error::new(codes::core::INVALID_ARGUMENT, "nothing to provision: no bundle"));
+            return Err(Error::new(codes::core::INVALID_ARGUMENT, "nothing to provision: no bundle")
+                .with_hint("Set [app] bundle-id in russet.toml (or russet.local.toml)."));
         }
         let team = self.portal.team_id().to_owned();
         let d = r.distribution;
@@ -528,7 +532,7 @@ impl Provisioner {
                 "the developer account changed since the plan was made",
             )
             .with_hint("Plan again: `russet provision --dry-run`, then apply the new plan.")
-            .with_details(serde_json::json!({"planId": plan.plan_id.0})));
+            .with_details(serde_json::json!({"planId": plan.plan_id.0, "reason": "drifted"})));
         }
         let mut bundles = Vec::new();
         for p in &fresh.profiles {

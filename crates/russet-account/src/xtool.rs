@@ -129,25 +129,33 @@ fn is_safe_name(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
+/// Reads xtool's identity file. Its name is the issuer ID, so messages say "xtool's identity file", never the path.
+/// The key's bytes are moved out of the parsed property list into a zeroizing buffer (no copy is left behind).
 fn read_identity(path: &Path) -> Result<XtoolIdentity> {
-    let raw = Zeroizing::new(std::fs::read(path).map_err(|e| io_error("cannot read", path, e))?);
-    let value = plist::Value::from_reader(std::io::Cursor::new(&raw[..]))
-        .map_err(|_| Error::new(codes::sign::NO_IDENTITY, "xtool's identity file is not a property list"))?;
-    let dict = value
-        .as_dictionary()
-        .ok_or_else(|| Error::new(codes::sign::NO_IDENTITY, "xtool's identity file is not a dictionary"))?;
-    let cert_der = dict
-        .get("certificate")
-        .and_then(plist::Value::as_data)
-        .ok_or_else(|| Error::new(codes::sign::NO_IDENTITY, "xtool's identity has no certificate"))?
-        .to_vec();
-    let key_pem = dict
-        .get("privateKey")
-        .and_then(plist::Value::as_dictionary)
-        .and_then(|d| d.get("data"))
-        .and_then(plist::Value::as_data)
-        .ok_or_else(|| Error::new(codes::sign::NO_IDENTITY, "xtool's identity has no private key"))?;
-    Ok(XtoolIdentity { cert_der, key_pem: Zeroizing::new(key_pem.to_vec()) })
+    let unusable = |why: &str| {
+        Error::new(codes::sign::NO_IDENTITY, format!("xtool's identity file {why}"))
+            .with_hint("Run `xtool dev` once so xtool recreates its development identity, then import again.")
+    };
+    let raw =
+        Zeroizing::new(std::fs::read(path).map_err(|e| {
+            Error::new(codes::core::IO, format!("cannot read xtool's identity file: {e}")).caused_by(e)
+        })?);
+    let value =
+        plist::Value::from_reader(std::io::Cursor::new(&raw[..])).map_err(|_| unusable("is not a property list"))?;
+    let plist::Value::Dictionary(mut dict) = value else { return Err(unusable("is not a dictionary")) };
+    let key = match dict.remove("privateKey") {
+        Some(plist::Value::Dictionary(mut d)) => match d.remove("data") {
+            Some(plist::Value::Data(bytes)) => Some(Zeroizing::new(bytes)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let key_pem = key.ok_or_else(|| unusable("has no private key"))?;
+    let cert_der = match dict.remove("certificate") {
+        Some(plist::Value::Data(bytes)) => bytes,
+        _ => return Err(unusable("has no certificate")),
+    };
+    Ok(XtoolIdentity { cert_der, key_pem })
 }
 
 #[cfg(unix)]

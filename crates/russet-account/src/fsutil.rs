@@ -12,9 +12,23 @@ use std::time::SystemTime;
 use russet_core::Result;
 use russet_core::error::{Error, codes};
 
-/// `core.io` with the path.
+/// `core.io` with the path ([`shown`]: team IDs in it masked).
 pub(crate) fn io_error(what: &str, path: &Path, e: std::io::Error) -> Error {
-    Error::new(codes::core::IO, format!("{what} {}: {e}", path.display())).caused_by(e)
+    Error::new(codes::core::IO, format!("{what} {}: {e}", shown(path))).caused_by(e)
+}
+
+/// A path for messages, with every component shaped like a team ID masked (`identities/*******345/…`): the
+/// identity store keeps one directory per team (ARCHITECTURE §14.8), and errors reach the wire and logs.
+pub(crate) fn shown(path: &Path) -> String {
+    let text = path.display().to_string();
+    if !path.components().any(|c| russet_sign::is_team_like(&c.as_os_str().to_string_lossy())) {
+        return text;
+    }
+    let sep = std::path::MAIN_SEPARATOR.to_string();
+    text.split(std::path::MAIN_SEPARATOR)
+        .map(|c| if russet_sign::is_team_like(c) { russet_sign::mask_team(c) } else { c.to_owned() })
+        .collect::<Vec<_>>()
+        .join(&sep)
 }
 
 /// Creates `dir` (and parents) owner-only (0700 on Unix).

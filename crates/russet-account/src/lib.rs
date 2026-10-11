@@ -15,12 +15,13 @@ const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use russet_core::Result;
 use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, codes};
 use russet_core::net::Endpoints;
+use russet_core::time::Clock;
 use russet_secrets::SecretStore;
 use russet_sign::Distribution;
 
@@ -51,6 +52,22 @@ pub use store::{Account, AccountId, AccountKind, AccountStore, AddAscKey, XtoolI
 
 /// How long a plan stays applicable (ARCHITECTURE §11.3: pending approvals live 10 minutes).
 pub const PLAN_TTL: Duration = Duration::from_secs(600);
+
+/// How long an expired plan is still recognized (answered `provision.planStale`, not `core.notFound`).
+pub const PLAN_MEMORY: Duration = Duration::from_secs(6 * 600);
+
+/// The system clock (W2's `russet_core::time::SystemClock` is the shared one once it lands on main).
+#[derive(Debug, Clone, Copy, Default)]
+struct WallClock;
+
+impl Clock for WallClock {
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+    fn instant(&self) -> Instant {
+        Instant::now()
+    }
+}
 
 /// One probe of `account.verify`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,8 +108,10 @@ impl ProbeResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountVerification {
     pub account_id: AccountId,
-    /// The key is accepted and can read certificates.
+    /// The key is accepted and reads what its kind is for: certificates for a team key; builds for an individual
+    /// key, which cannot use the provisioning endpoints (SIGN §5.2).
     pub ok: bool,
+    /// The recorded team, else the one these reads discovered (`account.verify` writes nothing).
     pub team_id: Option<String>,
     pub certificates: ProbeResult,
     pub profiles: ProbeResult,
@@ -107,6 +126,7 @@ pub struct AccountService {
     identities: IdentityStore,
     profiles: ProfileCache,
     plans: Mutex<BTreeMap<String, (ProvisionPlan, Instant)>>,
+    clock: Arc<dyn Clock>,
 }
 
 impl std::fmt::Debug for AccountService {
@@ -138,7 +158,24 @@ impl AccountService {
             accounts: tokio::sync::RwLock::new(store),
             endpoints,
             plans: Mutex::new(BTreeMap::new()),
+            clock: Arc::new(WallClock),
         })
+    }
+
+    /// The clock plans age by (tests substitute a manual one).
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Every team ID the store knows (the accounts' and the identities'): what the daemon masks in anything it
+    /// sends (AGENTS.md §8).
+    pub async fn known_teams(&self) -> Vec<String> {
+        let mut teams: Vec<String> = self.accounts.read().await.list().into_iter().filter_map(|a| a.team_id).collect();
+        teams.extend(self.identities.list(None).unwrap_or_default().into_iter().map(|i| i.team_id));
+        teams.sort();
+        teams.dedup();
+        teams
     }
 
     pub fn accounts(&self) -> &tokio::sync::RwLock<AccountStore> {
@@ -165,34 +202,26 @@ impl AccountService {
         Ok(Provisioner::new(portal, self.identities.clone(), self.profiles.clone(), acc.id))
     }
 
-    /// `account.verify`: GET-scoped probes of certificates, profiles and builds; discovers and records the team
-    /// when it is unknown.
+    /// `account.verify`: GET-scoped probes of certificates, profiles and builds, and the team (discovered when
+    /// none is recorded). Read-only: it writes nothing, `accounts.toml` included (re-adding the key records a
+    /// team).
     pub async fn verify(&self, account: Option<&AccountId>) -> Result<AccountVerification> {
-        let (acc, key, base) = {
+        let (acc, key, client) = {
             let store = self.accounts.read().await;
             let acc = store.resolve(account)?;
             let key = store.asc_key(&acc).await?;
-            (acc, key, store.asc_base().clone())
+            let client = store.client(&key)?;
+            (acc, key, client)
         };
-        let client = store::client_for(key.clone(), &base)?;
         let certificates = ProbeResult::of(&client.certificates().probe(1).await);
         let profiles = ProbeResult::of(&client.get_json::<serde_json::Value>("/v1/profiles?limit=1").await);
         let builds = ProbeResult::of(&client.builds().recent(1).await);
         let mut team_id = acc.team_id.clone();
         if team_id.is_none() && certificates == ProbeResult::Ok {
-            team_id = store::discover_team(&key, &base, &self.identities).await.ok().flatten();
-            if let Some(t) = &team_id {
-                self.accounts.write().await.set_team(&acc.id, t)?;
-            }
+            team_id = store::discover_team(&client, &key, &self.identities).await.ok().flatten();
         }
-        Ok(AccountVerification {
-            ok: certificates == ProbeResult::Ok,
-            account_id: acc.id,
-            team_id,
-            certificates,
-            profiles,
-            builds,
-        })
+        let ok = if key.is_individual() { builds == ProbeResult::Ok } else { certificates == ProbeResult::Ok };
+        Ok(AccountVerification { ok, account_id: acc.id, team_id, certificates, profiles, builds })
     }
 
     /// Plans provisioning for a project (`provision.plan {project}`): reads its signing inputs, applies the
@@ -219,21 +248,30 @@ impl AccountService {
         Ok(plan)
     }
 
-    /// Keeps a plan for [`Self::apply_plan`] for [`PLAN_TTL`].
+    /// Keeps a plan for [`Self::apply_plan`]: applicable for [`PLAN_TTL`], recognized as stale for
+    /// [`PLAN_MEMORY`].
     pub fn remember_plan(&self, plan: &ProvisionPlan) {
+        let now = self.clock.instant();
         if let Ok(mut plans) = self.plans.lock() {
-            plans.retain(|_, (_, at)| at.elapsed() < PLAN_TTL);
-            plans.insert(plan.plan_id.0.clone(), (plan.clone(), Instant::now()));
+            plans.retain(|_, (_, at)| now.saturating_duration_since(*at) < PLAN_MEMORY);
+            plans.insert(plan.plan_id.0.clone(), (plan.clone(), now));
         }
     }
 
-    /// A remembered plan.
+    /// A remembered plan: `provision.planStale` once it is older than [`PLAN_TTL`], `core.notFound` for an id this
+    /// daemon never planned (or forgot after [`PLAN_MEMORY`]).
     pub fn plan(&self, plan_id: &str) -> Result<ProvisionPlan> {
         let plans = self.plans.lock().map_err(|_| Error::new(codes::core::INTERNAL, "the plan table is poisoned"))?;
+        let again = "Plan again with `russet provision --dry-run` (or `provision.plan`), then apply the new plan.";
         match plans.get(plan_id) {
-            Some((p, at)) if at.elapsed() < PLAN_TTL => Ok(p.clone()),
-            _ => Err(Error::new(codes::core::NOT_FOUND, format!("no plan {plan_id} (plans expire after 10 minutes)"))
-                .with_hint("Plan again with `russet provision --dry-run` (or `provision.plan`).")),
+            Some((p, at)) if self.clock.instant().saturating_duration_since(*at) < PLAN_TTL => Ok(p.clone()),
+            Some(_) => Err(Error::new(
+                codes::provision::PLAN_STALE,
+                format!("plan {plan_id} has expired (plans can be applied for 10 minutes)"),
+            )
+            .with_hint(again)
+            .with_details(serde_json::json!({"planId": plan_id, "reason": "expired"}))),
+            None => Err(Error::new(codes::core::NOT_FOUND, format!("no plan {plan_id}")).with_hint(again)),
         }
     }
 

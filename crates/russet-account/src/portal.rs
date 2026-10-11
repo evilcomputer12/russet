@@ -263,6 +263,7 @@ impl DevPortal for AscPortal {
                 codes::account::APPLE_SERVICE_UNAVAILABLE,
                 "App Store Connect returned a profile without attributes",
             )
+            .with_hint("Retry later; report it with `russet bugreport` if it persists.")
         })
     }
 }

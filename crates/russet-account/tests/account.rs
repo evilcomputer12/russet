@@ -46,13 +46,17 @@ async fn imports_xtool_once_and_seals_everything() {
     let sealed: Vec<String> = e.secrets.items.lock().unwrap().keys().cloned().collect();
     let id = &imp.identities[0];
     assert!(sealed.contains(&format!("asc-key/{KEY_ID}")));
-    assert!(sealed.contains(&format!("signing-key/{}", id.id)));
+    assert!(sealed.contains(&format!("signing-key/{}", id.sha1)), "named by the certificate's SHA-1, not the team");
+    assert!(!sealed.iter().any(|k| k.contains(TEAM)), "secret names never name the team: {sealed:?}");
     assert_eq!(id.team_id, TEAM);
     assert_eq!(id.kind, CertKind::Development);
     assert_eq!(id.imported_from.as_deref(), Some("xtool"));
 
-    // The identity loads from the store (PKCS#1 RSA key, as xtool keeps it) and matches its certificate.
-    let loaded = svc.identities().load(&id.id).await.unwrap();
+    // The identity loads from the store (PKCS#1 RSA key, as xtool keeps it) and matches its certificate. `load`
+    // is ARCHITECTURE §5.3's synchronous form, called here from inside a (current-thread) runtime as the run
+    // pipeline does; `load_async` is the same read for async callers.
+    let loaded = svc.identities().load(&id.id).unwrap();
+    assert_eq!(svc.identities().load_async(&id.id).await.unwrap().certificate_der(), loaded.certificate_der());
     assert_eq!(loaded.certificate_der(), &rsa_identity().0.cert_der[..]);
     assert_eq!(loaded.team_id(), TEAM);
     assert_eq!(svc.identities().list(Some(TEAM)).unwrap().len(), 1);
@@ -429,7 +433,7 @@ async fn secrets_never_leak_into_debug_output_files_or_errors() {
         .collect();
     assert!(!canaries.is_empty());
     let id = &imp.identities[0];
-    let loaded = svc.identities().load(&id.id).await.unwrap();
+    let loaded = svc.identities().load_async(&id.id).await.unwrap();
     let key = svc.accounts().read().await.asc_key(&imp.accounts[0]).await.unwrap();
     let mut seen = vec![
         format!("{imp:?}"),
@@ -456,5 +460,270 @@ async fn secrets_never_leak_into_debug_output_files_or_errors() {
         for c in &canaries {
             assert!(!text.contains(c.as_str()), "key material leaked");
         }
+    }
+}
+
+fn write_p8(e: &Env) -> std::path::PathBuf {
+    let p8 = e.tmp.path().join("AuthKey.p8");
+    std::fs::write(&p8, p8_pem()).unwrap();
+    p8
+}
+
+/// Individual keys cannot use the provisioning endpoints (SIGN §5.2): adding one never probes them, `verify`
+/// calls it usable when it reads builds, and planning says why it cannot provision.
+#[tokio::test]
+async fn individual_keys_are_added_without_provisioning() {
+    let e = env();
+    let mut state = xtool_team("com.example.hello");
+    state.individual = true;
+    let (server, fake) = fake_asc(state).await;
+    let svc = service(&e, &format!("{}/", server.uri()));
+    let acc = svc
+        .accounts()
+        .write()
+        .await
+        .add_asc_key(AddAscKey { key_id: KEY_ID.into(), issuer_id: None, p8_path: write_p8(&e), label: None })
+        .await
+        .unwrap();
+    assert_eq!(acc.kind, AccountKind::AscIndividualKey);
+    assert!(acc.team_id.is_none());
+    assert!(!fake.paths().iter().any(|p| p.starts_with("/v1/certificates")), "{:?}", fake.paths());
+    assert!(fake.paths().iter().any(|p| p == "/v1/apps"));
+
+    let v = svc.verify(None).await.unwrap();
+    assert!(v.ok, "an individual key that reads builds is usable");
+    assert_eq!(
+        (v.certificates, v.profiles, v.builds),
+        (ProbeResult::Forbidden, ProbeResult::Forbidden, ProbeResult::Ok)
+    );
+
+    let req = ProvisionRequest {
+        bundles: vec![BundleSpec::with_entitlements_file("", "com.example.hello", None).unwrap()],
+        distribution: Distribution::Development,
+        devices: vec![],
+        identity: None,
+    };
+    let p = svc.provisioner(None, Some(TEAM)).await.unwrap();
+    assert_eq!(p.plan(&req).await.unwrap_err().code(), codes::account::INDIVIDUAL_KEY_NO_PROVISIONING);
+    assert_eq!(fake.non_get_requests(), 0);
+}
+
+/// A team key whose role cannot read certificates is still kept (it can serve TestFlight later), without a team.
+#[tokio::test]
+async fn a_team_key_without_certificate_access_is_kept_without_a_team() {
+    let e = env();
+    let mut state = xtool_team("com.example.hello");
+    state.forbidden = vec!["/v1/certificates".into(), "/v1/bundleIds".into()];
+    let (server, _fake) = fake_asc(state).await;
+    let svc = service(&e, &format!("{}/", server.uri()));
+    let acc = svc
+        .accounts()
+        .write()
+        .await
+        .add_asc_key(AddAscKey {
+            key_id: KEY_ID.into(),
+            issuer_id: Some(ISSUER.into()),
+            p8_path: write_p8(&e),
+            label: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(acc.kind, AccountKind::AscTeamKey);
+    assert!(acc.team_id.is_none());
+    let v = svc.verify(None).await.unwrap();
+    assert!(!v.ok, "a team key that cannot read certificates cannot provision");
+    assert_eq!(v.certificates, ProbeResult::Forbidden);
+}
+
+/// `account.verify` is read-class: it reports the team it discovers but writes nothing.
+#[tokio::test]
+async fn verify_writes_nothing() {
+    let e = env();
+    write_xtool(&e.xtool, false); // a key without an identity: no team yet
+    let (server, _fake) = fake_asc(xtool_team("com.example.hello")).await;
+    let svc = service(&e, &format!("{}/", server.uri()));
+    svc.accounts().write().await.import_xtool(false).await.unwrap();
+    let file = e.dirs.config.join("accounts.toml");
+    let before = std::fs::read(&file).unwrap();
+    let v = svc.verify(None).await.unwrap();
+    assert!(v.ok);
+    assert_eq!(v.team_id.as_deref(), Some(TEAM), "discovered from a certificate");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "accounts.toml is unchanged");
+    assert!(svc.accounts().read().await.list()[0].team_id.is_none());
+}
+
+struct ManualClock(std::sync::Mutex<std::time::Instant>);
+
+impl ManualClock {
+    fn advance(&self, d: std::time::Duration) {
+        *self.0.lock().unwrap() += d;
+    }
+}
+
+impl russet_core::time::Clock for ManualClock {
+    fn now(&self) -> std::time::SystemTime {
+        std::time::SystemTime::now()
+    }
+    fn instant(&self) -> std::time::Instant {
+        *self.0.lock().unwrap()
+    }
+}
+
+/// A plan expires after 10 minutes: applying it then is `provision.planStale`, distinct from an unknown id
+/// (`core.notFound`); after an hour the daemon forgets it.
+#[tokio::test]
+async fn expired_plans_are_stale_and_unknown_plans_are_not_found() {
+    let e = env();
+    write_xtool(&e.xtool, true);
+    let (server, _fake) = fake_asc(xtool_team("com.example.hello")).await;
+    let clock = Arc::new(ManualClock(std::sync::Mutex::new(std::time::Instant::now())));
+    let svc = service(&e, &format!("{}/", server.uri())).with_clock(clock.clone());
+    svc.accounts().write().await.import_xtool(false).await.unwrap();
+    let proj = project(e.tmp.path(), "com.example.hello", None);
+    let plan = svc.plan_project(&proj, Distribution::Development, vec![], None).await.unwrap();
+    assert!(svc.plan(&plan.plan_id.0).is_ok());
+    clock.advance(PLAN_TTL + std::time::Duration::from_secs(1));
+    let err = svc.apply_plan(&plan.plan_id.0, &ApprovalRef::default()).await.unwrap_err();
+    assert_eq!(err.code(), codes::provision::PLAN_STALE);
+    assert_eq!(err.to_data().details.unwrap()["reason"], "expired");
+    assert!(err.hint().unwrap().contains("Plan again"));
+    assert_eq!(svc.plan("pln_unknown").unwrap_err().code(), codes::core::NOT_FOUND);
+    clock.advance(PLAN_MEMORY);
+    let _ = svc.plan_project(&proj, Distribution::Development, vec![], None).await.unwrap(); // purges old plans
+    assert_eq!(svc.plan(&plan.plan_id.0).unwrap_err().code(), codes::core::NOT_FOUND);
+}
+
+/// One rate limiter per key spans every call (portal reads, verify, add-key), so the hourly quota is shared.
+#[tokio::test]
+async fn one_rate_limiter_per_key_spans_calls() {
+    let e = env();
+    write_xtool(&e.xtool, true);
+    let (server, fake) = fake_asc(xtool_team("com.example.hello")).await;
+    let svc = service(&e, &format!("{}/", server.uri()));
+    svc.accounts().write().await.import_xtool(false).await.unwrap();
+    let limiter = svc.accounts().read().await.limiter(KEY_ID);
+    svc.verify(None).await.unwrap();
+    let portal = svc.accounts().read().await.portal(&AccountId::asc(KEY_ID), None).await.unwrap();
+    portal.list_devices().await.unwrap();
+    let used = f64::from(russet_asc::BURST) - limiter.available();
+    assert!(
+        used >= fake.count() as f64 - 0.5,
+        "every request took a token of the one bucket: {used} vs {}",
+        fake.count()
+    );
+    assert!(Arc::ptr_eq(&limiter, &svc.accounts().read().await.limiter(KEY_ID)));
+}
+
+fn p12_of(id: &russet_sign::testpki::TestIdentity, password: &str) -> Vec<u8> {
+    let key = p12_keystore::PrivateKey::from_der(&id.key_pkcs8).unwrap();
+    let cert = p12_keystore::Certificate::from_der(&id.cert_der).unwrap();
+    let mut store = p12_keystore::KeyStore::new();
+    store.add_entry(
+        "identity",
+        p12_keystore::KeyStoreEntry::PrivateKeyChain(p12_keystore::PrivateKeyChain::new(b"k1".as_slice(), key, [cert])),
+    );
+    store.writer(password).write().unwrap()
+}
+
+/// `.p12` import through the identity store, in ARCHITECTURE §5.3's synchronous form and the async one; the
+/// identity is then found by its wire id (the certificate serial), its SHA-1 or its `<team>/<serial>` id.
+#[tokio::test]
+async fn imports_p12_identities_and_resolves_them() {
+    let e = env();
+    let svc = service(&e, "http://127.0.0.1:9/");
+    let (rsa, _) = rsa_identity();
+    let pw = russet_secrets::SecretBytes::new(b"p12 password".to_vec());
+    let a = svc.identities().import_p12(&p12_of(rsa, "p12 password"), &pw).unwrap();
+    assert_eq!((a.team_id.as_str(), a.kind), (TEAM, CertKind::Development));
+    let other = russet_sign::testpki::development_identity(TEAM);
+    let b = svc.identities().import_p12_async(&p12_of(&other, "p12 password"), &pw).await.unwrap();
+    assert_ne!(a.id, b.id);
+    let wrong = russet_secrets::SecretBytes::new(b"nope".to_vec());
+    assert_eq!(
+        svc.identities().import_p12(&p12_of(rsa, "p12 password"), &wrong).unwrap_err().code(),
+        codes::sign::NO_IDENTITY
+    );
+
+    for name in [a.id.wire(), a.id.wire().to_lowercase(), format!("00{}", a.id.wire()), a.sha1.clone(), a.id.0.clone()]
+    {
+        assert_eq!(svc.identities().resolve(&name).unwrap().id, a.id, "{name}");
+    }
+    assert_eq!(a.id.wire(), a.serial, "the wire id is the certificate serial");
+    assert!(!a.id.wire().contains(TEAM) && !a.id.masked().contains(TEAM) && !a.id.to_string().contains(TEAM));
+    assert_eq!(svc.identities().resolve("FFFFFFFF").unwrap_err().code(), codes::sign::NO_IDENTITY);
+    let loaded = svc.identities().load(&a.id).unwrap();
+    assert_eq!(russet_sign::CodeSigningIdentity::certificate_der(&loaded), &rsa.cert_der[..]);
+    assert_eq!(svc.identities().list(Some("*******345")).unwrap().len(), 2, "the masked team filters too");
+}
+
+/// Nothing the account service reports names the team or the issuer: import warnings, plan warnings, and the
+/// errors of identity, planning and signing paths (AGENTS.md §8; the daemon masks DTO fields itself).
+#[tokio::test]
+async fn reports_and_errors_never_name_the_team_or_the_issuer() {
+    let e = env();
+    write_xtool(&e.xtool, true);
+    let bundle = "com.example.hello";
+    let (server, fake) = fake_asc(xtool_team(bundle)).await;
+    let svc = service(&e, &format!("{}/", server.uri()));
+    let imp = svc.accounts().write().await.import_xtool(false).await.unwrap();
+    let mut seen: Vec<String> = imp.warnings.clone();
+    let clean = |text: &str| !text.contains(TEAM) && !text.contains(ISSUER);
+
+    // Plans: an explicit identity the portal does not list is reported masked.
+    let id = imp.identities[0].id.clone();
+    let proj = project(e.tmp.path(), bundle, None);
+    let plan = svc.plan_project(&proj, Distribution::Development, vec![], None).await.unwrap();
+    seen.extend(plan.warnings.iter().map(|w| w.message.clone()));
+    seen.extend(plan.mutations.iter().map(Mutation::summary));
+    let p = svc.provisioner(None, None).await.unwrap();
+    let mut req = plan.request.clone();
+    req.identity = Some(IdentityId::new(TEAM, "FFFF"));
+    let err = p.plan(&req).await.unwrap_err();
+    seen.push(format!("{} {}", err.message(), serde_json::to_string(&err.to_data()).unwrap()));
+    req.identity = Some(id.clone());
+    fake.state.lock().unwrap().certificates.clear();
+    let stale = p.plan(&req).await.unwrap();
+    assert!(stale.warnings.iter().any(|w| w.message.contains("no longer lists")), "{:?}", stale.warnings);
+    seen.extend(stale.warnings.iter().map(|w| w.message.clone()));
+
+    // Identities: a missing key and a broken identity file.
+    e.secrets.items.lock().unwrap().remove(&format!("signing-key/{}", imp.identities[0].sha1));
+    let err = svc.identities().load_async(&id).await.unwrap_err();
+    seen.push(format!("{} {:?}", err.message(), err.to_data()));
+    let json = e.dirs.data.join("identities").join(TEAM).join(format!("{}.json", imp.identities[0].serial));
+    std::fs::write(&json, b"{ broken").unwrap();
+    let err = svc.identities().list(None).unwrap_err();
+    seen.push(format!("{} {:?}", err.message(), err.to_data()));
+
+    // Signing with a profile of another App ID: the profile's App ID is masked.
+    let app = e.tmp.path().join("Hello.app");
+    std::fs::create_dir_all(&app).unwrap();
+    let mut info = plist::Dictionary::new();
+    for (k, v) in
+        [("CFBundleIdentifier", "com.other.app"), ("CFBundleExecutable", "Hello"), ("CFBundlePackageType", "APPL")]
+    {
+        info.insert(k.into(), plist::Value::String(v.into()));
+    }
+    plist::Value::Dictionary(info).to_file_xml(app.join("Info.plist")).unwrap();
+    std::fs::write(app.join("Hello"), russet_macho::fixture::MachOBuilder::executable().build()).unwrap();
+    let profile = e.tmp.path().join("hello.mobileprovision");
+    std::fs::write(&profile, xtl_profile(bundle)).unwrap();
+    let signing = russet_sign::testpki::development_identity(TEAM).load();
+    let err = russet_sign::sign(russet_sign::SignRequest {
+        bundle: &app,
+        identity: &signing,
+        per_bundle: std::collections::BTreeMap::from([(
+            String::new(),
+            russet_sign::BundleSigningInput::with_profile(profile),
+        )]),
+        options: russet_sign::SignOptions::default(),
+    })
+    .unwrap_err();
+    assert_eq!(err.code(), codes::sign::PROFILE_MISMATCH);
+    seen.push(format!("{} {}", err.message(), serde_json::to_string(&err.to_data()).unwrap()));
+
+    assert!(seen.len() >= 6);
+    for text in &seen {
+        assert!(clean(text), "a team or issuer ID leaked: {text}");
     }
 }

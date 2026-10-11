@@ -2,8 +2,14 @@
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Signing identities (SIGN §6.3): the public part on disk (`data/identities/<team>/<serial>.{json,cer}`,
-//! ARCHITECTURE §14.8), the private key sealed in the secret store as `signing-key/<team>/<serial>`.
+//! ARCHITECTURE §14.8), the private key sealed in the secret store as `signing-key/<certificate SHA-1>` (SIGN §5
+//! names it `<team>/<serial>`, but `secrets.list` shows secret names, and they must not name the team).
+//!
+//! The [`IdentityId`] (`<team>/<serial>`) stays inside the daemon. The wire names an identity by its certificate
+//! serial ([`IdentityId::wire`]), and [`IdentityStore::resolve`] maps a serial, a SHA-1 fingerprint or an
+//! [`IdentityId`] back; messages show [`IdentityId::masked`]. No team ID leaves the daemon unmasked (AGENTS.md §8).
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -14,9 +20,10 @@ use russet_secrets::{SecretBytes, SecretId, SecretKind, SecretStore};
 use russet_sign::{CertificateKind, CodeSigningIdentity, InMemoryIdentity, KeyInfoSigner, certificate_info};
 use serde::{Deserialize, Serialize};
 
-use crate::fsutil::{io_error, parse_rfc3339, rfc3339, write_private};
+use crate::fsutil::{io_error, parse_rfc3339, rfc3339, shown, write_private};
 
-/// A signing identity id: `<team>/<serial>`.
+/// A signing identity id: `<team>/<serial>`, internal to the daemon (its team part is a team ID). The wire form is
+/// [`IdentityId::wire`]; messages use [`IdentityId::masked`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct IdentityId(pub String);
 
@@ -33,11 +40,26 @@ impl IdentityId {
     pub fn parts(&self) -> Option<(&str, &str)> {
         self.0.split_once('/')
     }
+
+    /// The identity's name on the wire: its certificate serial (uppercase hex without leading zeros, as the
+    /// portal's `serialNumber` and `russet account certs list` show it). It names no team.
+    pub fn wire(&self) -> String {
+        self.parts().map_or_else(|| self.0.clone(), |(_, serial)| serial.to_owned())
+    }
+
+    /// `*******345/<serial>`, for messages.
+    pub fn masked(&self) -> String {
+        match self.parts() {
+            Some((team, serial)) => format!("{}/{serial}", russet_sign::mask_team(team)),
+            None => self.0.clone(),
+        }
+    }
 }
 
+/// Shows the masked form ([`IdentityId::masked`]): the raw id holds a team ID.
 impl std::fmt::Display for IdentityId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.masked())
     }
 }
 
@@ -87,7 +109,8 @@ impl SigningIdentity {
 
     /// The secret holding the private key.
     pub fn secret_id(&self) -> SecretId {
-        SecretId { kind: SecretKind::SigningKey, name: self.id.0.clone() }
+        let name = if self.sha1.is_empty() { self.id.wire() } else { self.sha1.clone() };
+        SecretId { kind: SecretKind::SigningKey, name }
     }
 }
 
@@ -167,13 +190,15 @@ impl IdentityStore {
         Self { dir: data_dir.join("identities"), secrets }
     }
 
-    /// Every identity, optionally of one team, newest certificate first.
+    /// Every identity, optionally of one team, newest certificate first. `team` is a team ID or its masked form
+    /// (`*******345`, what the wire shows).
     pub fn list(&self, team: Option<&str>) -> Result<Vec<SigningIdentity>> {
         let mut out = Vec::new();
         let Ok(teams) = std::fs::read_dir(&self.dir) else { return Ok(out) };
         for t in teams.filter_map(|e| e.ok()) {
             let team_dir = t.path();
-            if !team_dir.is_dir() || team.is_some_and(|want| t.file_name().to_string_lossy() != want) {
+            let name = t.file_name().to_string_lossy().into_owned();
+            if !team_dir.is_dir() || team.is_some_and(|want| name != want && russet_sign::mask_team(&name) != want) {
                 continue;
             }
             let entries = std::fs::read_dir(&team_dir).map_err(|e| io_error("cannot read", &team_dir, e))?;
@@ -203,8 +228,44 @@ impl IdentityStore {
         read_identity(&path)
     }
 
-    /// Loads an identity with its private key (from the secret store; in-process only).
-    pub async fn load(&self, id: &IdentityId) -> Result<LoadedIdentity> {
+    /// The identity a client names: its certificate serial (the wire form, [`IdentityId::wire`]; leading zeros
+    /// and case ignored), its SHA-1 fingerprint (40 hex digits, what `security find-identity` shows), or an
+    /// [`IdentityId`] (`<team>/<serial>`).
+    pub fn resolve(&self, name: &str) -> Result<SigningIdentity> {
+        let name = name.trim();
+        if name.contains('/') {
+            return self.get(&IdentityId(name.to_owned()));
+        }
+        let wanted = name.to_ascii_uppercase();
+        let serial = wanted.trim_start_matches('0');
+        let mut matches: Vec<SigningIdentity> = self
+            .list(None)?
+            .into_iter()
+            .filter(|i| i.serial.eq_ignore_ascii_case(serial) || i.sha1.eq_ignore_ascii_case(name))
+            .collect();
+        match matches.len() {
+            1 => Ok(matches.remove(0)),
+            0 => Err(Error::new(codes::sign::NO_IDENTITY, format!("no signing identity {name}")).with_hint(
+                "Name an identity by the id `russet account list` shows (its certificate serial) or its SHA-1.",
+            )),
+            n => Err(Error::new(
+                codes::core::INVALID_ARGUMENT,
+                format!("{n} signing identities have the certificate serial {name}"),
+            )
+            .with_hint("Name the identity by its SHA-1 fingerprint (the sha1 field of `russet account list --json`).")),
+        }
+    }
+
+    /// Loads an identity with its private key (from the secret store; in-process only). ARCHITECTURE §5.3's
+    /// synchronous form: the secret store is asynchronous, so the read runs on a short-lived thread with its own
+    /// runtime. It may be called from a runtime worker (it blocks that worker for the read) or from a blocking
+    /// thread; async callers can use [`Self::load_async`].
+    pub fn load(&self, id: &IdentityId) -> Result<LoadedIdentity> {
+        block_on_secrets(self.load_async(id))
+    }
+
+    /// [`Self::load`] for async callers.
+    pub async fn load_async(&self, id: &IdentityId) -> Result<LoadedIdentity> {
         let identity = self.get(id)?;
         let key = self.secrets.get(&identity.secret_id()).await?.ok_or_else(|| {
             Error::new(codes::sign::NO_IDENTITY, format!("the private key of {id} is not in the secret store"))
@@ -215,8 +276,14 @@ impl IdentityStore {
         Ok(LoadedIdentity { identity, inner })
     }
 
-    /// Imports a PKCS#12 identity (`identity.importP12` is W12's RPC; the store method is shared).
-    pub async fn import_p12(&self, p12: &[u8], pw: &SecretBytes) -> Result<SigningIdentity> {
+    /// Imports a PKCS#12 identity (`identity.importP12` is W12's RPC; the store method is shared). Synchronous as
+    /// in ARCHITECTURE §5.3, like [`Self::load`]; async callers use [`Self::import_p12_async`].
+    pub fn import_p12(&self, p12: &[u8], pw: &SecretBytes) -> Result<SigningIdentity> {
+        block_on_secrets(self.import_p12_async(p12, pw))
+    }
+
+    /// [`Self::import_p12`] for async callers.
+    pub async fn import_p12_async(&self, p12: &[u8], pw: &SecretBytes) -> Result<SigningIdentity> {
         let pw = std::str::from_utf8(pw.expose())
             .map_err(|_| Error::new(codes::core::INVALID_ARGUMENT, "the .p12 password is not UTF-8"))?;
         let identity = InMemoryIdentity::from_p12(p12, pw, None)?;
@@ -242,6 +309,9 @@ impl IdentityStore {
             return Err(Error::new(
                 codes::sign::NO_IDENTITY,
                 "the certificate's team or serial is not usable as a name",
+            )
+            .with_hint(
+                "Apple signing certificates carry a 10-character team (subject OU) and a hex serial; use one of those.",
             ));
         }
         let kind = match info.kind {
@@ -292,9 +362,26 @@ impl IdentityStore {
     }
 }
 
+/// Runs a secret-store future to completion from synchronous code: on a scoped thread with its own
+/// current-thread runtime, so it works inside and outside a Tokio runtime (the stores use `spawn_blocking` and
+/// their own keyring threads, never the caller's runtime).
+fn block_on_secrets<T: Send>(fut: impl Future<Output = Result<T>> + Send) -> Result<T> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| {
+                    Error::new(codes::core::INTERNAL, format!("cannot start a runtime for the secret store: {e}"))
+                })?;
+                rt.block_on(fut)
+            })
+            .join()
+            .map_err(|_| Error::new(codes::core::INTERNAL, "the secret-store read panicked"))?
+    })
+}
+
 fn invalid_id(id: &IdentityId) -> Error {
     Error::new(codes::core::INVALID_ARGUMENT, format!("invalid identity id `{id}`"))
-        .with_hint("Identity ids are `<team>/<serial>`, as `russet account list` shows them.")
+        .with_hint("Name an identity by the id `russet account list` shows (its certificate serial) or its SHA-1.")
 }
 
 /// A path component that cannot escape its directory.
@@ -305,7 +392,8 @@ fn safe_component(s: &str) -> bool {
 fn read_identity(json_path: &Path) -> Result<SigningIdentity> {
     let raw = std::fs::read(json_path).map_err(|e| io_error("cannot read", json_path, e))?;
     let f: IdentityFile = serde_json::from_slice(&raw).map_err(|e| {
-        Error::new(codes::core::INVALID_ARGUMENT, format!("{} is not an identity file: {e}", json_path.display()))
+        Error::new(codes::core::INVALID_ARGUMENT, format!("{} is not an identity file: {e}", shown(json_path)))
+            .with_hint("Remove the broken file and import the identity again (`russet account import --from-xtool`).")
     })?;
     let cer = json_path.with_extension("cer");
     let cert_der = std::fs::read(&cer).map_err(|e| io_error("cannot read", &cer, e))?;

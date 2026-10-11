@@ -168,20 +168,20 @@ impl Check for XtoolFilesPrivate {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             return result(Status::Skip, "xtool stores no credentials here", None);
         };
+        // The directory is named, never the files: xtool names its identity file after the issuer ID.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
-            let open: Vec<String> = entries
+            let open = entries
                 .filter_map(|e| e.ok())
                 .filter(|e| e.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o077 != 0))
-                .map(|e| e.path().display().to_string())
-                .collect();
-            if !open.is_empty() {
+                .count();
+            if open > 0 {
                 return CheckResult {
                     status: Status::Warn,
-                    summary: format!("{} xtool credential file(s) are readable by other users", open.len()),
-                    detail: Some(open.join("\n")),
-                    hint: Some(format!("chmod 600 {}", open.join(" "))),
+                    summary: format!("{open} xtool credential file(s) are readable by other users"),
+                    detail: Some(format!("in {}", dir.display())),
+                    hint: Some(format!("chmod 600 '{}'/*", dir.display())),
                 };
             }
         }

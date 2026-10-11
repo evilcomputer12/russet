@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use russet_asc::{AscClient, AscKey, Issuer, JwtAuth, TokenFactory};
+use russet_asc::{AscClient, AscKey, Issuer, JwtAuth, RateLimiter, RetryPolicy, TokenFactory};
 use russet_core::Result;
 use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, codes};
@@ -154,6 +154,10 @@ struct AccountEntry {
     imported_from: Option<String>,
 }
 
+/// The rate limiters of the App Store Connect keys, by key ID: every client of a key shares one, so the hourly
+/// quota spans calls (SIGN §5.3).
+pub(crate) type Limiters = Arc<std::sync::Mutex<std::collections::BTreeMap<String, Arc<RateLimiter>>>>;
+
 /// `accounts.toml` plus the sealed secrets.
 pub struct AccountStore {
     path: PathBuf,
@@ -162,6 +166,7 @@ pub struct AccountStore {
     identities: IdentityStore,
     asc_base: Url,
     xtool_dir: Option<PathBuf>,
+    limiters: Limiters,
 }
 
 impl std::fmt::Debug for AccountStore {
@@ -188,7 +193,26 @@ impl AccountStore {
         let identities = IdentityStore::new(&dirs.data, secrets.clone());
         #[allow(clippy::unwrap_used)] // a constant, valid URL
         let asc_base = Url::parse(russet_asc::DEFAULT_BASE_URL).unwrap();
-        Ok(Self { path, file, secrets, identities, asc_base, xtool_dir: xtool::default_dir() })
+        Ok(Self {
+            path,
+            file,
+            secrets,
+            identities,
+            asc_base,
+            xtool_dir: xtool::default_dir(),
+            limiters: Limiters::default(),
+        })
+    }
+
+    /// The rate limiter every client of App Store Connect key `key_id` shares.
+    pub fn limiter(&self, key_id: &str) -> Arc<RateLimiter> {
+        let Ok(mut map) = self.limiters.lock() else { return Arc::new(RateLimiter::per_key()) };
+        map.entry(key_id.to_owned()).or_insert_with(|| Arc::new(RateLimiter::per_key())).clone()
+    }
+
+    /// A GET-only client of `key` with per-request scopes, sharing the key's limiter.
+    pub(crate) fn client(&self, key: &AscKey) -> Result<AscClient> {
+        client_for(key.clone(), &self.asc_base, self.limiter(&key.key_id))
     }
 
     /// Points the App Store Connect client at `base` (`Endpoints.asc`; fakes in tests).
@@ -261,7 +285,7 @@ impl AccountStore {
             None => Issuer::Individual,
         };
         let key = AscKey::from_p8(&r.key_id, issuer, &pem)?;
-        let team = discover_team(&key, &self.asc_base, &self.identities).await?;
+        let team = discover_team(&self.client(&key)?, &key, &self.identities).await?;
         let kind = if key.is_individual() { AccountKind::AscIndividualKey } else { AccountKind::AscTeamKey };
         let label = r.label.unwrap_or_else(|| format!("App Store Connect key {}", r.key_id));
         self.seal_key(&r.key_id, &label, &pem).await?;
@@ -285,6 +309,7 @@ impl AccountStore {
     pub async fn import_xtool(&mut self, dry_run: bool) -> Result<XtoolImport> {
         let dir = self.xtool_dir.clone().ok_or_else(|| {
             Error::new(codes::core::NOT_FOUND, "cannot locate xtool's data directory (HOME is not set)")
+                .with_hint("Set HOME (or XDG_CONFIG_HOME) to the user whose xtool login should be imported.")
         })?;
         let data = xtool::read(&dir)?;
         let mut warnings = data.warnings.clone();
@@ -355,18 +380,18 @@ impl AccountStore {
                 )
                 .with_details(serde_json::json!({"warnings": warnings})));
         }
-        // The chmod 600 advice (SIGN §4.4, ARCHITECTURE §12.3), whatever the files' modes are today.
-        let files: Vec<String> = data.files.iter().map(|p| p.display().to_string()).collect();
+        // The chmod 600 advice (SIGN §4.4, ARCHITECTURE §12.3), whatever the files' modes are today. It names
+        // xtool's directory, never its files: the identity file is named after the App Store Connect issuer ID.
+        let dir_shown = dir.display().to_string();
         if data.world_readable.is_empty() {
             warnings.push(format!(
-                "xtool keeps its own copy of these credentials ({}); they are private (chmod 600) — keep them so, and run `xtool auth logout` once Russet provisions on its own (W12)",
-                files.join(", ")
+                "xtool keeps its own copy of these credentials ({} file(s) in {dir_shown}); they are private (chmod 600) — keep them so, and run `xtool auth logout` once Russet provisions on its own (W12)",
+                data.files.len()
             ));
         } else {
-            let open: Vec<String> = data.world_readable.iter().map(|p| p.display().to_string()).collect();
             warnings.push(format!(
-                "xtool's credential files are readable by other users: run `chmod 600 {}`, and `xtool auth logout` once Russet provisions on its own (W12)",
-                open.join(" ")
+                "{} of xtool's credential files in {dir_shown} are readable by other users: run `chmod 600 '{dir_shown}'/*`, and `xtool auth logout` once Russet provisions on its own (W12)",
+                data.world_readable.len()
             ));
         }
         Ok(XtoolImport { dry_run, accounts, identities, warnings })
@@ -378,15 +403,16 @@ impl AccountStore {
         let key = self.asc_key(&account).await?;
         let team_id = team.map(str::to_owned).or_else(|| account.team_id.clone()).ok_or_else(|| {
             Error::new(codes::account::NO_ACCOUNT, format!("the team of {id} is unknown"))
-                .with_hint("Run `russet account verify`, or re-add the key so Russet can discover the team.")
+                .with_hint("Re-add the key (`russet account add-key …`) or import xtool's identity so Russet can discover the team; `russet account verify` shows what the key can read.")
         })?;
-        Ok(Arc::new(AscPortal::new(client_for(key, &self.asc_base)?, team_id, key_is_individual(&account))))
+        Ok(Arc::new(AscPortal::new(self.client(&key)?, team_id, key_is_individual(&account))))
     }
 
     /// The account's App Store Connect key, unsealed (in-process only).
     pub async fn asc_key(&self, account: &Account) -> Result<AscKey> {
         let secret = account.secret_id().ok_or_else(|| {
             Error::new(codes::account::NO_ACCOUNT, format!("{} has no App Store Connect key", account.id))
+                .with_hint("Only App Store Connect accounts read the portal in Wave 1: add a key with `russet account add-key`, or import xtool's with `russet account import --from-xtool --yes`.")
         })?;
         let pem = self.secrets.get(&secret).await?.ok_or_else(|| {
             Error::new(
@@ -457,17 +483,40 @@ pub(crate) fn no_account(id: Option<&AccountId>) -> Error {
         .with_hint("Add one: `russet account import --from-xtool --yes` or `russet account add-key --key-id … --issuer-id … --p8 …`.")
 }
 
-/// A GET-only client with per-request scopes (Wave 1).
-pub(crate) fn client_for(key: AscKey, base: &Url) -> Result<AscClient> {
+/// A GET-only client with per-request scopes (Wave 1) that shares `limiter` with the key's other clients.
+pub(crate) fn client_for(key: AscKey, base: &Url, limiter: Arc<RateLimiter>) -> Result<AscClient> {
     let auth = JwtAuth::per_request(base.clone(), Arc::new(TokenFactory::new(key)));
-    AscClient::new(Arc::new(auth))
+    AscClient::with_limiter(Arc::new(auth), RetryPolicy::default(), limiter)
 }
 
-/// Checks the key with `GET /v1/certificates?limit=…` and discovers the team: a certificate's subject OU, a
-/// local identity of one of those certificates, else the seed ID of a bundle ID (SIGN §6.1 step 3).
-pub(crate) async fn discover_team(key: &AscKey, base: &Url, identities: &IdentityStore) -> Result<Option<String>> {
-    let client = client_for(key.clone(), base)?;
-    let certs = client.certificates().probe(20).await?;
+/// Checks the key against App Store Connect with GET-scoped reads and discovers its team (SIGN §6.1 step 3).
+///
+/// - A team key reads `GET /v1/certificates?limit=…`: the team is a certificate's subject OU, else the team of a
+///   local identity of one of those certificates, else the seed ID of a bundle ID. A 403 there means the key's
+///   role cannot use the provisioning endpoints: the key is kept, without a team.
+/// - An individual key cannot use the provisioning endpoints at all (SIGN §5.2), so it reads `GET /v1/apps` to
+///   prove it is accepted, and has no team.
+///
+/// A 401 (wrong key, issuer or clock) is an error either way: nothing is stored.
+pub(crate) async fn discover_team(
+    client: &AscClient,
+    key: &AscKey,
+    identities: &IdentityStore,
+) -> Result<Option<String>> {
+    let forbidden =
+        |e: &Error| e.code() == codes::account::ASC_FORBIDDEN || e.code() == codes::account::INSUFFICIENT_ROLE;
+    if key.is_individual() {
+        return match client.get_json::<serde_json::Value>("/v1/apps?limit=1").await {
+            Ok(_) => Ok(None),
+            Err(e) if forbidden(&e) => Ok(None),
+            Err(e) => Err(e),
+        };
+    }
+    let certs = match client.certificates().probe(20).await {
+        Ok(c) => c,
+        Err(e) if forbidden(&e) => Vec::new(),
+        Err(e) => return Err(e),
+    };
     for c in &certs {
         let Some(content) = c.attributes.as_ref().and_then(|a| a.certificate_content.as_deref()) else { continue };
         let Some(der) = base64_std(content) else { continue };
@@ -480,9 +529,6 @@ pub(crate) async fn discover_team(key: &AscKey, base: &Url, identities: &Identit
     let serials: Vec<String> = certs.iter().filter_map(|c| c.attributes.as_ref()?.serial_number.clone()).collect();
     if let Some(i) = identities.list(None)?.into_iter().find(|i| serials.contains(&i.serial)) {
         return Ok(Some(i.team_id));
-    }
-    if key.is_individual() {
-        return Ok(None);
     }
     let bundles = client.bundle_ids().list(None).await.unwrap_or_default();
     Ok(bundles.iter().find_map(|b| b.resource.attributes.as_ref()?.seed_id.clone()))
