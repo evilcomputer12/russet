@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-build"
+description = "Build orchestrator: project detection, stack adapters, Info.plist synthesis, bundle assembly, lints, metadata policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+camino.workspace = true
+plist.workspace = true
+russet-core.workspace = true
+russet-doctor.workspace = true
+russet-ipa.workspace = true
+russet-macho.workspace = true
+russet-plist.workspace = true
+russet-sdk.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true

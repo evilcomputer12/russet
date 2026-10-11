@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-sdk"
+description = "SDK facts, platform view, toolsets, SDK and DDI import"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+camino.workspace = true
+plist.workspace = true
+russet-core.workspace = true
+russet-doctor.workspace = true
+russet-plist.workspace = true
+russet-toolchain.workspace = true
+russet-xar.workspace = true
+tokio-util.workspace = true

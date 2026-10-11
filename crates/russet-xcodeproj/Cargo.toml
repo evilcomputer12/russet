@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-xcodeproj"
+description = "pbxproj, .xcproj, workspace, scheme and xcconfig parsing; build-setting resolver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

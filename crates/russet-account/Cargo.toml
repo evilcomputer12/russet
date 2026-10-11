@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-account"
+description = "Accounts, identities, DevPortal, provisioning planner and applier, free-team policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+p12-keystore.workspace = true
+rsa.workspace = true
+russet-asc.workspace = true
+russet-core.workspace = true
+russet-doctor.workspace = true
+russet-secrets.workspace = true
+russet-sign.workspace = true
+secrecy.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+x509-cert.workspace = true
