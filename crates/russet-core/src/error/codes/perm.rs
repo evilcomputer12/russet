@@ -37,3 +37,15 @@ pub const ALL: &[ErrorCode] = &[
     RATE_LIMITED,
     TIER_EXCEEDED,
 ];
+
+/// Default hints (ARCHITECTURE §13.1), used when an error of this family carries none. A declined confirmation
+/// has no next step beyond running the command again.
+pub const HINTS: &[(ErrorCode, &str)] = &[
+    (DENIED, "This client's permission profile does not allow the call (ARCHITECTURE §7.5)."),
+    (CONFIRMATION_UNAVAILABLE, "Run it in a terminal to confirm, or pass `--yes` (typed ones need `--confirm-text`)."),
+    (AUTH_FAILED, "The connection was not authenticated: check the token or the socket's owner."),
+    (APPROVAL_REQUIRED, "A human must approve it (`russet approve <id>` in a terminal, or Approve in Russet IDE)."),
+    (APPROVAL_INVALID, "Request a new approval: retry the call without `approval`."),
+    (RATE_LIMITED, "Wait and retry; the limits are set in mcp-policy.toml."),
+    (TIER_EXCEEDED, "Raise the client's `tier-max` in mcp-policy.toml if a human agrees (ARCHITECTURE §11.3)."),
+];

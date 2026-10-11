@@ -1,0 +1,10 @@
+{
+  "name": "russet-ipc-node-interop",
+  "private": true,
+  "description": "Interop test: stock vscode-jsonrpc 9.0.3 against russet-ipc (ARCHITECTURE §7.2; PLAN W2 tests)",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "dependencies": {
+    "vscode-jsonrpc": "9.0.3"
+  }
+}

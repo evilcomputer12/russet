@@ -34,3 +34,14 @@ pub const ALL: &[ErrorCode] = &[
     CONNECTION_CLOSED,
     BUILD_MISMATCH,
 ];
+
+/// Default hints (ARCHITECTURE §13.1), used when an error of this family carries none.
+pub const HINTS: &[(ErrorCode, &str)] = &[
+    (PROTOCOL_MISMATCH, "Another Russet version runs the daemon: stop it (`russet daemon restart --force`)."),
+    (NOT_INITIALIZED, "Clients must send `initialize` first (ARCHITECTURE §7.4)."),
+    (DAEMON_UNAVAILABLE, "Start it with `russet daemon start`, check `russet daemon logs`, or use `--no-daemon`."),
+    (DAEMON_STARTING, "The daemon is starting: wait a moment and retry."),
+    (FRAME_TOO_LARGE, "Messages are limited to 16 MiB: pass large data through files instead."),
+    (CONNECTION_CLOSED, "The daemon went away: retry, and check `russet daemon logs` if it keeps happening."),
+    (BUILD_MISMATCH, "Another build runs this daemon: `russet daemon restart --force` once its jobs are done."),
+];

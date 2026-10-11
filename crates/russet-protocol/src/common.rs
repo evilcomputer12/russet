@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! Shared wire types (`LogEntry`, `DeviceSummary`, `JitStats`, `SessionSummary`, …; ARCHITECTURE §9.5). No methods. Owner: W2.
+//! Shared wire types (`LogEntry`, `DeviceSummary`, `JitStats`, `SessionSummary`, …; ARCHITECTURE §9.5), the
+//! client references the core namespaces share, and the LSP built-ins `$/progress` and `$/cancelRequest`
+//! (ARCHITECTURE §7.6). No methods. Owner: W2.
 //!
 //! These shapes are binding for every producer (device, run/debug) and consumer (CLI, IDE, MCP) [D 52, D 72]:
 //! fields are camelCase, unit enums are kebab-case strings, optional fields are omitted rather than `null`, and
@@ -9,12 +11,12 @@
 //! `run.output`) code against the same types from day 0. Times are RFC 3339 UTC strings (ARCHITECTURE §7.3).
 
 use russet_core::error::ErrorData;
-use russet_core::ids::SessionId;
+use russet_core::ids::{JobId, SessionId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{MethodInfo, NotificationInfo};
+use crate::{ClientKind, MethodInfo, NotificationInfo};
 
 /// Methods the daemon serves in this namespace.
 pub const METHODS: &[MethodInfo] = &[];
@@ -22,6 +24,120 @@ pub const METHODS: &[MethodInfo] = &[];
 pub const NOTIFICATIONS: &[NotificationInfo] = &[];
 /// Requests the daemon sends to clients in this namespace.
 pub const CLIENT_METHODS: &[MethodInfo] = &[];
+
+/// A client as other clients see it: `{kind, name}` (`ui.confirm.requestedBy`, audit entries).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientRef {
+    pub kind: ClientKind,
+    pub name: String,
+}
+
+/// A client connection: `{kind, name, connectionId}` (approvals' `requestedBy` and `grantedBy`, owners of jobs
+/// and leases).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionRef {
+    pub kind: ClientKind,
+    pub name: String,
+    /// `c-<n>`.
+    pub connection_id: String,
+}
+
+impl ConnectionRef {
+    /// The `{kind, name}` part.
+    pub fn client(&self) -> ClientRef {
+        ClientRef { kind: self.kind, name: self.name.clone() }
+    }
+}
+
+/// The token of an LSP work-done progress (`$/progress`): a string or an integer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(untagged)]
+pub enum ProgressToken {
+    Number(i64),
+    String(String),
+}
+
+/// `begin`, `report` or `end`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressKind {
+    Begin,
+    Report,
+    End,
+}
+
+/// The value of `$/progress` (ARCHITECTURE §7.6): LSP work-done progress plus Russet's `jobId`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkDoneProgress {
+    pub kind: ProgressKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub message: Option<String>,
+    /// 0–100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub percentage: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cancellable: Option<bool>,
+    /// The job behind the request, on `begin` (ARCHITECTURE §7.6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub job_id: Option<JobId>,
+}
+
+impl WorkDoneProgress {
+    /// A `begin` value.
+    pub fn begin(title: impl Into<String>, cancellable: bool) -> Self {
+        Self {
+            kind: ProgressKind::Begin,
+            title: Some(title.into()),
+            message: None,
+            percentage: None,
+            cancellable: Some(cancellable),
+            job_id: None,
+        }
+    }
+
+    /// A `report` value.
+    pub fn report(message: Option<String>, percentage: Option<u8>) -> Self {
+        Self { kind: ProgressKind::Report, title: None, message, percentage, cancellable: None, job_id: None }
+    }
+
+    /// An `end` value.
+    pub fn end(message: Option<String>) -> Self {
+        Self { kind: ProgressKind::End, title: None, message, percentage: None, cancellable: None, job_id: None }
+    }
+}
+
+/// Params of the LSP built-in notification `$/progress` (not in the registry: its name is not `ns.event`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressParams {
+    pub token: ProgressToken,
+    pub value: WorkDoneProgress,
+}
+
+/// A JSON-RPC request id as `$/cancelRequest` carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(untagged)]
+pub enum RequestIdValue {
+    Number(i64),
+    String(String),
+}
+
+/// Params of the LSP built-in notification `$/cancelRequest` (ARCHITECTURE §7.6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelParams {
+    pub id: RequestIdValue,
+}
 
 /// One log line: `logs.entries`, `logs.tail`, `run.output`, `run.output.query`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

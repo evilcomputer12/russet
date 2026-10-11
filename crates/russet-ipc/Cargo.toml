@@ -15,16 +15,34 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+bytes.workspace = true
+futures.workspace = true
 russet-core.workspace = true
 russet-protocol.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["sync"] }
-tokio-util.workspace = true
+# W2 (CORE-04): `-32602` errors name the offending field (core §7.9; crates.io-checked, already in the graph).
+serde_path_to_error = "0.1.20"
+tokio = { workspace = true, features = ["sync", "rt", "net", "io-util", "time", "macros"] }
+tokio-util = { workspace = true, features = ["codec"] }
+tracing.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt"] }
+# W2 (CORE-04): framing with arbitrary chunking (PLAN W2 tests; crates.io-checked).
+proptest = "1.12.0"
+# Test-only methods are declared with rpc_method!, whose DTOs derive JsonSchema and TS.
+schemars.workspace = true
+tempfile.workspace = true
+ts-rs = { workspace = true, features = ["serde-json-impl"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Memory",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
