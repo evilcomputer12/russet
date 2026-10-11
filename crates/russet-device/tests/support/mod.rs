@@ -58,7 +58,8 @@ pub struct FakeConnector {
     /// While set, RSD services other than `test.echo` fail with `device.locked` (a locked iPhone).
     pub locked: AtomicBool,
     /// While set, the connector answers like russet-testkit's scripted backend before it adopted the device
-    /// plane's catalog: `lockdown.get_value {udid?, key?, domain?}` only, `device.serviceNotImplemented` for the rest.
+    /// plane's catalog: `lockdown.get_value {udid?, key?, domain?}` and `ddi.status` only,
+    /// `device.serviceNotImplemented` for the rest.
     pub qa_catalog_only: AtomicBool,
 }
 
@@ -148,6 +149,12 @@ impl ServiceConnector for FakeConnector {
         self.calls.lock().expect("lock").push(call.api.clone());
         let udid = call.args.get("udid").and_then(|u| u.as_str()).unwrap_or_default().to_owned();
         if self.qa_catalog_only.load(Ordering::SeqCst) {
+            // A scripted scenario's DDI (the optional `ddi.status` call).
+            if call.api == facade::DDI_STATUS {
+                self.device(&udid)?;
+                return Ok(json!({"mounted": true, "kind": "cryptex1", "version": "27.1.266.1",
+                                 "productBuild": "27A266a", "source": "dir"}));
+            }
             // The shape of russet-testkit's `lockdown_value` (W8, scripted.rs): the whole domain without `key`.
             if call.api != facade::LOCKDOWN_GET_VALUE {
                 return Err(Error::new(

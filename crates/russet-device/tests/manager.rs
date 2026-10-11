@@ -397,6 +397,10 @@ async fn a_connector_with_only_lockdown_get_value_still_drives_the_device_plane(
     let h = m.get(&DeviceSelector::Only).expect("the only device is usable");
     let r = h.readiness(true).await.expect("readiness through the fallbacks");
     assert!(r.paired);
+    // The scenario's DDI comes through the optional `ddi.status` call.
+    let ddi = r.ddi.expect("a DDI status");
+    assert_eq!((ddi.mounted, ddi.product_build.as_deref()), (true, Some("27A266a")));
+    assert_eq!(ddi.source, russet_device::ddi::DdiOrigin::Dir);
     let calls = conn.calls.lock().expect("calls").clone();
     assert!(calls.iter().any(|c| c == "lockdown.get_value"), "{calls:?}");
 }

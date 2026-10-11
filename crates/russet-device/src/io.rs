@@ -94,6 +94,10 @@ pub mod facade {
     pub const TUNNEL_STATUS: &str = "tunnel.status";
     /// `tunnel.close`: `{udid}` → `{}`; the next RSD call opens a new generation.
     pub const TUNNEL_CLOSE: &str = "tunnel.close";
+    /// `ddi.status`: `{udid}` → `{mounted, kind, version?, productBuild?, source}` (the `DdiStatus` wire shape,
+    /// ARCHITECTURE §9.5). Optional: scripted backends answer it from their scenario; the live connector does not,
+    /// and the device plane then reads `CopyDevices` and cryptexd itself.
+    pub const DDI_STATUS: &str = "ddi.status";
     /// `rsd.services`: `{udid}` → `{generation, services: {name: {port, features[]}}, properties}`.
     pub const RSD_SERVICES: &str = "rsd.services";
     /// `tunnel.kill`: `{udid}` → `{killed}`; stops the tunnel's TCP stack but leaves the tunnel in place, as if its

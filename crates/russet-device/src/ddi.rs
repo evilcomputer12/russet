@@ -177,6 +177,34 @@ pub fn parse_installed(reply: Option<&plist::Value>) -> Vec<InstalledCryptex> {
         .unwrap_or_default()
 }
 
+/// A `ddi.status` facade answer (the wire `DdiStatus` shape) as a status.
+pub fn status_from_facade(v: &serde_json::Value) -> Result<DdiStatus> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Wire {
+        mounted: bool,
+        kind: DdiKind,
+        #[serde(default)]
+        version: Option<String>,
+        #[serde(default)]
+        product_build: Option<String>,
+        #[serde(default = "unknown_origin")]
+        source: DdiOrigin,
+    }
+    fn unknown_origin() -> DdiOrigin {
+        DdiOrigin::Unknown
+    }
+    let w: Wire = serde_json::from_value(v.clone())
+        .map_err(|e| device_error(codes::device::PROTOCOL, format!("ddi.status: unexpected result: {e}")))?;
+    Ok(DdiStatus {
+        mounted: w.mounted,
+        kind: w.kind,
+        version: w.version,
+        product_build: w.product_build,
+        source: w.source,
+    })
+}
+
 /// The DDI form expected for an iOS major version (17–26.x personalized DMG, 27+ Cryptex1).
 pub fn expected_kind(ios_major: Option<u32>) -> DdiKind {
     match ios_major {
@@ -438,6 +466,16 @@ impl DeviceHandle {
     }
 
     pub async fn ddi_status(&self) -> Result<DdiStatus> {
+        // A connector may know the status itself (a scripted backend's scenario); the live one reads the device.
+        let call = crate::io::FacadeCall::new(
+            crate::io::facade::DDI_STATUS,
+            serde_json::json!({ "udid": self.udid().as_str() }),
+        );
+        match self.conn().call(call).await {
+            Ok(v) => return status_from_facade(&v),
+            Err(e) if crate::io::unanswered(&e) => {}
+            Err(e) => return Err(e),
+        }
         if self.ios_major().is_none() {
             let _ = self.ensure_identity().await;
         }
@@ -825,6 +863,29 @@ mod tests {
         for key in TRANSFER_KEYS {
             assert!(argv.contains_key(key), "{key} missing");
         }
+    }
+
+    #[test]
+    fn scripted_backends_may_answer_the_status_themselves() {
+        let s = status_from_facade(&serde_json::json!({"mounted": true, "kind": "cryptex1", "productBuild": "27A266a",
+                                                        "version": "27.1.266.1", "source": "dir"}))
+        .expect("status");
+        assert_eq!(
+            s,
+            DdiStatus {
+                mounted: true,
+                kind: DdiKind::Cryptex1,
+                version: Some("27.1.266.1".into()),
+                product_build: Some("27A266a".into()),
+                source: DdiOrigin::Dir,
+            }
+        );
+        let s = status_from_facade(&serde_json::json!({"mounted": false, "kind": "cryptex1"})).expect("status");
+        assert_eq!((s.mounted, s.source), (false, DdiOrigin::Unknown));
+        assert_eq!(
+            status_from_facade(&serde_json::json!({"mounted": "yes"})).expect_err("bad").code(),
+            codes::device::PROTOCOL
+        );
     }
 
     #[test]
