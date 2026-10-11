@@ -1,18 +1,82 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! `audit.*`: the append-only audit log (ARCHITECTURE §6.5). Owner: W2.
+//! `audit.*`: the append-only `state/audit.jsonl` (ARCHITECTURE §6.5, §8.1). Owner: W2.
 //!
-//! F0 stub (W1): every name of ARCHITECTURE §8.1 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
-//! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+//! Every MCP call is recorded, and CLI and IDE calls from class `account` upwards, with redacted params.
 
-use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
+use russet_core::ids::ApprovalId;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-/// Params of `audit.tail`: `{limit?, kinds?, client?} → {entries: AuditEntry[]}`.
-pub type AuditTailParams = Unspecified;
-/// Result of `audit.tail`.
-pub type AuditTailResult = Unspecified;
+use crate::common::ClientRef;
+use crate::{MethodInfo, NotificationInfo, RpcMethod};
+
+/// What an audit entry records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuditKind {
+    /// A call (or a refused call).
+    Rpc,
+    /// An approval was requested, granted, denied or used.
+    Approval,
+    /// A change on Apple's side (`account`, `account-destructive`, `publish`).
+    AccountMutation,
+}
+
+/// One line of `state/audit.jsonl` (ARCHITECTURE §6.5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntry {
+    /// RFC 3339 UTC.
+    pub ts: String,
+    pub kind: AuditKind,
+    pub client: ClientRef,
+    pub method: String,
+    /// The MCP tool behind the call, when the bridge named it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tool: Option<String>,
+    /// The MCP tier of the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tier: Option<u8>,
+    /// SHA-256 of the canonical JSON params without `approval`.
+    pub params_digest: String,
+    /// The params with secrets masked (ARCHITECTURE §12.2).
+    pub params_redacted: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub approval_id: Option<ApprovalId>,
+    /// `ok`, or the `russetCode` of the error (`perm.denied`, …), or an approval state for `approval` entries.
+    pub outcome: String,
+    pub duration_ms: u64,
+}
+
+/// Params of `audit.tail`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditTailParams {
+    /// The newest entries to return; default 50.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<AuditKind>,
+    /// Only this client name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub client: Option<String>,
+}
+
+/// Result of `audit.tail`: oldest first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditTailResult {
+    pub entries: Vec<AuditEntry>,
+}
+
 crate::rpc_method!(
     /// `audit.tail` (class `read`). W2 (Wave 1).
     AuditTail,
