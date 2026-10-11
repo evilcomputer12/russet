@@ -13,7 +13,8 @@ Bundle walk, provisioning profiles, entitlements, signing through apple-codesign
 - `EntitlementsResolver` is the SIGN §8.4 merge (variables, required keys, glob rules per value type,
   `aps-environment` from the profile, least privilege or profile-all); `capability_for_entitlement` is the SIGN
   §6.5 map.
-- `sign` copies the app (`SignOutput::CopyTo`) or signs in place; runs the pre-sign fixes (chmod 0755, string-pool
+- `sign` signs in place or a copy (`SignOutput::CopyTo`: an `.app` path; only an earlier signed copy of the same app
+  is replaced, and a path inside the input is refused); runs the pre-sign fixes (chmod 0755, string-pool
   alignment when sdk ≥ 27.0, stale `_CodeSignature`/`.DS_Store`/`__MACOSX` removal, opt-in thinning); checks each
   app-like bundle's profile (bundle, team, certificate, distribution, expiry); embeds it; signs inside-out with one
   `SigningSettings` (key and team global, entitlements per bundle path; frameworks and dylibs get none); then
@@ -23,5 +24,8 @@ Bundle walk, provisioning profiles, entitlements, signing through apple-codesign
   directory's pages + the Info.plist and CodeResources slots + every sealed resource and coverage + L-SIG-001…007.
 - `lint` adds L-MACHO-001…004 and L-BND-001…010 (`device-install`, `app-store`); a build product that is unsigned
   or only linker-signed skips the L-SIG rules with an info finding.
-- `inspect` reports every slice with team IDs masked and no certificate subject.
-- The `test-pki` feature provides synthetic identities and CMS-signed profiles for tests.
+- `inspect` reports every slice with team IDs masked and no certificate subject. Entitlement and profile errors
+  render App ID prefixes masked; `redact_error` masks known team IDs in an error (the daemon's wire boundary).
+- `InMemoryIdentity::from_p12` reads `.p12` files with `p12-keystore` (PBES2/AES and the legacy PBES1 forms).
+- The `test-pki` feature provides synthetic identities and CMS-signed profiles for tests. Checks against the
+  owner's real M1 `Hello.app` are local and env-gated, never committed (PLAN §0 rule 9).

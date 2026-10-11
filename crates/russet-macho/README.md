@@ -11,7 +11,8 @@ Mach-O parsing, load commands, string-pool alignment, code-signature blobs, rpat
   bounds-checked reads: malformed input is an error, never a panic. Per slice (`Image`): `LC_BUILD_VERSION` (or
   `LC_VERSION_MIN_*`), UUID, rpaths, dylibs, install name, `LC_ENCRYPTION_INFO(_64)`, `LC_SYMTAB`, segments, header
   padding, and the `LC_CODE_SIGNATURE` superblob. The single-valued accessors describe the arm64 slice (then
-  arm64e, then the first).
+  arm64e, then the first). `Arch` keeps ARCHITECTURE §5.3's three variants; slices of other CPUs are described by
+  `Cpu` and listed by `cpu_slices()` (`slices()` lists the `Arch` slices).
 - `CodeSignature` parses every code directory (version, flags, hash type, page size, identifier, team, code limit,
   exec-segment fields, runtime, special and code slot hashes, CDHash), the requirement set, XML and DER
   entitlements and the CMS wrapper; `CodeDirectory::mismatched_pages` re-hashes the code pages.

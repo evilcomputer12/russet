@@ -15,11 +15,14 @@ Async typed App Store Connect client: ES256 JWT, scoped tokens, rate limiter, pl
 - `JwtAuth` implements the pluggable `Auth` trait. The Wave-1 default, `TokenMode::PerRequest`, scopes every request
   to exactly itself, so App Store Connect refuses anything else even on a bug [V3].
 - `AscClient` sends GETs only: retries for 5xx and transport errors, exponential backoff with jitter (and
-  `Retry-After`) on 429, pacing below 200 remaining requests of the hourly quota (`X-Rate-Limit`), error mapping to
-  the `account` family, JSON:API paging that keeps `limit` next to `cursor` and never follows a next link to
-  another origin, and an allowlisted `raw_get` for W12's `asc.get`.
+  `Retry-After`) on 429, a per-key `RateLimiter` (a token bucket of 3,600 requests an hour, capped by the
+  `X-Rate-Limit` quota left, shared by every client of the key through `with_limiter`), pacing below 200 remaining
+  requests, error mapping to the `account` family, JSON:API paging that keeps `limit` next to `cursor` and never
+  follows a next link to another origin, and an allowlisted `raw_get` for W12's `asc.get` whose allowlist is checked
+  on the normalized URL (encoded dots, slashes and backslashes are refused). `RUSSET_OFFLINE=1` limits it to
+  loopback hosts.
 - Typed accessors: certificates, devices, bundle IDs with capabilities (exact-match post-filter, ambiguity error),
   profiles (content, bundle ID, certificates, devices), apps, builds, beta groups, Xcode Cloud products. Every enum
   is open (`model::Open`) [V5]. The models are written by hand; SIGN §5.1's `xtask asc-gen`/`asc-drift` are not in
   Wave 1.
-- Doctor: `asc.reachable` (with `--online`).
+- Doctor: `asc.reachable` (with `--online`; the root from `RUSSET_ENDPOINTS_FILE`).
