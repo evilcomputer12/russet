@@ -386,6 +386,8 @@ impl ConfigService {
                 None => Ok(Lookup { value: Some(eff.value().clone()), sources: eff.sources(), files }),
                 Some(k) => match eff.get(k)? {
                     Some((value, sources)) => Ok(Lookup { value: Some(value), sources, files }),
+                    // A valid key with no value anywhere (an optional key such as `app.bundle-id`).
+                    None if is_known_key(k)? => Ok(Lookup { value: None, sources: Vec::new(), files }),
                     None => Err(unknown_effective_key(k)),
                 },
             };
@@ -446,6 +448,14 @@ impl ConfigService {
     pub fn schema(&self, file: ConfigFile) -> Value {
         schema::schema(file)
     }
+}
+
+/// Whether `key` exists in the project or the global schema.
+fn is_known_key(key: &str) -> Result<bool> {
+    let segments = keys::parse(key)?;
+    Ok([ConfigFile::Project, ConfigFile::Global]
+        .into_iter()
+        .any(|f| schema::schema_at(&schema::schema(f), &segments).is_some()))
 }
 
 fn unknown_effective_key(key: &str) -> Error {

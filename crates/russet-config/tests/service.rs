@@ -64,6 +64,10 @@ fn get_set_unset_round_trip_through_the_service() {
     let committed = std::fs::read_to_string(project.path().join("russet.toml")).expect("read");
     assert!(committed.starts_with("# committed\n"));
 
+    // A valid key that nothing sets has no value, and no error.
+    let l = svc.lookup(ReadScope::Effective, None, Some("app.display-name")).expect("valid but unset");
+    assert_eq!((l.value, l.sources.len()), (None, 0));
+
     // Unknown keys are refused in every scope.
     let err = svc.lookup(ReadScope::Effective, None, Some("daemon.nope")).expect_err("unknown");
     assert_eq!(err.code(), codes::config::UNKNOWN_KEY);
