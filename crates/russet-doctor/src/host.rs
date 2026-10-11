@@ -6,7 +6,7 @@
 //! backend it only stats the socket and reports `skip`, so lane D never connects to `/run/usbmuxd`
 //! (ARCHITECTURE §3.3 item 7) [D 83].
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -197,7 +197,7 @@ impl Check for HostWsl {
 struct DirsPrivate;
 
 #[cfg(unix)]
-fn dir_problem(d: &Path) -> Option<String> {
+fn dir_problem(d: &std::path::Path) -> Option<String> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let meta = match std::fs::metadata(d) {
         Ok(m) => m,
