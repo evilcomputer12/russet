@@ -155,6 +155,9 @@ async fn russet_probe_builds_on_this_host() {
     assert_eq!(info.get("CFBundleIdentifier").and_then(Value::as_string), Some("dev.russet.test.probe"));
     assert!(out.report_path.is_file());
     assert_eq!(out.signing_plan.items.last().map(|i| i.path.clone()), Some(out.app.path.clone()));
+    // A debug build signs the app with get-task-allow (the debugger attaches, PLAN §4.10).
+    assert!(out.signing_plan.items.last().is_some_and(|i| i.get_task_allow));
+    debug_map_reaches_the_breakpoint_source(&h, &out.app.executable);
     let first = hash_tree(&out.app.path);
 
     // A warm build (nothing changed) is fast (PLAN §4.5: ≤ 60 s warm).
@@ -183,6 +186,39 @@ async fn russet_probe_builds_on_this_host() {
     let report =
         russet_ipa::write(&again.app.path, &other, russet_ipa::IpaOptions::new(russet_ipa::IpaMode::Dev)).unwrap();
     assert_eq!(report.sha256, sha1, "two IPA runs give the same SHA-256");
+}
+
+/// The debug executable has no dSYM (`[build] dsym = "release"`), so LLDB reads DWARF through its debug map: the
+/// `N_OSO` entries must name object files that still exist after the build (the persistent `.russet/work/swiftpm`
+/// scratch), and `ContentView.swift`'s object must carry the line table of the `RUSSET_PROBE_BREAK` breakpoint
+/// (W9's `russet debug --break ContentView.swift:<line>`).
+fn debug_map_reaches_the_breakpoint_source(h: &Host, executable: &Utf8Path) {
+    let tool = |name: &str| h.otool.parent().unwrap().join(name);
+    let (nm, dwarfdump) = (tool("llvm-nm"), tool("llvm-dwarfdump"));
+    if !nm.is_file() || !dwarfdump.is_file() {
+        eprintln!("debug map not checked: no llvm-nm or llvm-dwarfdump next to llvm-otool");
+        return;
+    }
+    let out = std::process::Command::new(nm.as_std_path()).arg("-a").arg(executable.as_str()).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let objects: Vec<&str> =
+        text.lines().filter(|l| l.contains(" OSO ")).filter_map(|l| l.split(" OSO ").nth(1)).collect();
+    assert!(!objects.is_empty(), "no debug map in the debug executable");
+    for o in &objects {
+        let file = o.split('(').next().unwrap_or(o).trim();
+        assert!(Utf8Path::new(file).exists(), "debug-map object {file} is gone after the build");
+    }
+    let content_view =
+        objects.iter().find(|o| o.contains("ContentView")).expect("ContentView's object in the debug map");
+    let lines = std::process::Command::new(dwarfdump.as_std_path())
+        .arg("--debug-line")
+        .arg(content_view.split('(').next().unwrap().trim())
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&lines.stdout).contains("ContentView.swift"),
+        "no line table for ContentView.swift"
+    );
 }
 
 fn sha(path: &Utf8Path) -> String {
