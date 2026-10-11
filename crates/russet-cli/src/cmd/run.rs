@@ -217,7 +217,21 @@ pub async fn follow(cx: &CliCtx, session_id: &SessionId) -> Result<Option<Sessio
         let me = list.sessions.into_iter().find(|s| &s.session_id == session_id);
         match me {
             Some(s) if s.ended_at.is_none() => {}
-            other => return Ok(other),
+            other => {
+                // The app may have printed its last lines between the query and the list.
+                let q = RunOutputQueryParams {
+                    session_id: session_id.clone(),
+                    since_ms: cursor.since_ms,
+                    limit: None,
+                    filter: None,
+                };
+                if let Ok(out) = cx.peer.call::<RunOutputQuery>(q).await {
+                    for e in cursor.fresh(out.entries) {
+                        cx.reporter.result(&json(&e)?);
+                    }
+                }
+                return Ok(other);
+            }
         }
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
