@@ -1,5 +1,202 @@
 {
   "$defs": {
+    "Account": {
+      "description": "An account (`Account`), from `accounts.toml`.",
+      "properties": {
+        "id": {
+          "description": "`asc:<KEYID>` or `appleid:<DSID>`.",
+          "type": "string"
+        },
+        "importedFrom": {
+          "description": "`xtool` for the one-time import.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "keyId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/AccountKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "teamId": {
+          "description": "Masked (`*******XYZ`); omitted until discovered.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "isDefault"
+      ],
+      "type": "object"
+    },
+    "AccountAddAscKeyParams": {
+      "description": "Params of `account.addAscKey` (cli/ide only).",
+      "properties": {
+        "issuerId": {
+          "description": "Omitted for an individual key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyId": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "p8Path": {
+          "description": "The `AuthKey_<KEYID>.p8` file (absolute); the key is sealed, never echoed.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "keyId",
+        "p8Path"
+      ],
+      "type": "object"
+    },
+    "AccountImportXtoolParams": {
+      "description": "Params of `account.importXtool` (cli/ide only; the explicit one-time import [D 50]).",
+      "properties": {
+        "dryRun": {
+          "description": "Report what would be imported without sealing or writing anything.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AccountImportXtoolResult": {
+      "description": "Result of `account.importXtool`.",
+      "properties": {
+        "accounts": {
+          "items": {
+            "$ref": "#/$defs/Account"
+          },
+          "type": "array"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "identities": {
+          "items": {
+            "$ref": "#/$defs/SigningIdentity"
+          },
+          "type": "array"
+        },
+        "warnings": {
+          "description": "Advice (always the `chmod 600` / `xtool auth logout` line, which names xtool's directory but none of its\nfiles) and anything skipped.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "accounts",
+        "identities",
+        "warnings",
+        "dryRun"
+      ],
+      "type": "object"
+    },
+    "AccountKind": {
+      "description": "What an account is.",
+      "enum": [
+        "asc-team-key",
+        "asc-individual-key",
+        "apple-id"
+      ],
+      "type": "string"
+    },
+    "AccountListParams": {
+      "description": "Params of `account.list`.",
+      "type": "object"
+    },
+    "AccountListResult": {
+      "description": "Result of `account.list`.",
+      "properties": {
+        "accounts": {
+          "items": {
+            "$ref": "#/$defs/Account"
+          },
+          "type": "array"
+        },
+        "default": {
+          "description": "The default account's id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "accounts"
+      ],
+      "type": "object"
+    },
+    "AccountVerifyParams": {
+      "description": "Params of `account.verify`.",
+      "properties": {
+        "accountId": {
+          "description": "Omitted: the default account.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AccountVerifyResult": {
+      "description": "Result of `account.verify`.",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "roleProbe": {
+          "$ref": "#/$defs/RoleProbe"
+        },
+        "teamId": {
+          "description": "Masked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ok",
+        "accountId",
+        "roleProbe"
+      ],
+      "type": "object"
+    },
     "Approval": {
       "description": "An approval record (ARCHITECTURE §6.5).",
       "properties": {
@@ -962,6 +1159,31 @@
       ],
       "type": "object"
     },
+    "BundleProvision": {
+      "description": "One provisioned bundle.",
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "profilePath": {
+          "description": "The cached `.mobileprovision` `sign.run` uses.",
+          "type": "string"
+        },
+        "profileUuid": {
+          "type": "string"
+        },
+        "relPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relPath",
+        "bundleId",
+        "profileUuid",
+        "profilePath"
+      ],
+      "type": "object"
+    },
     "CancelParams": {
       "description": "Params of the LSP built-in notification `$/cancelRequest` (ARCHITECTURE §7.6).",
       "properties": {
@@ -973,6 +1195,14 @@
         "id"
       ],
       "type": "object"
+    },
+    "CertificateKind": {
+      "description": "A certificate kind.",
+      "enum": [
+        "development",
+        "distribution"
+      ],
+      "type": "string"
     },
     "CleanScope": {
       "description": "What `build.clean` removes.",
@@ -1078,6 +1308,50 @@
       "required": [
         "kind",
         "name"
+      ],
+      "type": "object"
+    },
+    "CodeDirectoryInfo": {
+      "description": "One code directory.",
+      "properties": {
+        "cdhash": {
+          "type": "string"
+        },
+        "execSegFlags": {
+          "description": "`main-binary`, `allow-unsigned`, …",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "flags": {
+          "description": "`adhoc`, `linker-signed`, `runtime`, …",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hashType": {
+          "description": "`sha1`, `sha256`, …",
+          "type": "string"
+        },
+        "pageSize": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "For example `0x20400`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "hashType",
+        "pageSize",
+        "flags",
+        "execSegFlags",
+        "cdhash"
       ],
       "type": "object"
     },
@@ -2108,6 +2382,34 @@
       },
       "required": [
         "profile"
+      ],
+      "type": "object"
+    },
+    "IdentityListParams": {
+      "description": "Params of `identity.list`.",
+      "properties": {
+        "team": {
+          "description": "Only this team's identities: a team ID, or its masked form as the wire shows it (`*******345`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IdentityListResult": {
+      "description": "Result of `identity.list`.",
+      "properties": {
+        "identities": {
+          "items": {
+            "$ref": "#/$defs/SigningIdentity"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "identities"
       ],
       "type": "object"
     },
@@ -3239,6 +3541,18 @@
       ],
       "type": "string"
     },
+    "MutationKind": {
+      "description": "The kind of an account change.",
+      "enum": [
+        "create-certificate",
+        "register-device",
+        "register-bundle-id",
+        "enable-capability",
+        "create-profile",
+        "delete-profile"
+      ],
+      "type": "string"
+    },
     "PackageKind": {
       "description": "What to package after the build.",
       "oneOf": [
@@ -3293,6 +3607,30 @@
       ],
       "type": "object"
     },
+    "PlanMutation": {
+      "description": "One account change a plan needs.",
+      "properties": {
+        "bundleId": {
+          "description": "The bundle ID it concerns, when it concerns one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/MutationKind"
+        },
+        "summary": {
+          "description": "A one-line description (UDIDs redacted).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "summary"
+      ],
+      "type": "object"
+    },
     "PlanSdk": {
       "description": "The SDK a plan resolved.",
       "properties": {
@@ -3337,6 +3675,296 @@
         "bundle"
       ],
       "type": "object"
+    },
+    "PlannedProfile": {
+      "description": "An existing profile the plan reuses.",
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "expires": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "relPath": {
+          "description": "`\"\"` for the app.",
+          "type": "string"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relPath",
+        "bundleId",
+        "profileId",
+        "uuid",
+        "name",
+        "expires"
+      ],
+      "type": "object"
+    },
+    "PortalBundleId": {
+      "description": "A registered bundle ID.",
+      "properties": {
+        "capabilities": {
+          "description": "Enabled capability types (open strings).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "identifier",
+        "capabilities"
+      ],
+      "type": "object"
+    },
+    "PortalBundleIdsListResult": {
+      "description": "Result of `portal.bundleIds.list`.",
+      "properties": {
+        "bundleIds": {
+          "items": {
+            "$ref": "#/$defs/PortalBundleId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bundleIds"
+      ],
+      "type": "object"
+    },
+    "PortalCertificate": {
+      "description": "A portal certificate.",
+      "properties": {
+        "certificateType": {
+          "description": "`DEVELOPMENT`, `DISTRIBUTION`, … (open).",
+          "type": "string"
+        },
+        "displayName": {
+          "description": "Omitted unless revealed (it can name a person).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expires": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "localIdentity": {
+          "description": "Whether a local identity holds its private key.",
+          "type": "boolean"
+        },
+        "serial": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "certificateType",
+        "localIdentity"
+      ],
+      "type": "object"
+    },
+    "PortalCertificatesListResult": {
+      "description": "Result of `portal.certificates.list`.",
+      "properties": {
+        "certificates": {
+          "items": {
+            "$ref": "#/$defs/PortalCertificate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "certificates"
+      ],
+      "type": "object"
+    },
+    "PortalDevice": {
+      "description": "A registered device.",
+      "properties": {
+        "deviceClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "description": "Omitted unless revealed (device names often name a person).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "description": "Masked (`0000…5F60`) unless revealed.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "udid"
+      ],
+      "type": "object"
+    },
+    "PortalDevicesListResult": {
+      "description": "Result of `portal.devices.list`.",
+      "properties": {
+        "devices": {
+          "items": {
+            "$ref": "#/$defs/PortalDevice"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "devices"
+      ],
+      "type": "object"
+    },
+    "PortalListParams": {
+      "description": "Params shared by the `portal.*.list` rows.",
+      "properties": {
+        "accountId": {
+          "description": "Omitted: the default account.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filter": {
+          "description": "A filter value: the certificate type (`DEVELOPMENT`), the bundle-ID prefix, or the profile type\n(`IOS_APP_DEVELOPMENT`), depending on the row.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reveal": {
+          "description": "From an `ide` connection: unmasked UDIDs and device names (`portal.devices.list`) and certificate display\nnames (`portal.certificates.list`). Ignored for every other connection kind.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PortalProfile": {
+      "description": "A portal profile.",
+      "properties": {
+        "expires": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profileType": {
+          "description": "`IOS_APP_DEVELOPMENT`, … (open).",
+          "type": "string"
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "profileType"
+      ],
+      "type": "object"
+    },
+    "PortalProfilesListResult": {
+      "description": "Result of `portal.profiles.list`.",
+      "properties": {
+        "profiles": {
+          "items": {
+            "$ref": "#/$defs/PortalProfile"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "profiles"
+      ],
+      "type": "object"
+    },
+    "ProbeOutcome": {
+      "description": "One `account.verify` probe.",
+      "enum": [
+        "ok",
+        "forbidden",
+        "unauthorized",
+        "error"
+      ],
+      "type": "string"
     },
     "ProgressKind": {
       "description": "`begin`, `report` or `end`.",
@@ -3615,6 +4243,148 @@
       ],
       "type": "object"
     },
+    "ProvisionApplyParams": {
+      "description": "Params of `provision.apply`.",
+      "properties": {
+        "approval": {
+          "description": "`apr_…`; a zero-mutation plan needs none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "planId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "planId"
+      ],
+      "type": "object"
+    },
+    "ProvisionApplyResult": {
+      "description": "Result of `provision.apply` (`ProvisionOutcome`).",
+      "properties": {
+        "bundles": {
+          "items": {
+            "$ref": "#/$defs/BundleProvision"
+          },
+          "type": "array"
+        },
+        "identityId": {
+          "description": "The identity that signs: its `identity.list` id (the certificate serial).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bundles"
+      ],
+      "type": "object"
+    },
+    "ProvisionPlanParams": {
+      "description": "Params of `provision.plan`.",
+      "properties": {
+        "accountId": {
+          "description": "Omitted: `[signing] account`, else the default account.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "devices": {
+          "description": "UDIDs the profiles must list (development and ad hoc).",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "distribution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignDistribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Default `development`."
+        },
+        "project": {
+          "description": "The project root (absolute): its `russet.toml` and `russet.local.toml` give the bundle IDs.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "ProvisionPlanResult": {
+      "description": "Result of `provision.plan` (`ProvisionPlan`).",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "digest": {
+          "description": "Hex SHA-256 the approval binds to.",
+          "type": "string"
+        },
+        "distribution": {
+          "$ref": "#/$defs/SignDistribution"
+        },
+        "identityId": {
+          "description": "The identity that signs, when one is usable: its `identity.list` id (the certificate serial).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mutations": {
+          "description": "Account changes; empty for a plan `provision.apply` performs without an approval.",
+          "items": {
+            "$ref": "#/$defs/PlanMutation"
+          },
+          "type": "array"
+        },
+        "planId": {
+          "description": "`pln_…`; plans can be applied for 10 minutes (then `provision.planStale`).",
+          "type": "string"
+        },
+        "profiles": {
+          "items": {
+            "$ref": "#/$defs/PlannedProfile"
+          },
+          "type": "array"
+        },
+        "teamId": {
+          "description": "Masked.",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "planId",
+        "digest",
+        "accountId",
+        "teamId",
+        "distribution",
+        "mutations",
+        "profiles",
+        "warnings"
+      ],
+      "type": "object"
+    },
     "RequestIdValue": {
       "anyOf": [
         {
@@ -3626,6 +4396,26 @@
         }
       ],
       "description": "A JSON-RPC request id as `$/cancelRequest` carries it."
+    },
+    "RoleProbe": {
+      "description": "The role probe of `account.verify`.",
+      "properties": {
+        "builds": {
+          "$ref": "#/$defs/ProbeOutcome"
+        },
+        "certificates": {
+          "$ref": "#/$defs/ProbeOutcome"
+        },
+        "profiles": {
+          "$ref": "#/$defs/ProbeOutcome"
+        }
+      },
+      "required": [
+        "certificates",
+        "profiles",
+        "builds"
+      ],
+      "type": "object"
     },
     "SdkInfo": {
       "description": "A Darwin SDK known to the registry (Russet imports and xtool bundles).",
@@ -4020,6 +4810,47 @@
       ],
       "type": "string"
     },
+    "SignDistribution": {
+      "description": "The distribution a bundle is signed for.",
+      "enum": [
+        "development",
+        "ad-hoc",
+        "app-store-connect"
+      ],
+      "type": "string"
+    },
+    "SignFixRecord": {
+      "description": "One pre-sign fix that changed a file.",
+      "properties": {
+        "fix": {
+          "description": "`chmod`, `align-string-pool`, `clean`, `thin`.",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fix",
+        "path"
+      ],
+      "type": "object"
+    },
+    "SignInspectResult": {
+      "description": "Result of `sign.inspect`.",
+      "properties": {
+        "signatures": {
+          "items": {
+            "$ref": "#/$defs/SignatureInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "signatures"
+      ],
+      "type": "object"
+    },
     "SignItem": {
       "description": "One item to sign.",
       "properties": {
@@ -4053,6 +4884,464 @@
         "mach-o"
       ],
       "type": "string"
+    },
+    "SignLintFinding": {
+      "description": "One lint finding (L-SIG, L-MACHO, L-BND; SIGN §8.6).",
+      "properties": {
+        "code": {
+          "description": "For example `L-SIG-001`.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "description": "The file or bundle, relative to the checked bundle.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/SignSeverity"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "type": "object"
+    },
+    "SignLintProfile": {
+      "description": "A lint profile.",
+      "enum": [
+        "device-install",
+        "app-store"
+      ],
+      "type": "string"
+    },
+    "SignLintResult": {
+      "description": "Result of `sign.lint`.",
+      "properties": {
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/SignLintFinding"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "findings"
+      ],
+      "type": "object"
+    },
+    "SignMergePolicy": {
+      "description": "How profile-only entitlements are treated.",
+      "oneOf": [
+        {
+          "const": "least",
+          "description": "Least privilege (the default).",
+          "type": "string"
+        },
+        {
+          "const": "profile-all",
+          "description": "Copy the profile's keys (re-signing third-party apps).",
+          "type": "string"
+        }
+      ]
+    },
+    "SignPathParams": {
+      "description": "Params of `sign.verify`, `sign.lint` and `sign.inspect`.",
+      "properties": {
+        "device": {
+          "description": "`sign.verify`: a device every embedded development profile must list (L-SIG-007).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "An `.app` directory or `.ipa` (and, for `sign.inspect`, any Mach-O file).",
+          "type": "string"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignLintProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`sign.verify`: also run these lints; `sign.lint`: the profile (default `device-install`)."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "SignRunParams": {
+      "description": "Params of `sign.run`.",
+      "properties": {
+        "device": {
+          "description": "A device the cached profiles must list.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "distribution": {
+          "$ref": "#/$defs/SignDistribution"
+        },
+        "entitlements": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Requested entitlements (`.entitlements` files) by bundle path.",
+          "type": "object"
+        },
+        "getTaskAllow": {
+          "description": "`get-task-allow` for every app-like bundle (debug builds); omitted: each profile's value.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "identityId": {
+          "description": "An identity's `id` as `identity.list` shows it (its certificate serial), or its SHA-1 fingerprint; omitted:\nthe newest identity the profiles list.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignLintProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The lints that must pass after signing (default `device-install`)."
+        },
+        "mergePolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignMergePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "noFix": {
+          "description": "Pre-sign fixes to skip: `chmod`, `align-string-pool`, `clean`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "noLint": {
+          "description": "Skip the post-sign lints (verification still runs).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "output": {
+          "description": "Sign a copy at this `.app` path; omitted: sign in place. An existing path is replaced only when it is an\nearlier signed copy of the same app; a path inside the input (or containing it) is refused.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "The `.app` to sign (absolute).",
+          "type": "string"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Profiles by bundle path (`\"\"` = the app); others come from the profile cache (`provision.apply`).",
+          "type": "object"
+        }
+      },
+      "required": [
+        "path",
+        "distribution"
+      ],
+      "type": "object"
+    },
+    "SignRunResult": {
+      "description": "Result of `sign.run` (`SignReport`).",
+      "properties": {
+        "bundles": {
+          "items": {
+            "$ref": "#/$defs/SignedBundle"
+          },
+          "type": "array"
+        },
+        "fixesApplied": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SignFixRecord"
+          },
+          "type": "array"
+        },
+        "lints": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SignLintFinding"
+          },
+          "type": "array"
+        },
+        "output": {
+          "description": "The signed bundle.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "output",
+        "bundles"
+      ],
+      "type": "object"
+    },
+    "SignSeverity": {
+      "description": "A finding's severity: errors block signing and uploads; warnings do not.",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "type": "string"
+    },
+    "SignVerifyResult": {
+      "description": "Result of `sign.verify` (`VerifyReport`).",
+      "properties": {
+        "bundles": {
+          "items": {
+            "$ref": "#/$defs/VerifiedBundle"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/SignLintFinding"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "description": "No finding of severity error.",
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "path",
+        "bundles",
+        "findings"
+      ],
+      "type": "object"
+    },
+    "SignatureInfo": {
+      "description": "One Mach-O slice's signature (`SignatureInfo`).",
+      "properties": {
+        "arch": {
+          "type": "string"
+        },
+        "bundleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "codeDirectories": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CodeDirectoryInfo"
+          },
+          "type": "array"
+        },
+        "entitlementKeys": {
+          "default": [],
+          "description": "Entitlement keys only (values can embed the team ID).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "filetype": {
+          "description": "`execute`, `dylib`, …",
+          "type": "string"
+        },
+        "getTaskAllow": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hasCms": {
+          "type": "boolean"
+        },
+        "hasDerEntitlements": {
+          "type": "boolean"
+        },
+        "identifier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "minos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "platform": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sdk": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signed": {
+          "type": "boolean"
+        },
+        "stringPoolAligned": {
+          "type": "boolean"
+        },
+        "teamId": {
+          "description": "Masked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "arch",
+        "filetype",
+        "signed",
+        "hasDerEntitlements",
+        "hasCms",
+        "stringPoolAligned"
+      ],
+      "type": "object"
+    },
+    "SignedBundle": {
+      "description": "One signed app-like bundle.",
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "cdhash": {
+          "description": "The CDHash (20 bytes, hex) the install ledger records.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`app`, `app-extension`, `app-clip`, `watch-app`.",
+          "type": "string"
+        },
+        "notes": {
+          "default": [],
+          "description": "Merge notes (for example `aps-environment` taken from the profile).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "profileUuid": {
+          "type": "string"
+        },
+        "relPath": {
+          "description": "`\"\"` for the app.",
+          "type": "string"
+        },
+        "teamId": {
+          "description": "Masked.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relPath",
+        "bundleId",
+        "kind",
+        "cdhash",
+        "teamId",
+        "profileUuid"
+      ],
+      "type": "object"
+    },
+    "SigningIdentity": {
+      "description": "A signing identity's public part (`SigningIdentity`). The private key never leaves the daemon, and nothing here\nnames the team unmasked or the certificate's subject (it names a person).",
+      "properties": {
+        "expired": {
+          "type": "boolean"
+        },
+        "id": {
+          "description": "The certificate serial (uppercase hex without leading zeros), what `sign.run {identityId}` takes; the\ndaemon also accepts the SHA-1 fingerprint. The daemon's internal `<team>/<serial>` id never goes on the wire.",
+          "type": "string"
+        },
+        "importedFrom": {
+          "description": "`xtool` for the one-time import.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CertificateKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "notAfter": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "serial": {
+          "description": "Uppercase hex without leading zeros (the portal's form).",
+          "type": "string"
+        },
+        "sha1": {
+          "description": "Lower-case hex SHA-1 of the certificate.",
+          "type": "string"
+        },
+        "teamId": {
+          "description": "Masked (`*******XYZ`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "teamId",
+        "kind",
+        "serial",
+        "label",
+        "notAfter",
+        "expired",
+        "sha1"
+      ],
+      "type": "object"
     },
     "SigningPlan": {
       "description": "Items to sign, inside-out: deepest first, the app last.",
@@ -4610,6 +5899,53 @@
       "description": "Placeholder DTO of a method whose shape is not written yet (freeze F0): any JSON object, unknown fields\nignored. The owning area replaces its `…Params`/`…Result` aliases with real structs.",
       "type": "object"
     },
+    "VerifiedBundle": {
+      "description": "One verified bundle.",
+      "properties": {
+        "bundleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cdhash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identifier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profileUuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "relPath": {
+          "type": "string"
+        },
+        "signed": {
+          "type": "boolean"
+        },
+        "teamId": {
+          "description": "Masked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "relPath",
+        "signed"
+      ],
+      "type": "object"
+    },
     "WorkDoneProgress": {
       "description": "The value of `$/progress` (ARCHITECTURE §7.6): LSP work-done progress plus Russet's `jobId`.",
       "properties": {
@@ -4782,11 +6118,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAddAscKeyParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/Account"
       }
     },
     "account.anisette.fetchLibraries": {
@@ -4860,11 +6196,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountImportXtoolParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountImportXtoolResult"
       }
     },
     "account.list": {
@@ -4873,11 +6209,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountListResult"
       }
     },
     "account.remove": {
@@ -4912,11 +6248,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountVerifyParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountVerifyResult"
       }
     },
     "app.icon": {
@@ -5939,11 +7275,11 @@
       "longRunning": false,
       "namespace": "identity",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/IdentityListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/IdentityListResult"
       }
     },
     "initialize": {
@@ -6290,11 +7626,11 @@
       "longRunning": false,
       "namespace": "portal",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalBundleIdsListResult"
       }
     },
     "portal.certificates.list": {
@@ -6303,11 +7639,11 @@
       "longRunning": false,
       "namespace": "portal",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalCertificatesListResult"
       }
     },
     "portal.certificates.revoke": {
@@ -6329,11 +7665,11 @@
       "longRunning": false,
       "namespace": "portal",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalDevicesListResult"
       }
     },
     "portal.devices.register": {
@@ -6355,11 +7691,11 @@
       "longRunning": false,
       "namespace": "portal",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalProfilesListResult"
       }
     },
     "process.list": {
@@ -6446,11 +7782,11 @@
       "longRunning": true,
       "namespace": "provision",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProvisionApplyParams"
       },
       "permission": "account",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProvisionApplyResult"
       }
     },
     "provision.capabilities": {
@@ -6472,11 +7808,11 @@
       "longRunning": false,
       "namespace": "provision",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProvisionPlanParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProvisionPlanResult"
       }
     },
     "run.hotReload": {
@@ -7148,11 +8484,11 @@
       "longRunning": false,
       "namespace": "sign",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SignPathParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SignInspectResult"
       }
     },
     "sign.lint": {
@@ -7161,11 +8497,11 @@
       "longRunning": false,
       "namespace": "sign",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SignPathParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SignLintResult"
       }
     },
     "sign.run": {
@@ -7174,11 +8510,11 @@
       "longRunning": true,
       "namespace": "sign",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SignRunParams"
       },
       "permission": "build",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SignRunResult"
       }
     },
     "sign.verify": {
@@ -7187,11 +8523,11 @@
       "longRunning": false,
       "namespace": "sign",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SignPathParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/SignVerifyResult"
       }
     },
     "subscription.cancel": {

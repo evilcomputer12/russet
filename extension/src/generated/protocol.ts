@@ -6,6 +6,92 @@ import type { CancellationToken, Disposable, MessageConnection } from "vscode-js
 export const PROTOCOL = { major: 1, minor: 0 } as const;
 
 /**
+ * An account (`Account`), from `accounts.toml`.
+ */
+export type Account = { 
+/**
+ * `asc:<KEYID>` or `appleid:<DSID>`.
+ */
+id: string, kind: AccountKind, label: string, keyId?: string, 
+/**
+ * Masked (`*******XYZ`); omitted until discovered.
+ */
+teamId?: string, 
+/**
+ * `xtool` for the one-time import.
+ */
+importedFrom?: string, isDefault: boolean, };
+
+/**
+ * Params of `account.addAscKey` (cli/ide only).
+ */
+export type AccountAddAscKeyParams = { keyId: string, 
+/**
+ * Omitted for an individual key.
+ */
+issuerId?: string, 
+/**
+ * The `AuthKey_<KEYID>.p8` file (absolute); the key is sealed, never echoed.
+ */
+p8Path: string, label?: string, };
+
+/**
+ * Params of `account.importXtool` (cli/ide only; the explicit one-time import [D 50]).
+ */
+export type AccountImportXtoolParams = { 
+/**
+ * Report what would be imported without sealing or writing anything.
+ */
+dryRun?: boolean, };
+
+/**
+ * Result of `account.importXtool`.
+ */
+export type AccountImportXtoolResult = { accounts: Array<Account>, identities: Array<SigningIdentity>, 
+/**
+ * Advice (always the `chmod 600` / `xtool auth logout` line, which names xtool's directory but none of its
+ * files) and anything skipped.
+ */
+warnings: Array<string>, dryRun: boolean, };
+
+/**
+ * What an account is.
+ */
+export type AccountKind = "asc-team-key" | "asc-individual-key" | "apple-id";
+
+/**
+ * Params of `account.list`.
+ */
+export type AccountListParams = Record<symbol, never>;
+
+/**
+ * Result of `account.list`.
+ */
+export type AccountListResult = { accounts: Array<Account>, 
+/**
+ * The default account's id.
+ */
+default?: string, };
+
+/**
+ * Params of `account.verify`.
+ */
+export type AccountVerifyParams = { 
+/**
+ * Omitted: the default account.
+ */
+accountId?: string, };
+
+/**
+ * Result of `account.verify`.
+ */
+export type AccountVerifyResult = { ok: boolean, accountId: string, 
+/**
+ * Masked.
+ */
+teamId?: string, roleProbe: RoleProbe, };
+
+/**
  * An approval record (ARCHITECTURE §6.5).
  */
 export type Approval = { approvalId: ApprovalId, state: ApprovalState, requestedBy: ConnectionRef, subject: ApprovalSubject, 
@@ -322,9 +408,23 @@ version: string,
 buildNumber: string, };
 
 /**
+ * One provisioned bundle.
+ */
+export type BundleProvision = { relPath: string, bundleId: string, profileUuid: string, 
+/**
+ * The cached `.mobileprovision` `sign.run` uses.
+ */
+profilePath: string, };
+
+/**
  * Params of the LSP built-in notification `$/cancelRequest` (ARCHITECTURE §7.6).
  */
 export type CancelParams = { id: RequestIdValue, };
+
+/**
+ * A certificate kind.
+ */
+export type CertificateKind = "development" | "distribution";
 
 /**
  * What `build.clean` removes.
@@ -378,6 +478,27 @@ export type ClientKind = "cli" | "ide" | "mcp" | "flutter-device" | "test";
  * A client as other clients see it: `{kind, name}` (`ui.confirm.requestedBy`, audit entries).
  */
 export type ClientRef = { kind: ClientKind, name: string, };
+
+/**
+ * One code directory.
+ */
+export type CodeDirectoryInfo = { 
+/**
+ * For example `0x20400`.
+ */
+version: string, 
+/**
+ * `sha1`, `sha256`, …
+ */
+hashType: string, pageSize: number, 
+/**
+ * `adhoc`, `linker-signed`, `runtime`, …
+ */
+flags: Array<string>, 
+/**
+ * `main-binary`, `allow-unsigned`, …
+ */
+execSegFlags: Array<string>, cdhash: string, };
 
 /**
  * Params of the `config.changed` notification (to every connection).
@@ -743,6 +864,20 @@ profile: string, allow: Array<Permission>, confirm: Array<Permission>, approval:
 tierMax?: number, };
 
 /**
+ * Params of `identity.list`.
+ */
+export type IdentityListParams = { 
+/**
+ * Only this team's identities: a team ID, or its masked form as the wire shows it (`*******345`).
+ */
+team?: string, };
+
+/**
+ * Result of `identity.list`.
+ */
+export type IdentityListResult = { identities: Array<SigningIdentity>, };
+
+/**
  * Params of `initialize` (ARCHITECTURE §7.4).
  */
 export type InitializeParams = { protocol: ProtocolVersion, client: ClientDescriptor, capabilities: ClientCapabilities, workspace?: Workspace, 
@@ -1057,6 +1192,11 @@ export type ManagedComponent = "python-shared" | "darwin-tools" | "swift" | "llv
 export type MessageLevel = "info" | "warning" | "error";
 
 /**
+ * The kind of an account change.
+ */
+export type MutationKind = "create-certificate" | "register-device" | "register-bundle-id" | "enable-capability" | "create-profile" | "delete-profile";
+
+/**
  * What to package after the build.
  */
 export type PackageKind = "none" | "ipa-dev" | "ipa-store";
@@ -1076,6 +1216,19 @@ export type PinsInfo = { id: string,
 source: string, };
 
 /**
+ * One account change a plan needs.
+ */
+export type PlanMutation = { kind: MutationKind, 
+/**
+ * A one-line description (UDIDs redacted).
+ */
+summary: string, 
+/**
+ * The bundle ID it concerns, when it concerns one.
+ */
+bundleId?: string, };
+
+/**
  * The SDK a plan resolved.
  */
 export type PlanSdk = { 
@@ -1091,6 +1244,107 @@ canonicalName: string, version: string, build?: string, xcodeVersion: string, xc
  * The bundle the SDK was read from.
  */
 bundle: string, };
+
+/**
+ * An existing profile the plan reuses.
+ */
+export type PlannedProfile = { 
+/**
+ * `""` for the app.
+ */
+relPath: string, bundleId: string, profileId: string, uuid: string, name: string, expires: string, };
+
+/**
+ * A registered bundle ID.
+ */
+export type PortalBundleId = { id: string, identifier: string, name?: string, platform?: string, 
+/**
+ * Enabled capability types (open strings).
+ */
+capabilities: Array<string>, };
+
+/**
+ * Result of `portal.bundleIds.list`.
+ */
+export type PortalBundleIdsListResult = { bundleIds: Array<PortalBundleId>, };
+
+/**
+ * A portal certificate.
+ */
+export type PortalCertificate = { id: string, 
+/**
+ * `DEVELOPMENT`, `DISTRIBUTION`, … (open).
+ */
+certificateType: string, serial?: string, 
+/**
+ * Omitted unless revealed (it can name a person).
+ */
+displayName?: string, expires?: string, 
+/**
+ * Whether a local identity holds its private key.
+ */
+localIdentity: boolean, };
+
+/**
+ * Result of `portal.certificates.list`.
+ */
+export type PortalCertificatesListResult = { certificates: Array<PortalCertificate>, };
+
+/**
+ * A registered device.
+ */
+export type PortalDevice = { id: string, 
+/**
+ * Masked (`0000…5F60`) unless revealed.
+ */
+udid: string, 
+/**
+ * Omitted unless revealed (device names often name a person).
+ */
+name?: string, platform?: string, deviceClass?: string, status?: string, };
+
+/**
+ * Result of `portal.devices.list`.
+ */
+export type PortalDevicesListResult = { devices: Array<PortalDevice>, };
+
+/**
+ * Params shared by the `portal.*.list` rows.
+ */
+export type PortalListParams = { 
+/**
+ * Omitted: the default account.
+ */
+accountId?: string, 
+/**
+ * A filter value: the certificate type (`DEVELOPMENT`), the bundle-ID prefix, or the profile type
+ * (`IOS_APP_DEVELOPMENT`), depending on the row.
+ */
+filter?: string, 
+/**
+ * From an `ide` connection: unmasked UDIDs and device names (`portal.devices.list`) and certificate display
+ * names (`portal.certificates.list`). Ignored for every other connection kind.
+ */
+reveal?: boolean, };
+
+/**
+ * A portal profile.
+ */
+export type PortalProfile = { id: string, name?: string, 
+/**
+ * `IOS_APP_DEVELOPMENT`, … (open).
+ */
+profileType: string, state?: string, uuid?: string, expires?: string, };
+
+/**
+ * Result of `portal.profiles.list`.
+ */
+export type PortalProfilesListResult = { profiles: Array<PortalProfile>, };
+
+/**
+ * One `account.verify` probe.
+ */
+export type ProbeOutcome = "ok" | "forbidden" | "unauthorized" | "error";
 
 /**
  * `begin`, `report` or `end`.
@@ -1216,9 +1470,78 @@ restartable: boolean, };
 export type ProtocolVersion = { major: number, minor: number, };
 
 /**
+ * Params of `provision.apply`.
+ */
+export type ProvisionApplyParams = { planId: string, 
+/**
+ * `apr_…`; a zero-mutation plan needs none.
+ */
+approval?: string, };
+
+/**
+ * Result of `provision.apply` (`ProvisionOutcome`).
+ */
+export type ProvisionApplyResult = { 
+/**
+ * The identity that signs: its `identity.list` id (the certificate serial).
+ */
+identityId?: string, bundles: Array<BundleProvision>, };
+
+/**
+ * Params of `provision.plan`.
+ */
+export type ProvisionPlanParams = { 
+/**
+ * The project root (absolute): its `russet.toml` and `russet.local.toml` give the bundle IDs.
+ */
+project: string, 
+/**
+ * Default `development`.
+ */
+distribution?: SignDistribution, 
+/**
+ * UDIDs the profiles must list (development and ad hoc).
+ */
+devices?: Array<string>, 
+/**
+ * Omitted: `[signing] account`, else the default account.
+ */
+accountId?: string, };
+
+/**
+ * Result of `provision.plan` (`ProvisionPlan`).
+ */
+export type ProvisionPlanResult = { 
+/**
+ * `pln_…`; plans can be applied for 10 minutes (then `provision.planStale`).
+ */
+planId: string, 
+/**
+ * Hex SHA-256 the approval binds to.
+ */
+digest: string, accountId: string, 
+/**
+ * Masked.
+ */
+teamId: string, distribution: SignDistribution, 
+/**
+ * The identity that signs, when one is usable: its `identity.list` id (the certificate serial).
+ */
+identityId?: string, 
+/**
+ * Account changes; empty for a plan `provision.apply` performs without an approval.
+ */
+mutations: Array<PlanMutation>, profiles: Array<PlannedProfile>, warnings: Array<string>, };
+
+/**
  * A JSON-RPC request id as `$/cancelRequest` carries it.
  */
 export type RequestIdValue = number | string;
+
+/**
+ * The role probe of `account.verify`.
+ */
+export type RoleProbe = { certificates: ProbeOutcome, profiles: ProbeOutcome, builds: ProbeOutcome, };
 
 /**
  * A Darwin SDK known to the registry (Russet imports and xtool bundles).
@@ -1385,6 +1708,25 @@ export type Severity = "error" | "warning" | "note";
 export type ShutdownReason = "idle" | "request" | "upgrade" | "signal";
 
 /**
+ * The distribution a bundle is signed for.
+ */
+export type SignDistribution = "development" | "ad-hoc" | "app-store-connect";
+
+/**
+ * One pre-sign fix that changed a file.
+ */
+export type SignFixRecord = { 
+/**
+ * `chmod`, `align-string-pool`, `clean`, `thin`.
+ */
+fix: string, path: string, };
+
+/**
+ * Result of `sign.inspect`.
+ */
+export type SignInspectResult = { signatures: Array<SignatureInfo>, };
+
+/**
  * One item to sign.
  */
 export type SignItem = { path: string, kind: SignKind, entitlements?: string, getTaskAllow: boolean, };
@@ -1393,6 +1735,194 @@ export type SignItem = { path: string, kind: SignKind, entitlements?: string, ge
  * What a signing-plan item is.
  */
 export type SignKind = "bundle" | "mach-o";
+
+/**
+ * One lint finding (L-SIG, L-MACHO, L-BND; SIGN §8.6).
+ */
+export type SignLintFinding = { 
+/**
+ * For example `L-SIG-001`.
+ */
+code: string, severity: SignSeverity, message: string, 
+/**
+ * The file or bundle, relative to the checked bundle.
+ */
+path?: string, };
+
+/**
+ * A lint profile.
+ */
+export type SignLintProfile = "device-install" | "app-store";
+
+/**
+ * Result of `sign.lint`.
+ */
+export type SignLintResult = { findings: Array<SignLintFinding>, };
+
+/**
+ * How profile-only entitlements are treated.
+ */
+export type SignMergePolicy = "least" | "profile-all";
+
+/**
+ * Params of `sign.verify`, `sign.lint` and `sign.inspect`.
+ */
+export type SignPathParams = { 
+/**
+ * An `.app` directory or `.ipa` (and, for `sign.inspect`, any Mach-O file).
+ */
+path: string, 
+/**
+ * `sign.verify`: also run these lints; `sign.lint`: the profile (default `device-install`).
+ */
+profile?: SignLintProfile, 
+/**
+ * `sign.verify`: a device every embedded development profile must list (L-SIG-007).
+ */
+device?: string, };
+
+/**
+ * Params of `sign.run`.
+ */
+export type SignRunParams = { 
+/**
+ * The `.app` to sign (absolute).
+ */
+path: string, distribution: SignDistribution, 
+/**
+ * An identity's `id` as `identity.list` shows it (its certificate serial), or its SHA-1 fingerprint; omitted:
+ * the newest identity the profiles list.
+ */
+identityId?: string, 
+/**
+ * Profiles by bundle path (`""` = the app); others come from the profile cache (`provision.apply`).
+ */
+profiles?: { [key in string]: string }, 
+/**
+ * Requested entitlements (`.entitlements` files) by bundle path.
+ */
+entitlements?: { [key in string]: string }, mergePolicy?: SignMergePolicy, 
+/**
+ * Sign a copy at this `.app` path; omitted: sign in place. An existing path is replaced only when it is an
+ * earlier signed copy of the same app; a path inside the input (or containing it) is refused.
+ */
+output?: string, 
+/**
+ * `get-task-allow` for every app-like bundle (debug builds); omitted: each profile's value.
+ */
+getTaskAllow?: boolean, 
+/**
+ * A device the cached profiles must list.
+ */
+device?: string, 
+/**
+ * Pre-sign fixes to skip: `chmod`, `align-string-pool`, `clean`.
+ */
+noFix?: Array<string>, 
+/**
+ * The lints that must pass after signing (default `device-install`).
+ */
+lint?: SignLintProfile, 
+/**
+ * Skip the post-sign lints (verification still runs).
+ */
+noLint?: boolean, };
+
+/**
+ * Result of `sign.run` (`SignReport`).
+ */
+export type SignRunResult = { 
+/**
+ * The signed bundle.
+ */
+output: string, bundles: Array<SignedBundle>, fixesApplied: Array<SignFixRecord>, lints: Array<SignLintFinding>, };
+
+/**
+ * A finding's severity: errors block signing and uploads; warnings do not.
+ */
+export type SignSeverity = "info" | "warning" | "error";
+
+/**
+ * Result of `sign.verify` (`VerifyReport`).
+ */
+export type SignVerifyResult = { 
+/**
+ * No finding of severity error.
+ */
+ok: boolean, path: string, bundles: Array<VerifiedBundle>, findings: Array<SignLintFinding>, };
+
+/**
+ * One Mach-O slice's signature (`SignatureInfo`).
+ */
+export type SignatureInfo = { path: string, bundleId?: string, arch: string, 
+/**
+ * `execute`, `dylib`, …
+ */
+filetype: string, signed: boolean, identifier?: string, 
+/**
+ * Masked.
+ */
+teamId?: string, codeDirectories: Array<CodeDirectoryInfo>, 
+/**
+ * Entitlement keys only (values can embed the team ID).
+ */
+entitlementKeys: Array<string>, getTaskAllow?: boolean, hasDerEntitlements: boolean, hasCms: boolean, platform?: number, minos?: string, sdk?: string, stringPoolAligned: boolean, };
+
+/**
+ * One signed app-like bundle.
+ */
+export type SignedBundle = { 
+/**
+ * `""` for the app.
+ */
+relPath: string, bundleId: string, 
+/**
+ * `app`, `app-extension`, `app-clip`, `watch-app`.
+ */
+kind: string, 
+/**
+ * The CDHash (20 bytes, hex) the install ledger records.
+ */
+cdhash: string, 
+/**
+ * Masked.
+ */
+teamId: string, profileUuid: string, 
+/**
+ * Merge notes (for example `aps-environment` taken from the profile).
+ */
+notes: Array<string>, };
+
+/**
+ * A signing identity's public part (`SigningIdentity`). The private key never leaves the daemon, and nothing here
+ * names the team unmasked or the certificate's subject (it names a person).
+ */
+export type SigningIdentity = { 
+/**
+ * The certificate serial (uppercase hex without leading zeros), what `sign.run {identityId}` takes; the
+ * daemon also accepts the SHA-1 fingerprint. The daemon's internal `<team>/<serial>` id never goes on the wire.
+ */
+id: string, 
+/**
+ * Masked (`*******XYZ`).
+ */
+teamId: string, kind: CertificateKind, 
+/**
+ * Uppercase hex without leading zeros (the portal's form).
+ */
+serial: string, label: string, 
+/**
+ * RFC 3339.
+ */
+notAfter: string, expired: boolean, 
+/**
+ * Lower-case hex SHA-1 of the certificate.
+ */
+sha1: string, 
+/**
+ * `xtool` for the one-time import.
+ */
+importedFrom?: string, };
 
 /**
  * Items to sign, inside-out: deepest first, the app last.
@@ -1574,6 +2104,15 @@ export type UiShowMessageParams = { level: MessageLevel, message: string, action
 export type Unspecified = Record<symbol, never>;
 
 /**
+ * One verified bundle.
+ */
+export type VerifiedBundle = { relPath: string, bundleId?: string, identifier?: string, cdhash?: string, 
+/**
+ * Masked.
+ */
+teamId?: string, profileUuid?: string, signed: boolean, };
+
+/**
  * The value of `$/progress` (ARCHITECTURE §7.6): LSP work-done progress plus Russet's `jobId`.
  */
 export type WorkDoneProgress = { kind: ProgressKind, title?: string, message?: string, 
@@ -1700,10 +2239,10 @@ export interface Methods {
   "flutter.register": { params: Unspecified; result: Unspecified };
   "flutter.device.install": { params: Unspecified; result: Unspecified };
   "flutter.genSnapshot.ensure": { params: Unspecified; result: Unspecified };
-  "account.list": { params: Unspecified; result: Unspecified };
-  "account.addAscKey": { params: Unspecified; result: Unspecified };
-  "account.importXtool": { params: Unspecified; result: Unspecified };
-  "account.verify": { params: Unspecified; result: Unspecified };
+  "account.list": { params: AccountListParams; result: AccountListResult };
+  "account.addAscKey": { params: AccountAddAscKeyParams; result: Account };
+  "account.importXtool": { params: AccountImportXtoolParams; result: AccountImportXtoolResult };
+  "account.verify": { params: AccountVerifyParams; result: AccountVerifyResult };
   "account.remove": { params: Unspecified; result: Unspecified };
   "account.setDefault": { params: Unspecified; result: Unspecified };
   "account.appleId.begin": { params: Unspecified; result: Unspecified };
@@ -1711,22 +2250,22 @@ export interface Methods {
   "account.appleId.submitCode": { params: Unspecified; result: Unspecified };
   "account.anisette.status": { params: Unspecified; result: Unspecified };
   "account.anisette.fetchLibraries": { params: Unspecified; result: Unspecified };
-  "identity.list": { params: Unspecified; result: Unspecified };
+  "identity.list": { params: IdentityListParams; result: IdentityListResult };
   "identity.importP12": { params: Unspecified; result: Unspecified };
   "identity.exportP12": { params: Unspecified; result: Unspecified };
-  "portal.certificates.list": { params: Unspecified; result: Unspecified };
-  "portal.devices.list": { params: Unspecified; result: Unspecified };
-  "portal.bundleIds.list": { params: Unspecified; result: Unspecified };
-  "portal.profiles.list": { params: Unspecified; result: Unspecified };
+  "portal.certificates.list": { params: PortalListParams; result: PortalCertificatesListResult };
+  "portal.devices.list": { params: PortalListParams; result: PortalDevicesListResult };
+  "portal.bundleIds.list": { params: PortalListParams; result: PortalBundleIdsListResult };
+  "portal.profiles.list": { params: PortalListParams; result: PortalProfilesListResult };
   "portal.devices.register": { params: Unspecified; result: Unspecified };
   "portal.certificates.revoke": { params: Unspecified; result: Unspecified };
-  "provision.plan": { params: Unspecified; result: Unspecified };
-  "provision.apply": { params: Unspecified; result: Unspecified };
+  "provision.plan": { params: ProvisionPlanParams; result: ProvisionPlanResult };
+  "provision.apply": { params: ProvisionApplyParams; result: ProvisionApplyResult };
   "provision.capabilities": { params: Unspecified; result: Unspecified };
-  "sign.run": { params: Unspecified; result: Unspecified };
-  "sign.verify": { params: Unspecified; result: Unspecified };
-  "sign.lint": { params: Unspecified; result: Unspecified };
-  "sign.inspect": { params: Unspecified; result: Unspecified };
+  "sign.run": { params: SignRunParams; result: SignRunResult };
+  "sign.verify": { params: SignPathParams; result: SignVerifyResult };
+  "sign.lint": { params: SignPathParams; result: SignLintResult };
+  "sign.inspect": { params: SignPathParams; result: SignInspectResult };
   "asc.get": { params: Unspecified; result: Unspecified };
   "ship.archive": { params: Unspecified; result: Unspecified };
   "ship.ipa": { params: Unspecified; result: Unspecified };

@@ -86,12 +86,8 @@ where
 
 /// The default account's xtool identity prefix (W6's `Account::xtool_prefix()`: the first segment of the xtool
 /// identity id, uppercased).
-///
-/// F0's `Account` has no fields to derive it from and `AccountService`'s bodies are `todo!()`, so until W6 merges
-/// this answers `None`. With W6 (and W2's service slots) the body becomes
-/// `Ok(cx.accounts.get()?.accounts().read().await.default_account().and_then(|a| a.xtool_prefix()))`.
-pub(crate) async fn account_xtool_prefix(_cx: &DaemonCtx) -> Result<Option<String>> {
-    Ok(None)
+pub(crate) async fn account_xtool_prefix(cx: &DaemonCtx) -> Result<Option<String>> {
+    Ok(cx.accounts.get()?.accounts().read().await.default_account().and_then(|a| a.xtool_prefix()))
 }
 
 /// `build.start` / `build.plan` params as a domain request.

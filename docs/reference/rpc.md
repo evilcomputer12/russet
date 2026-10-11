@@ -387,10 +387,10 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `account.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `account.addAscKey` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.importXtool` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.verify` | read |  | plain | `Unspecified` | `Unspecified` |
+| `account.list` | read |  | plain | `AccountListParams` | `AccountListResult` |
+| `account.addAscKey` | secrets |  | plain | `AccountAddAscKeyParams` | `Account` |
+| `account.importXtool` | secrets |  | plain | `AccountImportXtoolParams` | `AccountImportXtoolResult` |
+| `account.verify` | read |  | plain | `AccountVerifyParams` | `AccountVerifyResult` |
 | `account.remove` | secrets |  | plain | `Unspecified` | `Unspecified` |
 | `account.setDefault` | secrets |  | plain | `Unspecified` | `Unspecified` |
 | `account.appleId.begin` | secrets |  | plain | `Unspecified` | `Unspecified` |
@@ -411,7 +411,7 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `identity.list` | read |  | plain | `Unspecified` | `Unspecified` |
+| `identity.list` | read |  | plain | `IdentityListParams` | `IdentityListResult` |
 | `identity.importP12` | secrets |  | plain | `Unspecified` | `Unspecified` |
 | `identity.exportP12` | secrets |  | plain | `Unspecified` | `Unspecified` |
 
@@ -421,10 +421,10 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `portal.certificates.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `portal.devices.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `portal.bundleIds.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `portal.profiles.list` | read |  | plain | `Unspecified` | `Unspecified` |
+| `portal.certificates.list` | read |  | plain | `PortalListParams` | `PortalCertificatesListResult` |
+| `portal.devices.list` | read |  | plain | `PortalListParams` | `PortalDevicesListResult` |
+| `portal.bundleIds.list` | read |  | plain | `PortalListParams` | `PortalBundleIdsListResult` |
+| `portal.profiles.list` | read |  | plain | `PortalListParams` | `PortalProfilesListResult` |
 | `portal.devices.register` | account |  | plain | `Unspecified` | `Unspecified` |
 | `portal.certificates.revoke` | account-destructive |  | typed | `Unspecified` | `Unspecified` |
 
@@ -434,8 +434,8 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `provision.plan` | read |  | plain | `Unspecified` | `Unspecified` |
-| `provision.apply` | account | L | plain | `Unspecified` | `Unspecified` |
+| `provision.plan` | read |  | plain | `ProvisionPlanParams` | `ProvisionPlanResult` |
+| `provision.apply` | account | L | plain | `ProvisionApplyParams` | `ProvisionApplyResult` |
 | `provision.capabilities` | read |  | plain | `Unspecified` | `Unspecified` |
 
 ## `sign` (module `sign`)
@@ -444,10 +444,10 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `sign.run` | build | L | plain | `Unspecified` | `Unspecified` |
-| `sign.verify` | read |  | plain | `Unspecified` | `Unspecified` |
-| `sign.lint` | read |  | plain | `Unspecified` | `Unspecified` |
-| `sign.inspect` | read |  | plain | `Unspecified` | `Unspecified` |
+| `sign.run` | build | L | plain | `SignRunParams` | `SignRunResult` |
+| `sign.verify` | read |  | plain | `SignPathParams` | `SignVerifyResult` |
+| `sign.lint` | read |  | plain | `SignPathParams` | `SignLintResult` |
+| `sign.inspect` | read |  | plain | `SignPathParams` | `SignInspectResult` |
 
 ## `asc` (module `asc`)
 
