@@ -43,3 +43,17 @@ pub const ALL: &[ErrorCode] = &[
     BUSY,
     UNSUPPORTED_PLATFORM,
 ];
+
+/// Default hints (ARCHITECTURE §13.1), used when an error of this family carries none. `core.cancelled` has no
+/// next step beyond running the command again.
+pub const HINTS: &[(ErrorCode, &str)] = &[
+    (INTERNAL, "This is a bug in Russet: run `russet bugreport` and attach the archive to an issue."),
+    (TIMEOUT, "Retry; if it keeps timing out, run `russet doctor` and check `russet daemon logs`."),
+    (IO, "Check the path's permissions and free space; `russet daemon logs` has the details."),
+    (DISK_FULL, "Free some space (`russet toolchain gc`, `russet sdk remove`, old caches) and retry."),
+    (NOT_IMPLEMENTED, "This lands in a later workstream (docs/PLAN.md); see ARCHITECTURE §8 for its wave."),
+    (INVALID_ARGUMENT, "Check the arguments (`russet <command> --help`)."),
+    (NOT_FOUND, "Check the id or name; the matching `list` command shows what exists."),
+    (BUSY, "Another job holds the lock: wait for it (`russet daemon status`) or cancel it."),
+    (UNSUPPORTED_PLATFORM, "This feature is not available on this platform yet (ARCHITECTURE §18)."),
+];
