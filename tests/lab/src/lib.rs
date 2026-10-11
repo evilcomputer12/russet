@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn rfc3339_millis() {
         assert_eq!(ts_millis("1970-01-01T00:00:01.5Z"), Some(1500));
-        assert_eq!(ts_millis("2026-10-11T10:33:40.424Z"), Some(1_791_715_420_424));
+        assert_eq!(ts_millis("2026-10-11T10:33:40.424Z"), Some(1_791_714_820_424));
     }
 
     #[test]
