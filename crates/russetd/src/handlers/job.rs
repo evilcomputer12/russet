@@ -129,7 +129,10 @@ async fn subscribe(cx: DaemonCtx, rq: RequestCtx, p: JobSubscribeParams) -> Resu
             for m in messages {
                 match m {
                     Message::Updated(job) => {
-                        if peer.notify::<JobUpdated>(JobUpdatedParams { subscription_id: id.clone(), job: *job }).is_err() {
+                        if peer
+                            .notify::<JobUpdated>(JobUpdatedParams { subscription_id: id.clone(), job: *job })
+                            .is_err()
+                        {
                             return;
                         }
                     }

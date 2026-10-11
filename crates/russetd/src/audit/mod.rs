@@ -141,12 +141,13 @@ pub fn entry(
     outcome: impl Into<String>,
     duration_ms: u64,
 ) -> AuditEntry {
+    let redact = |s: &str| russet_core::redact::redact_text(s).into_owned();
     AuditEntry {
         ts: russet_core::time::now_rfc3339(),
         kind,
-        client,
+        client: ClientRef { kind: client.kind, name: redact(&client.name) },
         method: method.to_owned(),
-        tool: params.get("_meta").and_then(|m| m.get("tool")).and_then(serde_json::Value::as_str).map(str::to_owned),
+        tool: params.get("_meta").and_then(|m| m.get("tool")).and_then(serde_json::Value::as_str).map(redact),
         tier,
         params_digest: params_digest(params),
         params_redacted: redacted_params(params),
