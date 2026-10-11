@@ -3,16 +3,31 @@
 
 //! `device.*`: discovery, readiness, pairing, DDI, reservation (ARCHITECTURE §8.2). Owner: W4 (Wave 1), W10 (Wave 2), W30 (Wi-Fi).
 //!
-//! F0 stub (W1): every name of ARCHITECTURE §8.2 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
-//! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+//! The shared shapes (`DeviceSummary`, `Readiness`, `DdiStatus`) are in [`crate::common`] (ARCHITECTURE §9.5).
+//! W10's rows (`device.unpair`, `device.developerMode.reveal`, `device.ddi.list`) and W30's `device.wifi.enable`
+//! keep placeholder DTOs ([`Unspecified`]) until their cards.
 
+use std::collections::BTreeMap;
+
+use russet_core::ids::{LeaseId, SubscriptionId};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::common::{CodeSigningMonitor, DdiStatus, DeviceState, DeviceSummary, DeviceTransport, Readiness};
 use crate::{MethodInfo, NotificationInfo, RpcMethod, RpcNotification, Unspecified};
 
 /// Params of `device.list`: `{} → {devices: DeviceSummary[]}`.
-pub type DeviceListParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceListParams {}
+
 /// Result of `device.list`.
-pub type DeviceListResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceListResult {
+    pub devices: Vec<DeviceSummary>,
+}
 crate::rpc_method!(
     /// `device.list` (class `read`). W4 (Wave 1).
     DeviceList,
@@ -22,9 +37,16 @@ crate::rpc_method!(
 );
 
 /// Params of `device.watch`: `{} → {subscriptionId} ⇒ device.changed`.
-pub type DeviceWatchParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceWatchParams {}
+
 /// Result of `device.watch`.
-pub type DeviceWatchResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceWatchResult {
+    pub subscription_id: SubscriptionId,
+}
 crate::rpc_method!(
     /// `device.watch` (class `read`). W4 (Wave 1).
     DeviceWatch,
@@ -34,9 +56,58 @@ crate::rpc_method!(
 );
 
 /// Params of `device.info`: `{udid?} → DeviceInfo`.
-pub type DeviceInfoParams = Unspecified;
-/// Result of `device.info`.
-pub type DeviceInfoResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfoParams {
+    /// A UDID or alias; may be omitted when exactly one device is attached (ARCHITECTURE §7.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+}
+
+/// Result of `device.info`: lockdown identity values plus a few safe properties (never serial numbers, ECIDs or
+/// network addresses).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfoResult {
+    pub udid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub product_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marketing_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub os_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub build: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub device_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hardware_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cpu_architecture: Option<String>,
+    /// `ChipID`, for example 33025 (0x8101).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub chip_id: Option<u32>,
+    pub transport: DeviceTransport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub code_signing_monitor: Option<CodeSigningMonitor>,
+    pub state: DeviceState,
+    /// Further lockdown values (`ProductName`, `ActivationState`, `PasswordProtected`, …).
+    #[serde(default)]
+    pub properties: BTreeMap<String, serde_json::Value>,
+}
 crate::rpc_method!(
     /// `device.info` (class `read`). W4 (Wave 1).
     DeviceInfo,
@@ -46,9 +117,20 @@ crate::rpc_method!(
 );
 
 /// Params of `device.readiness`: `{udid?, refresh?} → Readiness {paired, developerMode, ddi, locked, tunnel}`.
-pub type DeviceReadinessParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceReadinessParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// Re-read everything instead of answering from the cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub refresh: Option<bool>,
+}
+
 /// Result of `device.readiness`.
-pub type DeviceReadinessResult = Unspecified;
+pub type DeviceReadinessResult = Readiness;
 crate::rpc_method!(
     /// `device.readiness` (class `read`). W4 (Wave 1).
     DeviceReadiness,
@@ -57,10 +139,46 @@ crate::rpc_method!(
     Permission::Read
 );
 
+/// Where `device.prepare` and `device.ddi.mount` take the DDI from (ARCHITECTURE §8.2, §14.3) [D 62].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum DdiSourceParam {
+    /// An imported DDI (`data/ddi/<ddiBuild>/iOS`); the newest when `ddiBuild` is omitted (W10).
+    Imported {
+        #[serde(default, rename = "ddiBuild", skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        ddi_build: Option<String>,
+    },
+    /// A DDI root holding `Restore/` and `version.plist`, or a directory holding `BuildManifest.plist` [D 82].
+    Dir { path: String },
+    /// pymobiledevice3's mirror-derived cache; needs the `allow-mirror` consent (W10).
+    Pmd3Cache {},
+    /// The opt-in `pymobiledevice3 mounter auto-mount` subprocess (W10).
+    Pmd3AutoMount {
+        #[serde(rename = "allowMirror")]
+        allow_mirror: bool,
+    },
+}
+
 /// Params of `device.prepare`: `{udid?, ddiSource?, revealDeveloperMode?} → Readiness`.
-pub type DevicePrepareParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DevicePrepareParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// Default: the `[device.ddi]` order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ddi_source: Option<DdiSourceParam>,
+    /// Reveal the Developer Mode toggle in Settings when it is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reveal_developer_mode: Option<bool>,
+}
+
 /// Result of `device.prepare`.
-pub type DevicePrepareResult = Unspecified;
+pub type DevicePrepareResult = Readiness;
 crate::rpc_method!(
     /// `device.prepare` (class `device`, long-running). W4 (DDI from a directory) / W10 (imported DDI default) (Wave 1).
     DevicePrepare,
@@ -70,9 +188,33 @@ crate::rpc_method!(
 );
 
 /// Params of `device.pair`: `{udid?, hostName?} → {status: paired|pending|denied}`.
-pub type DevicePairParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DevicePairParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// The name the Trust dialog shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host_name: Option<String>,
+}
+
+/// The outcome of `device.pair`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum PairStatus {
+    Paired,
+    Pending,
+    Denied,
+}
+
 /// Result of `device.pair`.
-pub type DevicePairResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DevicePairResult {
+    pub status: PairStatus,
+}
 crate::rpc_method!(
     /// `device.pair` (class `device`, long-running). W4 (Wave 1).
     DevicePair,
@@ -106,9 +248,16 @@ crate::rpc_method!(
 );
 
 /// Params of `device.ddi.status`: `{udid?} → DdiStatus {mounted, kind, version?, productBuild?, source?}`.
-pub type DeviceDdiStatusParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDdiStatusParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+}
+
 /// Result of `device.ddi.status`.
-pub type DeviceDdiStatusResult = Unspecified;
+pub type DeviceDdiStatusResult = DdiStatus;
 crate::rpc_method!(
     /// `device.ddi.status` (class `read`). W4 (Wave 1).
     DeviceDdiStatus,
@@ -130,9 +279,24 @@ crate::rpc_method!(
 );
 
 /// Params of `device.ddi.mount`: `{udid?, source?: {kind: imported, ddiBuild?}|{kind: dir, path}|{kind: pmd3-cache}|{kind: pmd3-auto-mount, allowMirror}, force?} → DdiStatus`.
-pub type DeviceDdiMountParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDdiMountParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// Default: the `[device.ddi]` order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source: Option<DdiSourceParam>,
+    /// Replace a mounted DDI (on the rig only with the owner's approval [D 62]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub force: Option<bool>,
+}
+
 /// Result of `device.ddi.mount`.
-pub type DeviceDdiMountResult = Unspecified;
+pub type DeviceDdiMountResult = DdiStatus;
 crate::rpc_method!(
     /// `device.ddi.mount` (class `device`, long-running). W4 (dir, Wave 1) / W10 (the rest, Wave 2).
     DeviceDdiMount,
@@ -142,9 +306,23 @@ crate::rpc_method!(
 );
 
 /// Params of `device.reserve`: `{udid?, purpose} → {leaseId}; others get device.reserved`.
-pub type DeviceReserveParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceReserveParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// Shown to the clients that get `device.reserved`.
+    #[serde(default)]
+    pub purpose: String,
+}
+
 /// Result of `device.reserve`.
-pub type DeviceReserveResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceReserveResult {
+    pub lease_id: LeaseId,
+}
 crate::rpc_method!(
     /// `device.reserve` (class `device`). W4 (Wave 1).
     DeviceReserve,
@@ -154,9 +332,18 @@ crate::rpc_method!(
 );
 
 /// Params of `device.alias.set`: `{udid, alias} → {} (global config)`.
-pub type DeviceAliasSetParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceAliasSetParams {
+    /// The UDID; an empty string removes the alias.
+    pub udid: String,
+    pub alias: String,
+}
+
 /// Result of `device.alias.set`.
-pub type DeviceAliasSetResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceAliasSetResult {}
 crate::rpc_method!(
     /// `device.alias.set` (class `system`). W4 (Wave 1).
     DeviceAliasSet,
@@ -177,8 +364,23 @@ crate::rpc_method!(
     Permission::Device
 );
 
+/// What happened to a device (`device.changed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum DeviceChange {
+    Added,
+    Removed,
+    Updated,
+}
+
 /// Params of the `device.changed` notification: `{subscriptionId, change: added|removed|updated, device: DeviceSummary}; to subscribers`.
-pub type DeviceChangedParams = Unspecified;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceChangedParams {
+    pub subscription_id: SubscriptionId,
+    pub change: DeviceChange,
+    pub device: DeviceSummary,
+}
 crate::rpc_notification!(
     /// `device.changed` (daemon → client). W4.
     DeviceChanged,
