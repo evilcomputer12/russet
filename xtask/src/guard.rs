@@ -913,8 +913,10 @@ fn gitleaks(root: &Path, tree: bool, opts: &Options, synthetic: &SyntheticAllowl
     if tree {
         targets.push(vec!["git".into(), "--log-opts=HEAD".into(), root.as_os_str().to_owned()]);
     } else {
+        // Absolute, because gitleaks runs in the repository root while the paths are relative to the caller.
         for dir in opts.artifacts.iter().filter(|d| d.exists()) {
-            targets.push(vec!["dir".into(), "--follow-symlinks".into(), dir.as_os_str().to_owned()]);
+            let abs = std::path::absolute(dir).with_context(|| format!("resolving {}", dir.display()))?;
+            targets.push(vec!["dir".into(), "--follow-symlinks".into(), abs.into_os_string()]);
         }
     }
     let mut out = GitleaksOutcome::default();
