@@ -5346,7 +5346,11 @@ name = "russet-doctor"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "fs4",
+ "futures",
  "russet-core",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

@@ -16,4 +16,11 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+fs4.workspace = true
+futures.workspace = true
 russet-core.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
