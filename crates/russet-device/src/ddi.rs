@@ -114,6 +114,15 @@ pub struct MountRecord {
     pub mounted_at: OffsetDateTime,
 }
 
+/// The result of [`DeviceHandle::ddi_check`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DdiCheck {
+    pub ddi_build: Option<String>,
+    pub image_sha384: String,
+    /// The size of the IM4M ticket Apple signed.
+    pub ticket_bytes: usize,
+}
+
 /// What `CopyDevices` says about the mounted developer image.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MountedImage {
@@ -454,6 +463,25 @@ impl DeviceHandle {
         });
         self.changed();
         Ok(status)
+    }
+
+    /// Checks that a DDI directory fits this device without installing anything: loads the cryptex identity's
+    /// payloads and has Apple's TSS personalize them for the device's identifiers and current nonce (read, not
+    /// rolled). The dry run of [`Self::ddi_mount`]; nothing on the device changes.
+    pub async fn ddi_check(&self, dir: &Path) -> Result<DdiCheck> {
+        if expected_kind(self.ios_major()) != DdiKind::Cryptex1 {
+            let _ = self.ensure_identity().await;
+        }
+        let restore = resolve_restore_dir(dir)?;
+        let assets = Cryptex1Assets::load(&restore).await.map_err(|e| {
+            device_error(codes::device::DDI_SOURCE_MISSING, format!("{}: {}", restore.display(), render_idevice(&e)))
+        })?;
+        let ticket = self.personalize(&assets).await?;
+        Ok(DdiCheck {
+            ddi_build: ddi_build(dir, &restore),
+            image_sha384: sha384_hex(&assets.image),
+            ticket_bytes: ticket.len(),
+        })
     }
 
     /// A Cryptex1 ticket from Apple's TSS for this device's personalization identifiers and nonce.

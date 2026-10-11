@@ -158,6 +158,20 @@ async fn run() -> russet_core::Result<()> {
             eprintln!("device.prepare in {:?}", t.elapsed());
             show("readiness", serde_json::to_value(russet_device::wire::readiness(&r)).unwrap_or_default());
         }
+        "ddi-check" => {
+            // The dry run of a DDI mount: payloads plus a TSS ticket for this device; nothing is installed.
+            let h = mgr.get(&sel)?;
+            let dir = args.get(1).cloned().ok_or_else(|| russet_device::error::invalid_argument("ddi-check <dir>"))?;
+            let t = Instant::now();
+            let c = h.ddi_check(std::path::Path::new(&dir)).await?;
+            println!(
+                "DDI {} personalized for this device in {:?}: {}-byte ticket, image SHA-384 {}…",
+                c.ddi_build.unwrap_or_default(),
+                t.elapsed(),
+                c.ticket_bytes,
+                &c.image_sha384[..16]
+            );
+        }
         "ddi-mount" => {
             let h = mgr.get(&sel)?;
             let dir = args.get(1).cloned().ok_or_else(|| russet_device::error::invalid_argument("ddi-mount <dir>"))?;

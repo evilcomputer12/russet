@@ -106,5 +106,9 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
   `details`) is recorded and the lead and the owner decide gate item 7.
 - **What W4 verified without the reboot:** the mount path is idevice's cryptexd with Xcode's `persistence 2` and
   `nonce-persistence 1` (unit test over the encoded XPC request), payloads from the cryptex build identity of
-  `<dir>/Restore/BuildManifest.plist` (synthetic-root test), and the mount record's attribution rules. W4 did not
-  mount or replace the DDI on the rig (no reboot, no `--force`).
+  `<dir>/Restore/BuildManifest.plist` (synthetic-root test), and the mount record's attribution rules. The dry run
+  `$L ddi-check ~/russet-lab/ddi/27A266a/iOS` (2026-10-11) loaded the Apple-origin copy's cryptex payloads and got
+  a 2977-byte Cryptex1 ticket from Apple's TSS for the rig in 2.6 s (personalization identifiers and the current
+  nonce read, not rolled; nothing installed): the 27A266a DDI fits this device. The identity's `Cryptex1,Version`
+  is a placeholder (`39.999.999.0.0,0`); the mount record takes the version cryptexd reports after the install.
+  W4 did not mount or replace the DDI on the rig (no reboot, no `--force`); 27A5228h is still mounted.
