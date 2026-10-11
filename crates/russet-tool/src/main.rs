@@ -7,6 +7,9 @@
 //!
 //! F0 stub (W1); W16 owns the binary, W21 and W21b their tool modules.
 
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

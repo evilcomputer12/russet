@@ -10,6 +10,9 @@
 //!
 //! F0 stub (W1); W8 owns the crate, W7 owns [`debug`].
 
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
+
 /// Debug-plane test doubles: the fake debugserver, the pre-attach relay and the JIT demo harness, ported from
 /// `docs/design/run-debug-prototypes` (RD-02). Pre-created for W7.
 pub mod debug;

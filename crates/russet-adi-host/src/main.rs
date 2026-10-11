@@ -6,6 +6,9 @@
 //!
 //! F0 stub (W1); W22 fills it (SA-19).
 
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

@@ -10,6 +10,9 @@
 // F0 stubs: parameters of `todo!()` bodies are unused until the owner fills them.
 #![allow(unused_variables)]
 
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
+
 pub mod dirs;
 pub mod error;
 pub mod fsx;

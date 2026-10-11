@@ -6,3 +6,6 @@
 //! reader (ARCHITECTURE §5.1, §16.3). Streaming, size-capped, never writes through a link.
 //!
 //! Layer F (MIT). F0 stub (W1); W16b fills it. ARCHITECTURE §5.3 names no cross-area signature for this crate.
+
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");

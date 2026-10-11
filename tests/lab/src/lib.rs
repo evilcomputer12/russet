@@ -6,3 +6,6 @@
 //! §3.3 item 7). The lab's own exit convention is 3 = skipped environment (ARCHITECTURE §13.4).
 //!
 //! F0 stub (W1); W9 fills it (the `smoke` suite).
+
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");

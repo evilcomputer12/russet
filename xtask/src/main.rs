@@ -9,6 +9,9 @@
 // xtask is a command-line tool: printing its report to stdout is its job.
 #![allow(clippy::print_stdout)]
 
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
+
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -31,6 +34,7 @@ mod schema;
 mod sweep;
 mod traces;
 mod workstreams;
+mod worktree_guard;
 
 #[derive(Debug, Parser)]
 #[command(name = "cargo xtask", bin_name = "cargo xtask", version, about = "Russet repository automation")]

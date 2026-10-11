@@ -6,6 +6,9 @@
 //!
 //! F0 stub (W1); W22 fills it, W27c owns `windows`. ARCHITECTURE §5.3 names no cross-area signature for this crate.
 
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
+
 use std::sync::Arc;
 
 /// The Windows ADI host shims (pre-created for W27c).

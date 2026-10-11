@@ -163,7 +163,12 @@ mod tests {
 
     #[test]
     fn every_namespace_file_is_in_the_table() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // The run-time CARGO_MANIFEST_DIR (cargo test sets it) names the tree being tested; the compiled-in one
+        // is only the fallback (shared target slots, AGENTS.md §6).
+        let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        let src = manifest_dir.join("src");
         let mut files: Vec<String> = std::fs::read_dir(src)
             .expect("src/ is readable")
             .filter_map(|e| e.ok()?.file_name().into_string().ok())

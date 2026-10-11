@@ -72,7 +72,21 @@ VM.
 - Delete your own scratch output; never touch files Russet did not create.
 - Cargo target slots: `CARGO_TARGET_DIR=$HOME/.cache/russet-dev/target-<slot>` with the slot (`a` or `b`) from
   your card. At tier AMBER only slot `a` exists and every card uses it; slot `b` opens from tier GREEN, and then
-  at most two cargo builds run machine-wide.
+  at most two cargo builds run machine-wide. Each slot is capped at 6 GiB: `cargo sweep --time 7` weekly (W8
+  automates it as `cargo xtask sweep`).
+- **Shared slots and the worktree guard.** Cargo names a workspace crate's artifacts by its path inside the
+  workspace and decides freshness by mtime, so without a guard a worktree whose files are older than another
+  worktree's last build in the same slot silently reuses that build (another branch's code, and `cargo xtask`
+  inspecting the other tree). `.cargo/config.toml` sets `RUSSET_BUILD_WORKTREE` to your worktree, and every crate
+  root reads it, so cargo recompiles the workspace crates when the slot last built another worktree (registry
+  dependencies stay shared). Therefore:
+  - every new crate root (`src/lib.rs`, a binary's `src/main.rs`, `build.rs`; in a package without a library,
+    also every test, example and bench root) carries, after its doc comments,
+    `const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");` (`cargo xtask check-layers` checks it);
+  - run cargo from inside your worktree: cargo reads `.cargo/config.toml` from the current directory, so never
+    build a worktree with `--manifest-path` from elsewhere;
+  - expect the workspace crates to rebuild after another worktree used your slot. A per-worktree slot avoids
+    that churn, but only the lead assigns one.
 - `CARGO_BUILD_JOBS=6`, `CARGO_INCREMENTAL=0` (the workspace's `[profile.dev]` also disables incremental builds
   and uses `debug = "line-tables-only"`). Once W8 merges, run cargo through `cargo xtask ci|test|build`, which
   runs disk-guard first.

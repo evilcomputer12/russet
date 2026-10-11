@@ -14,6 +14,8 @@
 //! Normal and build dependencies count; dev-dependencies do not (tests may use the testkit, ARCHITECTURE §5.1).
 //! The graph is resolved with **all features** of every workspace package, so optional dependencies (for
 //! example russet-xar's `udif`, `hfsplus` and `cms` readers) are checked too; `deny.toml` does the same.
+//!
+//! It also checks the shared-slot worktree guard of every crate root ([`crate::worktree_guard`], AGENTS.md §6).
 //! Owner: W1.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,10 +51,11 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
     let violations = check(&graph, &cfg);
+    let unguarded = crate::worktree_guard::unguarded(&metadata, &root)?;
     let members = graph.packages.values().filter(|p| p.workspace).count();
-    if violations.is_empty() {
+    if violations.is_empty() && unguarded.is_empty() {
         println!(
-            "check-layers: {members} workspace packages, {} packages in the graph (all features): ok",
+            "check-layers: {members} workspace packages, {} packages in the graph (all features), worktree guard in every crate root: ok",
             graph.packages.len()
         );
         return Ok(());
@@ -60,7 +63,13 @@ pub fn run(args: Args) -> Result<()> {
     for v in &violations {
         println!("{v}");
     }
-    anyhow::bail!("check-layers: {} violation(s)", violations.len())
+    for path in &unguarded {
+        println!(
+            "{path}: does not read option_env!(\"{}\"), the shared-slot worktree guard (AGENTS.md §6)",
+            crate::worktree_guard::VAR
+        );
+    }
+    anyhow::bail!("check-layers: {} violation(s)", violations.len() + unguarded.len())
 }
 
 /// One package of the dependency graph.

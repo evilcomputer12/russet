@@ -8,3 +8,14 @@
 
 [alias]
 xtask = "run --quiet --package xtask --"
+
+[env]
+# The worktree guard for shared cargo target slots (AGENTS.md §6). Cargo names a workspace crate's artifacts by
+# its path relative to the workspace root and decides freshness by mtime, so in a slot shared by several
+# worktrees a checkout whose files are older than another worktree's last build would silently reuse that build.
+# Every workspace crate root reads this variable with `option_env!`, and cargo records the value it was compiled
+# with, so a build from a different worktree recompiles the workspace crates (registry dependencies stay shared).
+# `relative` makes the value this worktree's root; `force` overrides a stale value from the environment.
+# `cargo xtask check-layers` checks that every crate root reads it. Run cargo from inside the worktree: cargo
+# reads this file from the current directory, not from `--manifest-path`.
+RUSSET_BUILD_WORKTREE = { value = ".", relative = true, force = true }

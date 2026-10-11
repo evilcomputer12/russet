@@ -12,6 +12,9 @@
 //! §9.1, §9.3 and §9.4 with placeholder DTOs ([`Unspecified`]), so unimplemented methods answer
 //! `core.notImplemented` (1005) until their wave.
 
+// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
+const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
+
 #[macro_use]
 mod macros;
 mod registry;

@@ -69,10 +69,32 @@ pub struct Workstream {
     pub except: Vec<String>,
 }
 
-/// The repository root (xtask lives in `<root>/xtask`).
+/// The repository root, found at run time: the nearest ancestor of the current directory whose `Cargo.toml`
+/// declares `[workspace]` and has an `xtask/` member; else the parent of the `CARGO_MANIFEST_DIR` that cargo
+/// sets for `cargo run`; else, last, the directory this binary was compiled in.
+///
+/// Never trust the compiled-in path first: in a cargo target slot shared by several worktrees, `cargo xtask`
+/// can run a binary another worktree built, and that binary would then inspect the other tree (AGENTS.md §6).
 pub fn repo_root() -> PathBuf {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.parent().unwrap_or(manifest_dir).to_path_buf()
+    let from_cwd = std::env::current_dir().ok().and_then(|cwd| workspace_root_above(&cwd));
+    let from_cargo = std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .and_then(|dir| dir.parent().and_then(workspace_root_above));
+    from_cwd.or(from_cargo).unwrap_or_else(|| {
+        let compiled = Path::new(env!("CARGO_MANIFEST_DIR"));
+        compiled.parent().unwrap_or(compiled).to_path_buf()
+    })
+}
+
+/// The nearest directory at or above `start` that holds Russet's workspace manifest.
+fn workspace_root_above(start: &Path) -> Option<PathBuf> {
+    start.ancestors().find(|dir| is_workspace_root(dir)).map(Path::to_path_buf)
+}
+
+fn is_workspace_root(dir: &Path) -> bool {
+    let declares_workspace = std::fs::read_to_string(dir.join("Cargo.toml"))
+        .is_ok_and(|text| text.lines().any(|line| line.trim() == "[workspace]"));
+    declares_workspace && dir.join("xtask/Cargo.toml").is_file()
 }
 
 /// Loads `<root>/.config/workstreams.toml`.
@@ -97,11 +119,28 @@ pub fn parse(text: &str) -> Result<Workstreams> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn the_committed_file_parses() {
-        let ws = super::load(&super::repo_root()).expect("workstreams.toml parses");
+        let ws = load(&repo_root()).expect("workstreams.toml parses");
         assert!(ws.ws.contains_key("W1"));
         assert!(ws.layers.contains_key("russet-core"));
         assert!(ws.seams.lead_only.iter().any(|p| p == "xtask/src/main.rs"));
+    }
+
+    #[test]
+    fn the_root_is_found_from_any_directory_inside_the_worktree() {
+        let root = repo_root();
+        assert!(is_workspace_root(&root), "{} is not the workspace root", root.display());
+        assert_eq!(workspace_root_above(&root.join("crates/russet-core/src")), Some(root.clone()));
+        assert_eq!(workspace_root_above(&root.join("xtask")), Some(root));
+        // Another checkout with the same layout is its own root, whatever this binary was compiled from.
+        let other = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(other.path().join("xtask/src")).expect("mkdir");
+        std::fs::write(other.path().join("Cargo.toml"), "[workspace]\nmembers = [\"xtask\"]\n").expect("write");
+        std::fs::write(other.path().join("xtask/Cargo.toml"), "[package]\nname = \"xtask\"\n").expect("write");
+        assert_eq!(workspace_root_above(&other.path().join("xtask/src")), Some(other.path().to_path_buf()));
+        assert_eq!(workspace_root_above(Path::new("/")), None);
     }
 }
