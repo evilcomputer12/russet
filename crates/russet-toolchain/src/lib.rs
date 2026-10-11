@@ -365,25 +365,30 @@ impl Toolchains {
 
     /// The first working candidate of `c` that meets `req` (ARCHITECTURE §16.1 order).
     pub async fn resolve(&self, c: Component, req: &Requirement) -> Result<ToolInfo> {
+        let flavor = req.flavor.as_deref().filter(|f| !f.is_empty() && *f != "auto");
+        if matches!(c, Component::Linker | Component::Lldb | Component::LldbDap)
+            && let Some(path) = flavor.filter(|f| f.contains('/'))
+        {
+            return self.explicit_tool(c, path).await;
+        }
+        let candidates = self.candidates(c, req).await;
+        self.pick(c, candidates, req, flavor)
+    }
+
+    /// Every candidate of `c` for `req`'s flavor, in resolution order, with problems (one component of
+    /// [`probe_all`](Self::probe_all)).
+    pub async fn candidates(&self, c: Component, req: &Requirement) -> Vec<ToolInfo> {
         let p = self.prober();
         let flavor = req.flavor.as_deref().filter(|f| !f.is_empty() && *f != "auto");
-        let candidates: Vec<ToolInfo> = match c {
+        match c {
             Component::Swift => p.swift().await,
             Component::DarwinSdk => {
                 let swift = p.swift().await;
                 p.darwin_sdks(&self.sdks_now(), &swift)
             }
-            Component::Linker => {
-                if let Some(path) = flavor.filter(|f| f.contains('/')) {
-                    return self.explicit_tool(c, path).await;
-                }
-                p.linkers(&self.sdks_now()).await
-            }
+            Component::Linker => p.linkers(&self.sdks_now()).await,
             Component::Lldb | Component::LldbDap => {
                 let dap = c == Component::LldbDap;
-                if let Some(path) = flavor.filter(|f| f.contains('/')) {
-                    return self.explicit_tool(c, path).await;
-                }
                 let swift = p.swift().await;
                 let roots: Vec<PathBuf> = swift.iter().filter_map(|s| probe::swift_root(&s.path)).collect();
                 let mut all = Vec::new();
@@ -408,8 +413,7 @@ impl Toolchains {
             Component::Xtool => p.simple(c, "xtool").await,
             Component::Flutter => p.simple(c, "flutter").await,
             Component::GenSnapshotIos | Component::Llvm => Vec::new(),
-        };
-        self.pick(c, candidates, req, flavor)
+        }
     }
 
     fn pick(

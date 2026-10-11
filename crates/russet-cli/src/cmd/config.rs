@@ -102,8 +102,9 @@ fn absolute(cwd: &Path, p: &Path) -> PathBuf {
 
 /// Hands a result to the reporter (one JSON document with `--json`).
 pub(crate) fn report<T: Serialize>(cx: &CliCtx, v: &T) -> Result<()> {
-    let value = serde_json::to_value(v)
-        .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot encode the result: {e}")))?;
+    let value = serde_json::to_value(v).map_err(|e| {
+        Error::new(codes::core::INTERNAL, format!("cannot encode the result: {e}")).with_hint("Report this bug.")
+    })?;
     cx.reporter.result(&value);
     Ok(())
 }

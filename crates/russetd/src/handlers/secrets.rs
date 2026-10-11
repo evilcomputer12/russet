@@ -113,9 +113,9 @@ pub async fn set(store: &dyn SecretStore, conn: &ConnInfo, params: p::SecretsSet
         )
         .with_hint("Pass the file's absolute path."));
     }
-    let bytes = tokio::task::spawn_blocking(move || read_capped(&path))
-        .await
-        .map_err(|e| Error::new(codes::core::INTERNAL, format!("the read task failed: {e}")))??;
+    let bytes = tokio::task::spawn_blocking(move || read_capped(&path)).await.map_err(|e| {
+        Error::new(codes::core::INTERNAL, format!("the read task failed: {e}")).with_hint("Report this bug.")
+    })??;
     let label = params.label.unwrap_or_else(|| {
         std::path::Path::new(&params.from_file)
             .file_name()

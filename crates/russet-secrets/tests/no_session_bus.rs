@@ -52,3 +52,44 @@ fn child_stores_a_secret_without_dbus() {
         assert!(!store.status().await.locked);
     });
 }
+
+/// A session bus that leads nowhere (no Secret Service): `auto` falls back to the passphrase store on first use.
+#[test]
+fn auto_falls_back_to_the_passphrase_when_the_keyring_does_not_answer() {
+    let exe = std::env::current_exe().expect("test binary");
+    let home = tempfile::tempdir().expect("home");
+    let out = Command::new(exe)
+        .args(["--exact", "child_falls_back_to_the_passphrase", "--include-ignored", "--nocapture"])
+        .env(CHILD_MARKER, "1")
+        .env("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={}", home.path().join("no-bus").display()))
+        .env_remove("RUSSET_SECRETS_BACKEND")
+        .env("RUSSET_SECRETS_PASSPHRASE", "fallback passphrase")
+        .env("RUSSET_HOME", home.path())
+        .output()
+        .expect("run the child");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "child failed:\n{stdout}\n{stderr}");
+    assert!(stdout.contains("1 passed"), "the child test did not run:\n{stdout}");
+    let store_json = std::fs::read_to_string(home.path().join("data/secrets/store.json")).expect("store.json");
+    assert!(store_json.contains("\"passphrase\""), "{store_json}");
+}
+
+#[test]
+#[ignore = "run by auto_falls_back_to_the_passphrase_when_the_keyring_does_not_answer in a child process"]
+fn child_falls_back_to_the_passphrase() {
+    if std::env::var_os(CHILD_MARKER).is_none() {
+        return;
+    }
+    let cfg = SecretsConfig::from_env().expect("config");
+    assert!(cfg.session_bus, "a (broken) session bus is configured");
+    let home = cfg.russet_home.clone().expect("RUSSET_HOME");
+    let store = open_default(&RussetDirs::under(&home), &cfg).expect("open");
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).build().expect("runtime");
+    rt.block_on(async {
+        let id = SecretId { kind: SecretKind::GithubToken, name: "me".into() };
+        store.put(&id, "gh", SecretBytes::new(b"token".to_vec())).await.expect("put");
+        assert_eq!(store.get(&id).await.expect("get").expect("value").expose(), b"token");
+        assert_eq!(store.status().await.kind, BackendKind::PassphraseFile);
+    });
+}

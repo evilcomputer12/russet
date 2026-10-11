@@ -201,8 +201,9 @@ impl SealedStore {
     }
 
     fn write_index(&self, index: &IndexFile) -> Result<()> {
-        let text = serde_json::to_vec_pretty(index)
-            .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot encode the index: {e}")))?;
+        let text = serde_json::to_vec_pretty(index).map_err(|e| {
+            Error::new(codes::core::INTERNAL, format!("cannot encode the index: {e}")).with_hint("Report this bug.")
+        })?;
         write_private(&self.inner.dir.join(INDEX_FILE), &text)
     }
 
@@ -273,8 +274,10 @@ impl SealedStore {
                     backend: backend_name(self.inner.source.kind()).into(),
                     keyring_entry: self.inner.source.describe().keyring_entry,
                 };
-                let text = serde_json::to_vec_pretty(&store)
-                    .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot encode store.json: {e}")))?;
+                let text = serde_json::to_vec_pretty(&store).map_err(|e| {
+                    Error::new(codes::core::INTERNAL, format!("cannot encode store.json: {e}"))
+                        .with_hint("Report this bug.")
+                })?;
                 write_private(&self.inner.dir.join(STORE_FILE), &text)?;
                 k
             }

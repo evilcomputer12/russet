@@ -58,8 +58,9 @@ pub fn read_selection(data_dir: &Path) -> BTreeMap<String, String> {
 }
 
 fn write_selection(data_dir: &Path, sel: &BTreeMap<String, String>) -> Result<()> {
-    let text = serde_json::to_vec_pretty(sel)
-        .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot encode selected.json: {e}")))?;
+    let text = serde_json::to_vec_pretty(sel).map_err(|e| {
+        Error::new(codes::core::INTERNAL, format!("cannot encode selected.json: {e}")).with_hint("Report this bug.")
+    })?;
     let path = toolchains_dir(data_dir).join(SELECTED);
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path)).map_err(|e| io_err("write", &path, e))
@@ -205,7 +206,9 @@ impl InstallJob<'_> {
         let strip = archive_root(&pin.name);
         let extracted = tokio::task::spawn_blocking(move || extract_tar_gz(&part_owned, &staging_owned, strip))
             .await
-            .map_err(|e| Error::new(codes::core::INTERNAL, format!("the extraction task failed: {e}")))?;
+            .map_err(|e| {
+            Error::new(codes::core::INTERNAL, format!("the extraction task failed: {e}")).with_hint("Report this bug.")
+        })?;
         let root = match extracted {
             Ok(root) => root,
             Err(e) => {
@@ -221,8 +224,9 @@ impl InstallJob<'_> {
             size: artifact.size,
             installed_at: now_rfc3339(),
         };
-        let marker_text = serde_json::to_vec_pretty(&marker)
-            .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot encode the marker: {e}")))?;
+        let marker_text = serde_json::to_vec_pretty(&marker).map_err(|e| {
+            Error::new(codes::core::INTERNAL, format!("cannot encode the marker: {e}")).with_hint("Report this bug.")
+        })?;
         std::fs::write(root.join(MARKER), marker_text).map_err(|e| io_err("write", &root.join(MARKER), e))?;
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| io_err("create", parent, e))?;
@@ -452,7 +456,9 @@ async fn sha256_file(path: PathBuf) -> Result<String> {
         Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
     })
     .await
-    .map_err(|e| Error::new(codes::core::INTERNAL, format!("the hashing task failed: {e}")))?
+    .map_err(|e| {
+        Error::new(codes::core::INTERNAL, format!("the hashing task failed: {e}")).with_hint("Report this bug.")
+    })?
 }
 
 /// Whether a relative path stays inside its root (no absolute paths, no `..` above the root).

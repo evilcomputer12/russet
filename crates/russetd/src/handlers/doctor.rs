@@ -415,10 +415,10 @@ impl ToolchainLinker {
             other => format!("ld64.lld (LLD {}, {})", linker.version, provenance_label(other)),
         };
         let rejected: Vec<String> = tc
-            .probe_all(false)
+            .candidates(Component::Linker, &req)
             .await
             .into_iter()
-            .filter(|t| t.component == Component::Linker && !t.ok)
+            .filter(|t| !t.ok)
             .map(|t| format!("{} ld64.lld {} is too old", provenance_label(&t.provenance), t.version))
             .collect();
         let mut msg = source;

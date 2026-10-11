@@ -82,9 +82,11 @@ impl ConfigEditor {
         let segments = keys::parse(dotted_key)?;
         let raw: toml::Table = toml::from_str(&self.render()).map_err(|e| {
             Error::new(codes::config::INVALID, format!("{}: {}", self.path.display(), e.message().trim()))
+                .with_hint("Fix the file; `russet doctor` shows the position of the problem.")
         })?;
-        let json = serde_json::to_value(raw)
-            .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot convert TOML to JSON: {e}")))?;
+        let json = serde_json::to_value(raw).map_err(|e| {
+            Error::new(codes::core::INTERNAL, format!("cannot convert TOML to JSON: {e}")).with_hint("Report this bug.")
+        })?;
         Ok(keys::get_json(&json, &segments).cloned())
     }
 
@@ -208,9 +210,9 @@ fn table_at_mut<'a>(root: &'a mut Table, path: &[String]) -> Result<&'a mut dyn 
             t.set_implicit(true);
             current.insert(seg, Item::Table(t));
         }
-        let item = current
-            .get_mut(seg)
-            .ok_or_else(|| Error::new(codes::core::INTERNAL, format!("cannot create the table `{seg}`")))?;
+        let item = current.get_mut(seg).ok_or_else(|| {
+            Error::new(codes::core::INTERNAL, format!("cannot create the table `{seg}`")).with_hint("Report this bug.")
+        })?;
         current = item.as_table_like_mut().ok_or_else(|| {
             Error::new(codes::config::INVALID, format!("`{seg}` is a value, not a table"))
                 .with_hint("Unset the value first, or set a key that exists.")
@@ -259,7 +261,8 @@ fn json_to_value(v: &Value) -> Result<toml_edit::Value> {
             } else if let Some(f) = n.as_f64() {
                 f.into()
             } else {
-                return Err(Error::new(codes::config::INVALID, format!("the number {n} does not fit in TOML")));
+                return Err(Error::new(codes::config::INVALID, format!("the number {n} does not fit in TOML"))
+                    .with_hint("Use a smaller integer or a string."));
             }
         }
         Value::String(s) => s.as_str().into(),

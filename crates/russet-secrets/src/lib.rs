@@ -30,6 +30,7 @@ use russet_core::secret::Redacted;
 use time::OffsetDateTime;
 use zeroize::Zeroizing;
 
+pub mod auto;
 pub mod crypto;
 pub mod env;
 pub mod keyring;
@@ -309,13 +310,31 @@ pub fn secrets_dir(dirs: &RussetDirs) -> PathBuf {
 /// Opens the store `cfg` selects. Nothing here blocks or touches the keyring: the keyring is reached on first use
 /// (on a blocking thread), so a daemon starts even without one and reports the state through `secrets.status`.
 ///
-/// `auto` keeps using the backend that sealed `data/secrets` (from `store.json`); for a new store it takes the
-/// keyring when a session bus is configured, else the passphrase store when `RUSSET_SECRETS_PASSPHRASE` is set,
+/// `auto` keeps using the backend that sealed `data/secrets` (from `store.json`). For a new store it takes the
+/// keyring when a session bus is configured (falling back to the passphrase store on first use when the keyring
+/// does not answer and `RUSSET_SECRETS_PASSPHRASE` is set), else the passphrase store when a passphrase is set,
 /// else the keyring (which then reports itself unavailable, with a hint).
 pub fn open_default(dirs: &RussetDirs, cfg: &SecretsConfig) -> Result<Arc<dyn SecretStore>> {
     let dir = secrets_dir(dirs);
+    let sealed_with = sealed::sealed_by(&dir);
+    let keyring_store =
+        || sealed::SealedStore::new(dir.clone(), Box::new(keyring::KeyringKeySource::new(cfg.keyring_entry_name())));
+    let passphrase_store = || {
+        sealed::SealedStore::new(
+            dir.clone(),
+            Box::new(passphrase::PassphraseKeySource::new(
+                dir.clone(),
+                cfg.passphrase.as_ref().map(|p| p.0.clone()),
+                passphrase::KdfCost::DEFAULT,
+            )),
+        )
+    };
+    // A new store with both candidates: the keyring if it answers on first use, else the passphrase (core §9.6).
+    if cfg.backend == BackendChoice::Auto && sealed_with.is_none() && cfg.session_bus && cfg.passphrase.is_some() {
+        return Ok(Arc::new(auto::AutoStore::new(keyring_store(), passphrase_store())));
+    }
     let choice = match cfg.backend {
-        BackendChoice::Auto => match sealed::sealed_by(&dir) {
+        BackendChoice::Auto => match sealed_with {
             Some(BackendKind::PassphraseFile) => BackendChoice::Passphrase,
             Some(_) => BackendChoice::Keyring,
             None if cfg.session_bus => BackendChoice::Keyring,
@@ -324,7 +343,7 @@ pub fn open_default(dirs: &RussetDirs, cfg: &SecretsConfig) -> Result<Arc<dyn Se
         },
         explicit => explicit,
     };
-    if let Some(sealed_with) = sealed::sealed_by(&dir) {
+    if let Some(sealed_with) = sealed_with {
         let wanted = match choice {
             BackendChoice::Keyring => Some(BackendKind::Keyring),
             BackendChoice::Passphrase => Some(BackendKind::PassphraseFile),
@@ -343,17 +362,8 @@ pub fn open_default(dirs: &RussetDirs, cfg: &SecretsConfig) -> Result<Arc<dyn Se
     Ok(match choice {
         BackendChoice::Memory => Arc::new(memory::MemoryStore::new()),
         BackendChoice::Env => Arc::new(env::EnvStore::from_env()),
-        BackendChoice::Passphrase => Arc::new(sealed::SealedStore::new(
-            dir.clone(),
-            Box::new(passphrase::PassphraseKeySource::new(
-                dir,
-                cfg.passphrase.as_ref().map(|p| p.0.clone()),
-                passphrase::KdfCost::DEFAULT,
-            )),
-        )),
-        BackendChoice::Keyring | BackendChoice::Auto => {
-            Arc::new(sealed::SealedStore::new(dir, Box::new(keyring::KeyringKeySource::new(cfg.keyring_entry_name()))))
-        }
+        BackendChoice::Passphrase => Arc::new(passphrase_store()),
+        BackendChoice::Keyring | BackendChoice::Auto => Arc::new(keyring_store()),
     })
 }
 
