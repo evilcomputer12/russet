@@ -13,6 +13,7 @@
 // The renderers are the CLI's output.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
+pub mod job;
 pub mod prompts;
 
 use std::io::Write;
@@ -44,9 +45,9 @@ pub trait Reporter: Send + Sync {
 }
 
 /// The reporter for these flags.
-pub fn reporter_for(g: &GlobalArgs) -> Box<dyn Reporter> {
+pub fn reporter_for(g: &GlobalArgs) -> std::sync::Arc<dyn Reporter> {
     if g.json {
-        Box::new(JsonReporter::default())
+        std::sync::Arc::new(JsonReporter::default())
     } else {
         let color = match g.color {
             ColorChoice::Always => true,
@@ -55,7 +56,7 @@ pub fn reporter_for(g: &GlobalArgs) -> Box<dyn Reporter> {
                 std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty()) && russet_core::platform::stderr_is_tty()
             }
         };
-        Box::new(HumanReporter::new(color, g.quiet))
+        std::sync::Arc::new(HumanReporter::new(color, g.quiet))
     }
 }
 

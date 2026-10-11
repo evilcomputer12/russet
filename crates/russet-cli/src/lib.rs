@@ -153,7 +153,7 @@ impl DaemonLink {
 pub struct CliCtx {
     /// The daemon connection, made on first use ([`DaemonLink::get`]).
     pub peer: DaemonLink,
-    pub reporter: Box<dyn render::Reporter>,
+    pub reporter: Arc<dyn render::Reporter>,
     pub global: global::GlobalArgs,
 }
 
@@ -174,6 +174,26 @@ impl CliCtx {
             self.reporter.human(&human(value));
         }
         Ok(())
+    }
+
+    /// Calls the long-running method `M` (ARCHITECTURE §7.6) as area commands should
+    /// ([`render::job`]): progress on the reporter, Ctrl-C cancels the job (exit 130), and in human mode
+    /// (not `-q`) the job's log lines are printed as they arrive. Put `background: true` in the params for
+    /// `--background` (the result is then `{jobId}`).
+    pub async fn call_long<M: Method>(&self, params: M::Params) -> Result<M::Result> {
+        let logs = !self.reporter.is_json() && !self.global.quiet;
+        self.call_long_with::<M>(params, logs).await
+    }
+
+    /// [`CliCtx::call_long`], choosing whether the job's log lines are printed.
+    pub async fn call_long_with<M: Method>(&self, params: M::Params, logs: bool) -> Result<M::Result> {
+        let peer = self.peer.get().await?;
+        render::job::call_long::<M, _, _>(peer, Arc::clone(&self.reporter), params, logs, || async {
+            if tokio::signal::ctrl_c().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        })
+        .await
     }
 }
 
