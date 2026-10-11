@@ -564,16 +564,19 @@ fn handle(st: &mut State, p: &str, running: &mut bool) -> (Vec<String>, bool) {
     if p.starts_with("vCont;") || p == "c" || p == "s" || (p.starts_with('C') && p.len() == 3) {
         return (resume(st, running), false);
     }
-    if let Some(rest) = p.strip_prefix("Z0,") {
-        if let Some(addr) = rest.split(',').next().and_then(|a| u64::from_str_radix(a, 16).ok()) {
-            st.report.breakpoints.insert(addr);
-        }
+    // Breakpoints (Z0, Z1) and watchpoints (Z2–Z4), keyed by address.
+    let point = |p: &str, lead: char| -> Option<u64> {
+        let mut chars = p.chars();
+        (chars.next() == Some(lead) && matches!(chars.next(), Some('0'..='4')) && chars.next() == Some(','))
+            .then(|| p[3..].split(',').next().and_then(|a| u64::from_str_radix(a, 16).ok()))
+            .flatten()
+    };
+    if let Some(addr) = point(p, 'Z') {
+        st.report.breakpoints.insert(addr);
         return one("OK");
     }
-    if let Some(rest) = p.strip_prefix("z0,") {
-        if let Some(addr) = rest.split(',').next().and_then(|a| u64::from_str_radix(a, 16).ok()) {
-            st.report.breakpoints.remove(&addr);
-        }
+    if let Some(addr) = point(p, 'z') {
+        st.report.breakpoints.remove(&addr);
         return one("OK");
     }
     if p == "k" {
