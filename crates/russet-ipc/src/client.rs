@@ -267,12 +267,14 @@ impl Drop for SpawnLock {
 }
 
 async fn take_spawn_lock(path: &Path) -> Result<SpawnLock> {
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(path)
-        .map_err(|e| Error::io(format!("opening {}", path.display()), e))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path).map_err(|e| Error::io(format!("opening {}", path.display()), e))?;
     let deadline = Instant::now() + SPAWN_LOCK_WAIT;
     loop {
         match file.try_lock() {

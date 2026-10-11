@@ -268,10 +268,12 @@ async fn initialize<C: Clone + Send + Sync + 'static>(
         }
     };
     let interactive = params.capabilities.interactive && params.client.kind == ClientKind::Cli;
+    // The name is a display string that reaches logs, the audit log, job owners and `daemon.status`: anything
+    // secret-shaped in it is masked once, here (ARCHITECTURE §12.2).
     let conn = ConnInfo {
         id: peer.connection_id().to_owned(),
         kind: params.client.kind,
-        name: params.client.name.clone(),
+        name: russet_core::redact::redact_text(&params.client.name).into_owned(),
         interactive,
         shared_lease: params.shared_lease.clone(),
     };
