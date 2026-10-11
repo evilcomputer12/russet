@@ -219,10 +219,16 @@ impl DebugConfig {
     }
 }
 
+/// The runtime directory when Russet's directories are not known (tests, the doctor without `RUSSET_HOME` or
+/// `XDG_RUNTIME_DIR`): per user, so two users of one host never share it.
+pub fn fallback_runtime_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("russet-runtime-{}", fsutil::current_uid().unwrap_or(0)))
+}
+
 impl Default for DebugConfig {
     fn default() -> Self {
         Self {
-            runtime_dir: std::env::temp_dir().join("russet-runtime"),
+            runtime_dir: fallback_runtime_dir(),
             state_dir: None,
             broker: broker::BrokerOptions::default(),
             broker_transport: if cfg!(unix) { BrokerTransport::Unix } else { BrokerTransport::Tcp },
@@ -518,6 +524,13 @@ impl DebugService {
             }
         };
         let spec_ep = self.endpoint_spec(h.id());
+        #[cfg(unix)]
+        if let EndpointSpec::Unix { path } = &spec_ep
+            && let Some(dir) = path.parent()
+            && dir == self.cfg.runtime_dir.join("sessions").join(h.id().as_str())
+        {
+            h.keep_alive(Box::new(RuntimeDirGuard(dir.to_path_buf())));
+        }
         let (endpoint, lldb_url) = match r.attach_mode {
             AttachMode::Broker => {
                 let opts = self.cfg.broker.clone();
@@ -742,6 +755,19 @@ impl DebugService {
     }
 }
 
+/// Removes a session's own runtime directory (`runtime/sessions/<sid>/`, home of the broker socket) when the
+/// session ends; a socket that fell back to a shorter path elsewhere is the listener's to remove.
+#[cfg(unix)]
+struct RuntimeDirGuard(PathBuf);
+
+#[cfg(unix)]
+impl Drop for RuntimeDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.0.join("gdb.sock"));
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
 /// A stop (`run.stop`, the owner leaving) arrived while the session was still launching.
 fn stopped_while_launching() -> Error {
     Error::new(codes::core::CANCELLED, "the session was stopped while it launched")
@@ -855,7 +881,7 @@ impl russet_doctor::Check for BrokerEndpointCheck {
             Some(home) => PathBuf::from(home).join("runtime"),
             None => match std::env::var_os("XDG_RUNTIME_DIR") {
                 Some(r) => PathBuf::from(r).join("russet"),
-                None => std::env::temp_dir().join("russet-runtime"),
+                None => fallback_runtime_dir(),
             },
         };
         broker_endpoint_probe(&runtime).await

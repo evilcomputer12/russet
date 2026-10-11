@@ -98,6 +98,11 @@ fn fake_device(pid: u32) -> Arc<FakeDevice> {
     })
 }
 
+/// A configuration whose broker sockets live in the test's scratch directory.
+fn config(dir: &std::path::Path) -> DebugConfig {
+    DebugConfig { runtime_dir: dir.join("run"), ..DebugConfig::default() }
+}
+
 fn request(lease: SessionLease) -> DebugRequest {
     let mut run = RunRequest::new(DeviceSelector::Only, "dev.russet.test.probe");
     run.lease = lease;
@@ -122,7 +127,7 @@ fn request(lease: SessionLease) -> DebugRequest {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_debug_session_from_prepare_to_lldb_detach() {
-    let dir = common::scratch("session-fake");
+    let dir = common::scratch("sf-main");
     let dev = fake_device(932);
     let cfg =
         DebugConfig { runtime_dir: dir.join("run"), state_dir: Some(dir.join("state")), ..DebugConfig::default() };
@@ -141,6 +146,7 @@ async fn a_debug_session_from_prepare_to_lldb_detach() {
 
     // "LLDB" connects through the broker: the debugger is attached and the app stopped.
     let russet_debug::BrokerEndpoint::Unix { path } = &prepared.broker else { panic!("unix expected") };
+    assert!(path.starts_with(dir.join("run/sessions").join(s.id().as_str())), "{}", path.display());
     let stream: BoxStream = Box::new(tokio::net::UnixStream::connect(path).await.unwrap());
     let lldb = GdbClient::handshake(stream, HandshakeOptions::default()).await.unwrap().0;
     let st = s.wait_for(Duration::from_secs(5), |st| *st == SessionState::Stopped).await;
@@ -155,13 +161,15 @@ async fn a_debug_session_from_prepare_to_lldb_detach() {
     s.terminate(TerminateMode::Kill).await.unwrap();
     assert_eq!(dev.signals.lock().unwrap().as_slice(), &[(932, 9)]);
     assert_eq!(s.summary().state, WireSessionState::Exited);
+    assert!(!dir.join("run/sessions").join(s.id().as_str()).exists(), "the runtime directory goes with the session");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_attach_kills_the_suspended_app_and_fails_the_session() {
     // The fake process has another pid, so vAttach answers "no such process".
+    let dir = common::scratch("sf-attach");
     let dev = fake_device(4242);
-    let svc = DebugService::new(dev.clone(), DebugConfig::default());
+    let svc = DebugService::new(dev.clone(), config(dir.path()));
     let e = svc.prepare_debug(request(SessionLease::Owned)).await.unwrap_err();
     assert_eq!(e.code(), russet_core::error::codes::debug::PROCESS_EXITED);
     assert_eq!(dev.signals.lock().unwrap().as_slice(), &[(932, 9)], "no stopped app is left behind");
@@ -199,10 +207,12 @@ impl DeviceServices for ConsoleDevice {
 async fn after_a_detach_the_end_of_stdout_ends_the_session() {
     let fake = FakeDebugserver::start(FakeSpec { pid: 932, ..FakeSpec::default() }).unwrap();
     let dev = Arc::new(ConsoleDevice { fake, console: Mutex::new(None) });
-    let svc = DebugService::new(dev.clone(), DebugConfig::default());
+    let dir = common::scratch("sf-stdout");
+    let svc = DebugService::new(dev.clone(), config(dir.path()));
     let prepared = svc.prepare_debug(request(SessionLease::Detached)).await.unwrap();
     let s = prepared.session.clone();
     let russet_debug::BrokerEndpoint::Unix { path } = &prepared.broker else { panic!("unix expected") };
+    assert!(path.starts_with(dir.join("run/sessions").join(s.id().as_str())), "{}", path.display());
     let stream: BoxStream = Box::new(tokio::net::UnixStream::connect(path).await.unwrap());
     let lldb = GdbClient::handshake(stream, HandshakeOptions::default()).await.unwrap().0;
     // While the broker holds the process, the console's end does not end the session.
@@ -218,6 +228,9 @@ async fn after_a_detach_the_end_of_stdout_ends_the_session() {
     assert!(matches!(end, SessionState::Exited { .. }), "{end:?}");
     let (entries, _) = s.logs().query(None, None, &Default::default());
     assert!(entries.iter().any(|e| e.message == "last line"));
+    // The session's runtime directory (the broker socket's) goes with it.
+    let session_dir = dir.join("run/sessions").join(s.id().as_str());
+    assert!(!session_dir.exists(), "{} remains", session_dir.display());
 }
 
 /// A device whose launch finishes only when the test lets it.
@@ -272,12 +285,12 @@ async fn a_stop_during_the_launch_kills_the_app_and_cancels_the_start() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_after_the_broker_serves_kills_the_app_and_closes_the_endpoint() {
-    let dir = common::scratch("session-abort");
+    let dir = common::scratch("sf-abort");
     // The script root is a file, so writing attach.lldb fails after the broker already serves.
     let root = dir.join("not-a-directory");
     std::fs::write(&root, b"").unwrap();
     let dev = fake_device(932);
-    let svc = DebugService::new(dev.clone(), DebugConfig { runtime_dir: dir.join("run"), ..DebugConfig::default() });
+    let svc = DebugService::new(dev.clone(), config(dir.path()));
     let mut r = request(SessionLease::Detached);
     r.script_root = Some(root);
     let e = svc.prepare_debug(r).await.unwrap_err();
@@ -290,13 +303,16 @@ async fn a_failure_after_the_broker_serves_kills_the_app_and_closes_the_endpoint
     assert!(dev.signals.lock().unwrap().is_empty());
     // Nothing listens for a debugger any more.
     let sock = russet_debug::broker::socket_path(&dir.join("run"), summaries[0].session_id.as_str(), "gdb.sock");
+    assert!(sock.starts_with(dir.path()), "{}", sock.display());
     assert!(common::eventually(Duration::from_secs(5), || !sock.exists()).await, "{} remains", sock.display());
+    assert!(!dir.join("run/sessions").join(summaries[0].session_id.as_str()).exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stop_during_a_suspended_launch_kills_the_app_before_any_attach() {
+    let dir = common::scratch("sf-stop");
     let dev = Arc::new(SlowLaunchDevice { gate: tokio::sync::Notify::new(), signals: Mutex::new(Vec::new()) });
-    let svc = Arc::new(DebugService::new(dev.clone(), DebugConfig::default()));
+    let svc = Arc::new(DebugService::new(dev.clone(), config(dir.path())));
     let mut created = svc.watch_new();
     let prepare = tokio::spawn({
         let svc = Arc::clone(&svc);

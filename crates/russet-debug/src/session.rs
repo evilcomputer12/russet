@@ -438,8 +438,16 @@ impl SessionHandle {
         stop_control(control).await;
     }
 
+    /// Keeps `thing` until the session ends. Once it has ended (a stop that raced the launch), `thing` is dropped
+    /// at once: under the `ended` lock, so end()'s clearing never misses it.
     pub(crate) fn keep_alive(&self, thing: Box<dyn std::any::Any + Send>) {
-        lock(&self.inner.keep).push(thing);
+        let ended = lock(&self.inner.ended);
+        if ended.is_none() {
+            lock(&self.inner.keep).push(thing);
+            return;
+        }
+        drop(ended);
+        drop(thing);
     }
 
     pub(crate) fn kill_requested(&self) -> bool {
