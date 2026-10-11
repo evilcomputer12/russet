@@ -129,6 +129,14 @@ impl RussetDirs {
     }
 }
 
+/// The first 8 hex digits of SHA-256 of `bytes`: per-home names (the keyring entry `master-key-<hash8>`, named
+/// pipes, socket paths too long for `sun_path`; ARCHITECTURE §3.3 item 7, §7.1).
+pub fn hash8(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(bytes);
+    digest.iter().take(4).map(|b| format!("{b:02x}")).collect()
+}
+
 fn absolute(p: OsString) -> PathBuf {
     let p = PathBuf::from(p);
     std::path::absolute(&p).unwrap_or(p)
@@ -243,6 +251,12 @@ mod tests {
         assert_eq!(dirs.runtime, PathBuf::from(format!("/tmp/russet-{}", crate::platform::current_uid())));
         let e = RussetDirs::from_vars(env(&[])).expect_err("no HOME");
         assert_eq!(e.code(), codes::core::INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn hash8_is_stable() {
+        assert_eq!(hash8(b"abc"), "ba7816bf");
+        assert_eq!(hash8(b"/w/.russet-dev").len(), 8);
     }
 
     #[test]
