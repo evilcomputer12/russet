@@ -96,7 +96,7 @@ pub async fn device_ddi_mount(
     let status = match &p.source {
         Some(src) => h.ddi_mount(&wire::ddi_source(src), p.force.unwrap_or(false), progress).await?,
         None if p.force.unwrap_or(false) => {
-            let dir = h.cfg().ddi.dir.clone().ok_or_else(|| {
+            let dir = h.current_ddi_config().dir.ok_or_else(|| {
                 device_error(
                     codes::device::DDI_SOURCE_MISSING,
                     "`force` needs a source, and `[device.ddi] dir` is not set",

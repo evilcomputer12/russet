@@ -393,7 +393,7 @@ impl DeviceHandle {
                     .with_hint("Set `[device.ddi] dir` to a copy of a Mac's iOS_DDI folder for now."));
             }
             DdiSource::Pmd3Cache | DdiSource::Pmd3AutoMount { .. } => {
-                if !self.cfg().ddi.allow_mirror {
+                if !self.current_ddi_config().allow_mirror {
                     return Err(device_error(
                         codes::device::DDI_MIRROR_CONSENT_REQUIRED,
                         "pymobiledevice3's DDIs come from a third-party mirror",
@@ -489,6 +489,27 @@ impl DeviceHandle {
             })
     }
 
+    /// `[device.ddi]` as the config file says now (`russet config set device.ddi.dir …` applies without a daemon
+    /// restart), else the settings the manager started with.
+    pub fn current_ddi_config(&self) -> crate::config::DdiConfig {
+        let cfg = self.cfg();
+        if cfg.config_dir.as_os_str().is_empty() {
+            return cfg.ddi.clone();
+        }
+        let path = cfg.config_dir.join("config.toml");
+        let mut fresh = crate::config::DeviceConfig { ddi: cfg.ddi.clone(), ..Default::default() };
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match fresh.apply_toml(&text, &path) {
+                Ok(()) => fresh.ddi,
+                Err(e) => {
+                    tracing::warn!(error = %e.message(), "config.toml is invalid; using the DDI settings from start-up");
+                    cfg.ddi.clone()
+                }
+            },
+            Err(_) => cfg.ddi.clone(),
+        }
+    }
+
     /// The `[device.ddi]` order of ARCHITECTURE §14.3; lazy; remounts only when missing.
     pub async fn ensure_ddi(&self) -> Result<DdiStatus> {
         let status = self.ddi_status().await?;
@@ -497,9 +518,10 @@ impl DeviceHandle {
         }
         let progress = crate::NoProgress;
         let mut last_err = None;
-        for source in &self.cfg().ddi.order {
+        let ddi = self.current_ddi_config();
+        for source in &ddi.order {
             let src = match source.as_str() {
-                "dir" => match &self.cfg().ddi.dir {
+                "dir" => match &ddi.dir {
                     Some(d) => DdiSource::Dir(d.clone()),
                     None => continue,
                 },

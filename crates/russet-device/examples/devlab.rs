@@ -314,6 +314,69 @@ async fn run() -> russet_core::Result<()> {
             println!("pid {}: {oslog} oslog and {stdout} stdout entries; first after {first:?} from SIGCONT", p.pid);
             h.signal(p.pid, 9).await?;
         }
+        "stdio-shape" => {
+            // Device check D1 (DC-04): what a CoreDevice startStopped launch's stdio socket carries.
+            use tokio::io::AsyncReadExt;
+            let h = mgr.get(&sel)?;
+            let bundle =
+                args.get(1).cloned().ok_or_else(|| russet_device::error::invalid_argument("stdio-shape <bundle>"))?;
+            let mut stdio = h.connect_rsd(russet_device::coredevice::service::OPEN_STDIO_SOCKET).await?;
+            let mut id = [0u8; 16];
+            stdio
+                .read_exact(&mut id)
+                .await
+                .map_err(|e| russet_device::error::invalid_argument(format!("uuid: {e}")))?;
+            println!("stdio socket: first 16 bytes are the UUID (version nibble {:x})", id[6] >> 4);
+            let mut cd = russet_device::coredevice::CoreDeviceClient::new(
+                h.connect_rsd(russet_device::coredevice::service::APP_SERVICE).await?,
+            )
+            .await?;
+            let input = russet_device::coredevice::LaunchInput {
+                bundle_id: bundle,
+                start_suspended: true,
+                terminate_existing: true,
+                stdio: Some(uuid::Uuid::from_bytes(id)),
+                env: [("DYLD_PRINT_LIBRARIES".to_owned(), "1".to_owned())].into(),
+                ..Default::default()
+            };
+            let out = cd
+                .invoke(russet_device::coredevice::feature::LAUNCH_APPLICATION, input.to_xpc())
+                .await
+                .map_err(|e| e.into_error("launch"))?;
+            let launched = russet_device::coredevice::parse_launch(&out)?;
+            let mut buf = vec![0u8; 4096];
+            let quiet = tokio::time::timeout(Duration::from_millis(700), stdio.read(&mut buf)).await.is_err();
+            println!("while suspended: no stdio bytes for 700 ms = {quiet}");
+            h.signal(launched.pid, 19).await?;
+            let n = tokio::time::timeout(Duration::from_secs(3), stdio.read(&mut buf))
+                .await
+                .map_err(|_| russet_device::error::invalid_argument("no output"))?
+                .map_err(|e| russet_device::error::invalid_argument(format!("read: {e}")))?;
+            let chunk = &buf[..n];
+            let crlf = chunk.windows(2).filter(|w| w == b"\r\n").count();
+            let bare_lf =
+                chunk.iter().enumerate().filter(|(i, b)| **b == b'\n' && (*i == 0 || chunk[*i - 1] != b'\r')).count();
+            println!("first read after SIGCONT: {n} bytes, {crlf} CRLF line ends, {bare_lf} bare LF");
+            h.signal(launched.pid, 9).await?;
+            let t = Instant::now();
+            loop {
+                match tokio::time::timeout(Duration::from_secs(3), stdio.read(&mut buf)).await {
+                    Ok(Ok(0)) => {
+                        println!("stdio EOF {:?} after SIGKILL", t.elapsed());
+                        break;
+                    }
+                    Ok(Ok(_)) => continue,
+                    Ok(Err(e)) => {
+                        println!("stdio error {:?} after SIGKILL: {:?}", t.elapsed(), e.kind());
+                        break;
+                    }
+                    Err(_) => {
+                        println!("stdio still open 3 s after SIGKILL");
+                        break;
+                    }
+                }
+            }
+        }
         "debug-session" => {
             // The M1 device half without pymobiledevice3: a debugproxy forward plus a suspended CoreDevice launch,
             // both kept open (the launch channel too) until `--secs` pass or Ctrl-C; LLDB attaches meanwhile.
