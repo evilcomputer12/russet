@@ -212,7 +212,7 @@ pub struct Toolchains {
     host: HostEnv,
     raw: Arc<dyn Exec>,
     exec: Arc<CachedExec>,
-    min_free_space: u64,
+    min_free_space: std::sync::atomic::AtomicU64,
     offline: bool,
     tx: broadcast::Sender<Vec<Component>>,
     install_lock: tokio::sync::Mutex<()>,
@@ -261,7 +261,7 @@ impl Toolchains {
             host: HostEnv::from_env(),
             raw,
             exec,
-            min_free_space: 5 << 30,
+            min_free_space: std::sync::atomic::AtomicU64::new(5 << 30),
             offline: std::env::var_os("RUSSET_OFFLINE").is_some_and(|v| v == "1"),
             tx,
             install_lock: tokio::sync::Mutex::new(()),
@@ -287,9 +287,14 @@ impl Toolchains {
     }
 
     /// The free space installs must leave (`storage.min-free-space`, default 5 GiB).
-    pub fn with_min_free_space(mut self, bytes: u64) -> Self {
-        self.min_free_space = bytes;
+    pub fn with_min_free_space(self, bytes: u64) -> Self {
+        self.set_min_free_space(bytes);
         self
+    }
+
+    /// Updates the reserve from `storage.min-free-space` (the daemon reads it before each install).
+    pub fn set_min_free_space(&self, bytes: u64) {
+        self.min_free_space.store(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Refuses non-loopback downloads (`RUSSET_OFFLINE=1`).
@@ -603,7 +608,7 @@ impl Toolchains {
         let job = install::InstallJob {
             data_dir: &self.dirs.data,
             cache_dir: &self.dirs.cache,
-            min_free_space: self.min_free_space,
+            min_free_space: self.min_free_space.load(std::sync::atomic::Ordering::Relaxed),
             offline: self.offline,
             progress: p,
             cancel,

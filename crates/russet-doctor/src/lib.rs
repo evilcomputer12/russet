@@ -21,11 +21,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
 use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, Result, codes};
 
 pub mod host;
+
+/// The `async_trait` attribute, re-exported so that crates implementing [`Check`] need no direct dependency on
+/// async-trait (`#[russet_doctor::async_trait]`).
+pub use async_trait::async_trait;
 
 /// A check's outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
