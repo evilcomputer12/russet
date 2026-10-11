@@ -60,7 +60,7 @@ pub use async_trait::async_trait;
 use crate::broker::{Broker, BrokerEvent, EndpointSpec};
 use crate::launch::{InstalledAppInfo, LaunchChannel, LaunchSpec, LaunchStrategy, Launched};
 use crate::lldb::{AttachPlan, InitSettings, LldbPlatform};
-use crate::session::{Control, SessionInit};
+use crate::session::{Control, ProcessRef, SessionInit};
 
 /// A byte stream to debugserver or to LLDB.
 pub trait DebugStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
@@ -457,7 +457,8 @@ impl DebugService {
         spec.strategy = r.launch;
         let mut launched = self.dev.launch(&udid, &spec).await?;
         h.set_pid(launched.pid);
-        h.set_control(Control::Process { dev: self.devices(), udid: udid.clone(), pid: launched.pid }).await;
+        h.set_control(Control::Process(ProcessRef { dev: self.devices(), udid: udid.clone(), pid: launched.pid }))
+            .await;
         let stdio_done = self.pump_output(h, &udid, &mut launched, r.process_name.clone()).await;
         if let Some(channel) = launched.channel.take() {
             h.keep_alive(Box::new(channel));
@@ -531,7 +532,8 @@ impl DebugService {
                 let endpoint = handle.endpoint().clone();
                 let url = handle.lldb_url();
                 follow_broker(h.clone(), handle.subscribe(), self.devices(), udid.clone(), pid);
-                h.set_control(Control::Broker(handle)).await;
+                let process = ProcessRef { dev: self.devices(), udid: udid.clone(), pid };
+                h.set_control(Control::Broker { handle, process }).await;
                 (endpoint, url)
             }
             AttachMode::LegacyAsync => {
@@ -549,7 +551,7 @@ impl DebugService {
                     h.keep_alive(Box::new(channel));
                 }
                 h.keep_alive(Box::new(fwd));
-                h.set_control(Control::Process { dev: self.devices(), udid: udid.clone(), pid }).await;
+                h.set_control(Control::Process(ProcessRef { dev: self.devices(), udid: udid.clone(), pid })).await;
                 (endpoint, url)
             }
         };
@@ -768,9 +770,11 @@ fn follow_broker(
                 BrokerEvent::Resumed => h.set_state(SessionState::Running),
                 BrokerEvent::Stopped { .. } => h.set_state(SessionState::Stopped),
                 BrokerEvent::DebuggerDetached | BrokerEvent::DebuggerLost(broker::LostPolicy::Detach) => {
+                    // Switch the control first: a stop that sees `debugger: detached` must reach the process.
+                    h.set_control(Control::Process(ProcessRef { dev: Arc::clone(&dev), udid: udid.clone(), pid }))
+                        .await;
                     h.set_debugger(DebuggerState::Detached);
                     h.set_state(SessionState::Running);
-                    h.set_control(Control::Process { dev: Arc::clone(&dev), udid: udid.clone(), pid }).await;
                     watch_exit(h.clone(), h.take_exit_watch(), None);
                     return;
                 }

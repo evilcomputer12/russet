@@ -5,6 +5,8 @@
 //! and binds the local arm64 executable to the "device" image by UUID, with neither `SetPlatformFileSpec` nor
 //! Python, using exactly the generated attach commands.
 
+// Unix sockets, /proc and lldb-server: these harnesses run on Linux (and macOS) hosts.
+#![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
 mod common;

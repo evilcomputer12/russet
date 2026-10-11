@@ -7,6 +7,8 @@
 //! without it the probe is killed and the session ends `exited`. Also: `run` without a debugger, the merged
 //! output, owned leases ending with their owner, and the `legacy-async` fallback.
 
+// Unix sockets, /proc and lldb-server: these harnesses run on Linux (and macOS) hosts.
+#![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
 mod common;

@@ -32,14 +32,27 @@ pub const KEEP_SESSIONS: usize = 20;
 /// SIGKILL.
 const SIGKILL: i32 = 9;
 
+/// A launched process, reachable through the device plane.
+pub(crate) struct ProcessRef {
+    pub dev: Arc<dyn DeviceServices>,
+    pub udid: Udid,
+    pub pid: u32,
+}
+
+impl ProcessRef {
+    async fn kill(&self) -> Result<()> {
+        self.dev.signal(&self.udid, self.pid, SIGKILL).await
+    }
+}
+
 /// What [`SessionHandle::terminate`] acts on.
 pub(crate) enum Control {
     /// Nothing to stop (not launched yet, or already ended).
     None,
-    /// The broker owns the debugserver connection.
-    Broker(BrokerHandle),
+    /// The broker owns the debugserver connection; `process` is for after a detach.
+    Broker { handle: BrokerHandle, process: ProcessRef },
     /// A process without a debugger: stopped with a signal.
-    Process { dev: Arc<dyn DeviceServices>, udid: Udid, pid: u32 },
+    Process(ProcessRef),
 }
 
 pub(crate) struct Ended {
@@ -256,18 +269,23 @@ impl SessionHandle {
         }
         let control = std::mem::replace(&mut *self.inner.control.lock().await, Control::None);
         match control {
-            Control::Broker(b) => {
-                b.terminate(how).await?;
-                match (how, b.state()) {
+            Control::Broker { handle, process } => {
+                handle.terminate(how).await?;
+                match (how, handle.state()) {
                     (_, BrokerState::Exited { code, signal }) => self.end_exited(code, signal),
                     (TerminateMode::Detach, _) => self.end_untracked(),
                     (TerminateMode::Kill, BrokerState::Lost) => self.end(SessionState::Lost, None),
+                    // The debugger had detached already: the app runs on its own, so the device kills it.
+                    (TerminateMode::Kill, BrokerState::Detached) => {
+                        process.kill().await?;
+                        self.end_exited(None, Some(SIGKILL));
+                    }
                     (TerminateMode::Kill, _) => self.end_exited(None, Some(SIGKILL)),
                 }
             }
-            Control::Process { dev, udid, pid } => match how {
+            Control::Process(process) => match how {
                 TerminateMode::Kill => {
-                    dev.signal(&udid, pid, SIGKILL).await?;
+                    process.kill().await?;
                     self.end_exited(None, Some(SIGKILL));
                 }
                 TerminateMode::Detach => self.end_untracked(),

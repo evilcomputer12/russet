@@ -426,6 +426,8 @@ async fn wave_1_refuses_provisioning_mutations_and_bad_projects() {
     assert_eq!(f.builder.builds.load(Ordering::SeqCst), 0);
 }
 
+// The broker endpoint is a Unix socket here; Windows uses loopback TCP.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn debug_prepare_launches_suspended_and_pre_attaches_the_broker() {
     let f = fixture(0).await;

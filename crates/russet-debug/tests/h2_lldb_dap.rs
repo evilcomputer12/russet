@@ -5,6 +5,8 @@
 //! (`initialize` → `attach` → `initialized` → `configurationDone`), sees the process, and ends it with
 //! `disconnect {terminateDebuggee}`. The generated command lists contain no Python (H7a).
 
+// Unix sockets, /proc and lldb-server: these harnesses run on Linux (and macOS) hosts.
+#![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
 mod common;

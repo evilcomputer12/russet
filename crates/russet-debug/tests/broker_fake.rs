@@ -5,6 +5,8 @@
 //! the `QSetDetachOnError` ownership, `D` and `k`, the lost-debugger policy, the handoff timeout and
 //! `terminate` without a debugger.
 
+// Unix sockets, /proc and lldb-server: these harnesses run on Linux (and macOS) hosts.
+#![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
 mod common;

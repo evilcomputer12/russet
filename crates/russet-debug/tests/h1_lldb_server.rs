@@ -6,6 +6,8 @@
 //! a Unix socket and over TCP. Skipped (with the reason) when the host lacks lldb-server or a C compiler, unless
 //! `RUSSET_TEST_REQUIRE_LLDB=1`.
 
+// Unix sockets, /proc and lldb-server: these harnesses run on Linux (and macOS) hosts.
+#![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
 mod common;

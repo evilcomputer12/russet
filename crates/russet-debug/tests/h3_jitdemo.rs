@@ -7,6 +7,8 @@
 //! resumes; there are no step-over packets. The demo checks that every page was touched and prints
 //! `RESULT PASS`. The product servicer (arming, statistics, crash capture) is W18's (RD-10).
 
+// Unix sockets, /proc and lldb-server: these harnesses run on Linux (and macOS) hosts.
+#![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
 mod common;

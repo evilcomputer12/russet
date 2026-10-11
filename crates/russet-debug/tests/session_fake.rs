@@ -5,6 +5,8 @@
 //! console as the exit when there is no exit notice, a debug session against the fake iOS debugserver from
 //! `debug.prepare` to LLDB's `D`, and a failing attach that leaves no stopped app behind.
 
+// Unix sockets, /proc and lldb-server: these harnesses run on Linux (and macOS) hosts.
+#![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
 mod common;
