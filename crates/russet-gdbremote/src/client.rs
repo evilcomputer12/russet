@@ -409,13 +409,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> GdbClient<S> {
             return expect_stopped(self.stop_reason().await?);
         }
         self.write_raw(&[INTERRUPT]).await?;
-        loop {
-            match tokio::time::timeout(self.timeout, self.wait_stop()).await {
-                Err(_) => return Err(GdbError::Timeout("stop after interrupt")),
-                Ok(Ok(StopEvent::Output(o))) => self.output.push_back(o),
-                Ok(r) => return expect_stopped(r?),
+        // Output that arrives first is kept for the next wait_stop; it must not be fed back into this loop.
+        let deadline = Instant::now() + self.timeout;
+        let mut held = Vec::new();
+        let result = loop {
+            match tokio::time::timeout_at(deadline, self.wait_stop()).await {
+                Err(_) => break Err(GdbError::Timeout("stop after interrupt")),
+                Ok(Ok(StopEvent::Output(o))) => held.push(o),
+                Ok(r) => break r.and_then(expect_stopped),
             }
-        }
+        };
+        self.output.extend(held);
+        result
     }
 
     /// Reads `len` bytes at `addr` (`m`); a read that runs into unmapped memory returns the readable prefix.
@@ -610,7 +615,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> GdbClient<S> {
         }
         self.send_packet(b"k").await?;
         match tokio::time::timeout(Duration::from_secs(5), self.read_packet(None)).await {
-            Ok(Ok(p)) => Ok(stop::parse_stop(&p).ok()),
+            Ok(Ok(p)) => Ok(stop::parse_stop_raw(&p).ok()),
             Ok(Err(GdbError::Disconnected)) | Err(_) => Ok(None),
             Ok(Err(e)) => Err(e),
         }
@@ -1005,6 +1010,24 @@ mod tests {
         let stop = c.interrupt().await.unwrap();
         assert_eq!(stop.signal, 0x11);
         assert_eq!(c.kill().await.unwrap(), Some(StopEvent::Terminated { signal: 9 }));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_interrupt_keeps_output_that_arrives_before_the_stop() {
+        let (client_io, server_io) = duplex(1 << 16);
+        let mut out_then_stop = pkt(b"O6869");
+        out_then_stop.extend_from_slice(&pkt(b"O7468657265"));
+        out_then_stop.extend_from_slice(&pkt(b"T11thread:1;reason:signal;"));
+        let script = handshake_script(vec![(&b"vCont;c"[..], Vec::new()), (&b"\x03"[..], out_then_stop)]);
+        let server = tokio::spawn(serve(server_io, script));
+        let (mut c, _) = GdbClient::handshake(client_io, HandshakeOptions::default()).await.unwrap();
+        c.resume(ResumeAction::ContinueAll).await.unwrap();
+        let stop = tokio::time::timeout(Duration::from_secs(5), c.interrupt()).await.unwrap().unwrap();
+        assert_eq!(stop.signal, 0x11);
+        assert_eq!(c.wait_stop().await.unwrap(), StopEvent::Output(b"hi".to_vec()));
+        assert_eq!(c.wait_stop().await.unwrap(), StopEvent::Output(b"there".to_vec()));
+        drop(c);
         server.await.unwrap();
     }
 

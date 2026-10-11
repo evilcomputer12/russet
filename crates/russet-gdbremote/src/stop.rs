@@ -109,10 +109,10 @@ pub fn is_stop_packet(payload: &[u8]) -> bool {
     }
 }
 
-/// Parses a stop reply. `payload` may still be escaped or run-length encoded.
+/// Parses a decoded stop reply (escapes and run-length encoding already removed: decoding twice would turn a
+/// literal `*` or `}` in a thread name into a repeat or an escape).
 pub fn parse_stop(payload: &[u8]) -> Result<StopEvent, GdbError> {
-    let decoded = decode_payload(payload);
-    let p = decoded.as_slice();
+    let p = payload;
     match p.first() {
         Some(b'T' | b'S') => {
             let signal =
@@ -145,6 +145,11 @@ pub fn parse_stop(payload: &[u8]) -> Result<StopEvent, GdbError> {
         None => Err(GdbError::Unsupported("empty reply where a stop reply was expected")),
         _ => Err(GdbError::Protocol(format!("not a stop reply: {:?}", String::from_utf8_lossy(p)))),
     }
+}
+
+/// Parses a stop reply as it came off the wire (still escaped, maybe run-length encoded).
+pub fn parse_stop_raw(payload: &[u8]) -> Result<StopEvent, GdbError> {
+    parse_stop(&decode_payload(payload))
 }
 
 /// `W` and `X` carry the status in hex, optionally followed by `;process:…` or `;description:…`.
@@ -296,9 +301,15 @@ reason:breakpoint;qaddr:1fa0a4e0;metype:6;mecount:2;medata:1;medata:0;";
     }
 
     #[test]
-    fn escaped_payloads_are_decoded_first() {
+    fn raw_payloads_are_decoded_once() {
         // A register value with run-length encoding: "0* " = "0000".
-        let r = stopped(b"T05thread:1;00:0* 0* 0* 0* ;");
-        assert_eq!(r.reg(0), Some(0));
+        match parse_stop_raw(b"T05thread:1;00:0* 0* 0* 0* ;").unwrap() {
+            StopEvent::Stopped(r) => assert_eq!(r.reg(0), Some(0)),
+            other => panic!("{other:?}"),
+        }
+        // A decoded name with a literal '*' and '}' stays as it is.
+        let r = stopped(b"T05thread:1;name:pool*2};00:0100000000000000;");
+        assert_eq!(r.name.as_deref(), Some("pool*2}"));
+        assert_eq!(r.reg(0), Some(1));
     }
 }

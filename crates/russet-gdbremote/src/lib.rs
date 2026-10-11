@@ -20,7 +20,7 @@ pub use client::{
     ClientStats, GdbClient, HandshakeOptions, ImageInfo, MemoryRegion, ProcessInfo, RawSession, RegisterInfo,
     ResumeAction, SegmentInfo, ServerInfo, SharedCacheInfo, check_ok, memory_write_packet,
 };
-pub use stop::{MachException, StopEvent, StopReply, parse_stop};
+pub use stop::{MachException, StopEvent, StopReply, parse_stop, parse_stop_raw};
 
 /// Errors of the gdb-remote client.
 #[derive(Debug, thiserror::Error)]
