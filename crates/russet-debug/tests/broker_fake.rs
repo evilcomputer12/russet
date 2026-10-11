@@ -217,3 +217,29 @@ async fn attach_failures_have_debug_codes() {
     assert_eq!(e.code(), codes::debug::DEBUGSERVER_UNAVAILABLE);
     let _ = LostOutcome::Killed;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_broker_removes_a_departed_debuggers_breakpoints_before_it_detaches() {
+    for policy in [LostPolicy::Detach, LostPolicy::Keep] {
+        let fake = fake(vec![ResumeStep::Run]);
+        let mut b =
+            Broker::connect(upstream(&fake).await, BrokerOptions { on_debugger_lost: policy, ..opts() }).await.unwrap();
+        b.attach(PID).await.unwrap();
+        let handle = b.serve(EndpointSpec::Tcp { bind: "127.0.0.1:0".parse().unwrap() }).await.unwrap();
+        {
+            let mut lldb = debugger(handle.endpoint()).await;
+            lldb.set_breakpoint(0x1_0000_1004, 4).await.unwrap();
+            lldb.request_ok(b"Z2,100008000,8").await.unwrap();
+            lldb.resume(russet_gdbremote::ResumeAction::ContinueAll).await.unwrap();
+            assert!(fake.wait_for(Duration::from_secs(5), |r| r.saw("vCont;c")));
+        }
+        let state = handle.wait_for(|s| s == BrokerState::Ready).await;
+        let report = fake.report();
+        assert!(report.breakpoints.is_empty(), "{policy:?}: {report:?}");
+        assert!(report.saw("z2,100008000,8"), "{policy:?}: watchpoints too");
+        match policy {
+            LostPolicy::Detach => assert!(report.detached && state == BrokerState::Detached, "{report:?}"),
+            _ => assert_eq!(state, BrokerState::Ready),
+        }
+    }
+}

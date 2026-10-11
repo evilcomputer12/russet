@@ -367,9 +367,10 @@ impl InterposeHooks for RelayHooks {
         if pkt.starts_with(b"QSetDetachOnError") {
             return DownstreamAction::Reply(b"OK".to_vec());
         }
-        if pkt.starts_with(b"Z0,") || pkt.starts_with(b"Z1,") {
+        // Breakpoints and watchpoints (`Z0`…`Z4`): the broker removes what a departed debugger left behind.
+        if is_point(pkt, b'Z') {
             self.breakpoints.insert(pkt[1..].to_vec());
-        } else if pkt.starts_with(b"z0,") || pkt.starts_with(b"z1,") {
+        } else if is_point(pkt, b'z') {
             self.breakpoints.remove(&pkt[1..]);
         } else if russet_gdbremote::interpose::is_resume(pkt)
             && let Some(tx) = &self.events
@@ -455,7 +456,7 @@ async fn serve_task(
                     // Every handle is gone: keep the default policy.
                     None => (TerminateMode::Kill, None),
                 };
-                let s = finish(client, mode, false).await;
+                let s = finish(client, mode, false, &[]).await;
                 announce(&emit, s);
                 set(s);
                 if let Some(d) = done { let _ = d.send(()); }
@@ -464,7 +465,7 @@ async fn serve_task(
             () = handoff => {
                 emit(BrokerEvent::HandoffTimeout);
                 tracing::warn!(timeout = ?opts.handoff_timeout, "no debugger connected to the broker in time");
-                let _ = finish(client, TerminateMode::Kill, false).await;
+                let _ = finish(client, TerminateMode::Kill, false, &[]).await;
                 set(BrokerState::HandoffTimedOut);
                 return;
             }
@@ -490,6 +491,7 @@ async fn serve_task(
             }
         };
         let resume_pending = out.resume_pending;
+        let points: Vec<Vec<u8>> = hooks.breakpoints.iter().cloned().collect();
         client = GdbClient::from_parts(out.upstream);
         drop(out.downstream);
         // The debugger's `k` kills even when debugserver closed before its reply arrived.
@@ -521,7 +523,7 @@ async fn serve_task(
                     Some(Command::Terminate { mode, done }) => (mode, Some(done)),
                     None => (TerminateMode::Kill, None),
                 };
-                let s = finish(client, mode, resume_pending).await;
+                let s = finish(client, mode, resume_pending, &points).await;
                 announce(&emit, s);
                 set(s);
                 if let Some(d) = done {
@@ -543,15 +545,32 @@ async fn serve_task(
                             set(BrokerState::Lost);
                             return;
                         }
+                        remove_points(&mut client, &points).await;
                         set(BrokerState::Ready);
                         continue;
                     }
                 };
-                let s = finish(client, mode, resume_pending).await;
+                let s = finish(client, mode, resume_pending, &points).await;
                 announce(&emit, s);
                 set(s);
                 return;
             }
+        }
+    }
+}
+
+/// `Z0,`…`Z4,` (or `z…`): a breakpoint or watchpoint packet.
+fn is_point(pkt: &[u8], lead: u8) -> bool {
+    pkt.len() > 2 && pkt[0] == lead && (b'0'..=b'4').contains(&pkt[1]) && pkt[2] == b','
+}
+
+/// Removes the breakpoints and watchpoints a departed debugger left in debugserver.
+async fn remove_points(client: &mut GdbClient<BoxStream>, points: &[Vec<u8>]) {
+    for p in points {
+        let mut packet = vec![b'z'];
+        packet.extend_from_slice(p);
+        if let Err(e) = client.request(&packet).await {
+            tracing::warn!(error = %e, "removing a debugger's breakpoint failed");
         }
     }
 }
@@ -565,8 +584,14 @@ fn announce(emit: &impl Fn(BrokerEvent), s: BrokerState) {
     }
 }
 
-/// Kills or detaches through the upstream connection. A stub that is running must stop first.
-async fn finish(mut client: GdbClient<BoxStream>, mode: TerminateMode, running: bool) -> BrokerState {
+/// Kills or detaches through the upstream connection. A stub that is running must stop first; before a detach the
+/// debugger's breakpoints come out, or the app would trap on them later.
+async fn finish(
+    mut client: GdbClient<BoxStream>,
+    mode: TerminateMode,
+    running: bool,
+    points: &[Vec<u8>],
+) -> BrokerState {
     match mode {
         TerminateMode::Kill => {
             if running {
@@ -592,6 +617,7 @@ async fn finish(mut client: GdbClient<BoxStream>, mode: TerminateMode, running: 
                     return BrokerState::Lost;
                 }
             }
+            remove_points(&mut client, points).await;
             match client.detach().await {
                 Ok(()) => BrokerState::Detached,
                 Err(GdbError::Disconnected) | Err(_) => BrokerState::Lost,
