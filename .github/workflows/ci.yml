@@ -1,0 +1,165 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# CI (QA §4.1–§4.3; ARCHITECTURE [D 77]; PLAN W8, QA-03).
+#
+# Private phase (GitHub Free with no payment method: 2,000 included minutes, consumed at list price, and jobs
+# stop at the quota, so CI never costs money):
+#   - guard and rust-linux run on pushes to main and on non-draft pull requests labelled `ci`;
+#   - rust-windows runs weekly and on dispatch;
+#   - no macOS, no merge_group (merge queues need an organization-owned repository).
+# Public phase (repository variable RUSSET_PUBLIC = 'true'): every non-draft pull request and every push to main
+# runs all three jobs, and the DCO check joins the guard job.
+# `cargo xtask ci-budget` measures the month's use and warns at 80 % (QA §4.8).
+#
+# Actions are pinned to full commit SHAs (Dependabot keeps them current); `permissions: {}` at the top, raised
+# per job; checkout never persists credentials; untrusted values reach scripts only through `env`. zizmor audits
+# this file in the guard job.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  schedule:
+    - cron: "17 3 * * 1" # weekly (Monday 03:17 UTC): the Windows job in the private phase
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSSET_OFFLINE: "1"
+  # The pinned toolchain (ARCHITECTURE §16.7 [D 70]); rust-toolchain.toml names `stable` for local use.
+  RUSTUP_TOOLCHAIN: "1.99.0"
+
+jobs:
+  guard:
+    name: guard
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+       (vars.RUSSET_PUBLIC == 'true' || contains(github.event.pull_request.labels.*.name, 'ci')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # commit checks and gitleaks read the history
+      - name: Install the Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: xtask
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: typos@1.51.1,zizmor@1.30.1
+      - name: Install reuse and gitleaks
+        run: |
+          set -euo pipefail
+          pipx install reuse==6.2.0
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -sSfL -o "$archive" \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/bin" gitleaks
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Guards (apple-files, secrets, reuse, typos, public-terms, zizmor, commits)
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) base="origin/$BASE_REF" ;;
+            push) if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then base="$BEFORE"; else base=HEAD; fi ;;
+            *) base=HEAD ;;
+          esac
+          cargo xtask guard all --require-tools --base "$base"
+      - name: DCO (public phase)
+        if: github.event_name == 'pull_request' && vars.RUSSET_PUBLIC == 'true'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: cargo xtask guard dco --base "origin/$BASE_REF"
+
+  rust-linux:
+    name: rust-linux
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+       (vars.RUSSET_PUBLIC == 'true' || contains(github.event.pull_request.labels.*.name, 'ci')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # check-paths diffs a ws/… branch against origin/main
+      - name: Install the Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt,clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-nextest@0.9.148,cargo-deny@0.20.2
+      - name: Install the Node interop harness (vscode-jsonrpc 9.0.3)
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix crates/russet-testkit/node/interop
+      - name: cargo xtask ci --profile pr
+        env:
+          RUSSET_REQUIRE_NODE_HARNESS: "1"
+        # The guard job runs the guards with every tool installed.
+        run: cargo xtask ci --profile pr --require-tools --skip guard
+      - name: Upload the test report
+        if: always()
+        uses: ./.github/actions/upload-safe
+        with:
+          name: junit-linux
+          path: target/nextest/ci/junit.xml
+
+  rust-windows:
+    name: rust-windows
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (vars.RUSSET_PUBLIC == 'true' &&
+       (github.event_name == 'push' || (github.event_name == 'pull_request' && !github.event.pull_request.draft)))
+    runs-on: windows-2025 # Rust jobs; Swift for Windows and gen_snapshot use windows-2022 (QA §4.2)
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The image ships Rust 1.98.1; the pinned 1.99.0 toolchain is cached (QA §4.2).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains/1.99.0-x86_64-pc-windows-msvc
+          key: rustup-1.99.0-x86_64-pc-windows-msvc-minimal
+      - name: Install the Rust toolchain
+        shell: bash
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: windows
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: cargo xtask ci --profile windows
+        run: cargo xtask ci --profile windows --require-tools

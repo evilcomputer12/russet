@@ -11,3 +11,7 @@ fail-fast = false
 [profile.ci]
 retries = 0
 failure-output = "immediate-final"
+
+[profile.ci.junit]
+# target/nextest/ci/junit.xml, uploaded by ci.yml and nightly.yml through the upload-safe action (W8).
+path = "junit.xml"

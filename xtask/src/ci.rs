@@ -355,16 +355,23 @@ fn run_step(root: &Path, s: &Step, args: &Args, missing: &mut BTreeSet<String>) 
             Err(e) => Outcome::Failed(format!("{e:#}")),
         },
         Action::CheckPaths => {
-            let branch = git_stdout(root, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
-            if crate::paths::normalize_ws(branch.trim()).is_err() || !branch.trim().starts_with("ws/") {
-                return Outcome::Skipped(format!("not on a ws/… branch ({})", branch.trim()));
-            }
+            // In a pull request's CI run HEAD is detached; GitHub names the head branch.
+            let branch = std::env::var("GITHUB_HEAD_REF")
+                .ok()
+                .filter(|b| !b.is_empty())
+                .or_else(|| git_stdout(root, &["rev-parse", "--abbrev-ref", "HEAD"]))
+                .unwrap_or_default();
+            let branch = branch.trim();
+            let ws = match crate::paths::normalize_ws(branch) {
+                Ok(ws) if branch.starts_with("ws/") => ws,
+                _ => return Outcome::Skipped(format!("not on a ws/… branch ({branch})")),
+            };
             let base = if git_ok(root, &["rev-parse", "--verify", "--quiet", &args.base]) {
                 args.base.clone()
             } else {
                 format!("origin/{}", args.base)
             };
-            let a = crate::paths::Args { ws: None, base, paths: Vec::new(), strict: false };
+            let a = crate::paths::Args { ws: Some(ws), base, paths: Vec::new(), strict: false };
             match crate::paths::run(a) {
                 Ok(()) => Outcome::Ok("warnings only".into()),
                 Err(e) => Outcome::Failed(format!("{e:#}")),

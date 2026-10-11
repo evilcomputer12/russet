@@ -1445,6 +1445,22 @@ mod tests {
         }
     }
 
+    /// The committed upload allowlist admits apple-release.yml's RussetProbe Mach-O outputs and nothing else.
+    #[test]
+    fn the_committed_upload_allowlist_names_only_russetprobe() {
+        let file = crate::workstreams::repo_root().join(".github/upload-safe.toml");
+        let release = UploadAllow::load(&file, "apple-release.yml", "release").expect("parse");
+        assert!(release.admits("RussetProbe.app/RussetProbe", &["Mach-O magic"]));
+        assert!(release.admits("out/RussetProbe.app/RussetProbe", &["fat Mach-O magic"]));
+        assert!(release.admits("RussetProbe.app.dSYM/Contents/Resources/DWARF/RussetProbe", &["Mach-O magic"]));
+        assert!(!release.admits("RussetProbe.app/Frameworks/Foo.framework/Foo", &["Mach-O magic"]));
+        assert!(!release.admits("RussetProbe.app/RussetProbe", &["Mach-O magic", "Apple copyright header"]));
+        for (workflow, job) in [("ci.yml", "release"), ("apple-release.yml", "build-other"), ("nightly.yml", "full")] {
+            let other = UploadAllow::load(&file, workflow, job).expect("parse");
+            assert!(!other.admits("RussetProbe.app/RussetProbe", &["Mach-O magic"]), "{workflow}/{job}");
+        }
+    }
+
     /// The clean tree passes the built-in guards (QA-02 acceptance: "the clean tree passes").
     #[test]
     fn the_repository_passes_the_built_in_guards() {
