@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Build hygiene (PLAN §0 rule 7): CARGO_TARGET_DIR (slot a or b), CARGO_BUILD_JOBS=6 and CARGO_INCREMENTAL=0
+# come from the environment (.envrc.example); `[profile.dev]` in Cargo.toml sets line-tables-only debug info
+# and disables incremental builds. Rust 1.99 links x86_64-unknown-linux-gnu with rust-lld by default, so no
+# linker override is needed here.
+
+[alias]
+xtask = "run --quiet --package xtask --"
