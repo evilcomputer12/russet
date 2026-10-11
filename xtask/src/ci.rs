@@ -61,6 +61,9 @@ pub struct Args {
     /// The branch --quick and check-paths compare against
     #[arg(long, default_value = "main")]
     pub base: String,
+    /// The base of the guard's commit check (default: the merge base with main); CI passes the pushed range
+    #[arg(long, value_name = "REF")]
+    pub guard_base: Option<String>,
     /// Stop at the first failing step
     #[arg(long)]
     pub fail_fast: bool,
@@ -337,7 +340,11 @@ fn run_step(root: &Path, s: &Step, args: &Args, missing: &mut BTreeSet<String>) 
             status_outcome(cargo_status(root, &full, &s.env))
         }
         Action::Guard => {
-            let opts = crate::guard::Options { require_tools: args.require_tools, ..crate::guard::Options::default() };
+            let opts = crate::guard::Options {
+                require_tools: args.require_tools,
+                base: args.guard_base.clone(),
+                ..crate::guard::Options::default()
+            };
             match crate::guard::run_checks(root, &[crate::guard::Check::All], &opts) {
                 Ok(summary) => {
                     missing.extend(summary.missing_tools.iter().cloned());

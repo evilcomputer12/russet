@@ -12,7 +12,7 @@ PLAN W8.
 
 | File | Runs on | Jobs |
 |---|---|---|
-| `.github/workflows/ci.yml` | **private phase:** pushes to `main`; non-draft pull requests labelled `ci`; weekly (Monday 03:17 UTC) and on dispatch for Windows. **Public phase** (repository variable `RUSSET_PUBLIC` = `true`): every non-draft pull request and every push to `main` | `guard` (ubuntu-24.04): `cargo xtask guard all --require-tools`, plus `guard dco` on public-phase pull requests. `rust-linux` (ubuntu-24.04): `cargo xtask ci --profile pr --require-tools --skip guard`, JUnit report through `upload-safe`. `rust-windows` (windows-2025): `cargo xtask ci --profile windows` |
+| `.github/workflows/ci.yml` | **private phase:** pushes to `main`; non-draft pull requests labelled `ci`; weekly (Monday 03:17 UTC) and on dispatch for Windows. **Public phase** (repository variable `RUSSET_PUBLIC` = `true`): every non-draft pull request and every push to `main` | `rust-linux` (ubuntu-24.04): `cargo xtask ci --profile pr --require-tools` (fmt, clippy, nextest, deny, every guard, check-layers, check-paths, schema drift), with the commit check over the pull request or the push; `guard dco` on public-phase pull requests; the JUnit report through `upload-safe`. `rust-windows` (windows-2025): `cargo xtask ci --profile windows` |
 | `.github/workflows/nightly.yml` | weekly (Sunday 02:41 UTC) in the private phase; nightly once public; dispatch | `cargo xtask ci --profile full` (every feature, doc tests, rustdoc `-D warnings`, `cargo deny check` with advisories) |
 | `.github/actions/upload-safe` | every artifact upload | `cargo xtask guard apple-files secrets --artifacts <path>` with `.github/upload-safe.toml`, then `actions/upload-artifact` |
 | `.github/dependabot.yml` | weekly | GitHub Actions (SHA pins), cargo (minor and patch, exact pins excluded), the Node harness; a 7-day cooldown |
@@ -20,8 +20,9 @@ PLAN W8.
 Rules every workflow follows (QA §4.1): `permissions: {}` at the top and `contents: read` per job;
 `persist-credentials: false`; third-party actions pinned to full commit SHAs with the version in a comment; no
 `pull_request_target`; untrusted values reach scripts only through `env`; no `*-latest` labels, no `-large`
-runners, no hosted `ubuntu-22.04`, no macOS on pushes or pull requests. `zizmor` (medium severity and above) runs in
-the guard job.
+runners, no hosted `ubuntu-22.04`, no macOS on pushes or pull requests. `zizmor` (medium severity and above) runs as
+one of the guards. The guards share `rust-linux` instead of having a job of their own: every job is billed rounded
+up to whole minutes and pays its own setup.
 
 Not yet present, by design: `oracle.yml`, `apple-smoke.yml` (W16), `apple-release.yml` (W23), `release.yml`,
 `publish.yml` (W26), `ide.yml` (W25), the `extension` job (W14) and the lab (local only, `cargo xtask lab`, W9).
