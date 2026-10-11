@@ -66,6 +66,11 @@ pub struct LiveConnector {
     generation: Arc<AtomicU64>,
     /// CoreDeviceProxy opens that were refused and retried ([`OPEN_BACKOFF`]); the HIL budget test asserts 0.
     open_retries: Arc<AtomicU64>,
+    /// Tunnel opens that waited for the device's pace ([`TUNNEL_MIN_INTERVAL`]).
+    open_waits: Arc<AtomicU64>,
+    /// When each device's last tunnel open started; kept across tunnel slots (a closed tunnel still lingers on the
+    /// device).
+    last_open: Arc<Mutex<HashMap<Udid, tokio::time::Instant>>>,
 }
 
 #[derive(Debug, Default)]
@@ -73,6 +78,18 @@ struct TunnelSlot {
     tunnel: tokio::sync::Mutex<Option<Tunnel>>,
     status: Mutex<TunnelStatusRecord>,
     last_used: Mutex<Option<Instant>>,
+}
+
+/// The device keeps a closed CoreDeviceProxy tunnel for about 10 s and refuses new ones (`early eof`) while about two
+/// dozen linger (iOS 27.0, measured 2026-10-11: back-to-back open/close cycles of 280 ms were refused at every 24th
+/// open and recovered after 2.5–5 s; cycles of 430 ms or longer never were, whatever the close grace). Russet starts
+/// at most one tunnel per device in this interval, which keeps fewer than 20 lingering, so it does not run into the
+/// refusal; [`OPEN_BACKOFF`] stays as the safety net.
+const TUNNEL_MIN_INTERVAL: Duration = Duration::from_millis(500);
+
+/// How long to wait before the next tunnel open of a device whose last open started at `last`.
+fn pace_delay(last: Option<tokio::time::Instant>, now: tokio::time::Instant, min_interval: Duration) -> Duration {
+    last.map_or(Duration::ZERO, |t| min_interval.saturating_sub(now.duration_since(t)))
 }
 
 impl TunnelSlot {
@@ -150,7 +167,29 @@ impl LiveConnector {
             tunnels: Arc::default(),
             generation: Arc::new(AtomicU64::new(0)),
             open_retries: Arc::new(AtomicU64::new(0)),
+            open_waits: Arc::new(AtomicU64::new(0)),
+            last_open: Arc::default(),
         })
+    }
+
+    /// How many tunnel opens waited for the device's pace (one tunnel per device per 500 ms).
+    pub fn tunnel_open_waits(&self) -> u64 {
+        self.open_waits.load(Ordering::SeqCst)
+    }
+
+    /// Waits (if needed) so this device's tunnel opens start at least [`TUNNEL_MIN_INTERVAL`] apart, then records
+    /// this one.
+    async fn pace(&self, udid: &Udid) {
+        let last = self.last_open.lock().ok().and_then(|m| m.get(udid).copied());
+        let wait = pace_delay(last, tokio::time::Instant::now(), TUNNEL_MIN_INTERVAL);
+        if !wait.is_zero() {
+            self.open_waits.fetch_add(1, Ordering::SeqCst);
+            tracing::debug!(wait_ms = wait.as_millis() as u64, "pacing the next device tunnel (CoreDeviceProxy limit)");
+            tokio::time::sleep(wait).await;
+        }
+        if let Ok(mut m) = self.last_open.lock() {
+            m.insert(udid.clone(), tokio::time::Instant::now());
+        }
     }
 
     /// How many tunnel opens the device refused and this connector retried. Retries hide refusals from callers, so
@@ -249,6 +288,7 @@ impl LiveConnector {
         for attempt in 0..2 {
             let mut guard = slot.tunnel.lock().await;
             if guard.is_none() {
+                self.pace(udid).await;
                 let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
                 let provider = self.provider(udid).await?;
                 match open_with_retry(&provider, &self.tunnel_cfg, generation, &self.open_retries).await {
@@ -569,15 +609,16 @@ impl ServiceConnector for LiveConnector {
     }
 }
 
-/// Backoff for CoreDeviceProxy opens the device refuses with an early EOF. The device tears a closed tunnel down
-/// lazily: back-to-back open/close cycles hit its limit after about two dozen tunnels in a few seconds (measured on
-/// iOS 27.0, 2026-10-11) and it accepts new ones again shortly after.
-const OPEN_BACKOFF: [Duration; 5] = [
+/// Backoff for CoreDeviceProxy opens the device refuses with an early EOF (its lingering-tunnel limit, see
+/// [`TUNNEL_MIN_INTERVAL`]). It covers a full linger (about 10 s): with five steps (4.65 s) unpaced back-to-back cycles
+/// still failed now and then.
+const OPEN_BACKOFF: [Duration; 6] = [
     Duration::from_millis(150),
     Duration::from_millis(300),
     Duration::from_millis(600),
     Duration::from_millis(1200),
     Duration::from_millis(2400),
+    Duration::from_millis(4800),
 ];
 
 async fn open_with_retry(
@@ -664,6 +705,19 @@ async fn watch_once(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tunnel_opens_are_paced_to_the_device() {
+        let t0 = tokio::time::Instant::now();
+        let ms = |n: u64| Duration::from_millis(n);
+        // The first open of a device, and one long after the previous: no wait.
+        assert_eq!(pace_delay(None, t0, TUNNEL_MIN_INTERVAL), Duration::ZERO);
+        assert_eq!(pace_delay(Some(t0), t0 + ms(600), TUNNEL_MIN_INTERVAL), Duration::ZERO);
+        // A back-to-back re-open (close grace 200 ms + open 80 ms) waits for the rest of the interval.
+        assert_eq!(pace_delay(Some(t0), t0 + ms(280), TUNNEL_MIN_INTERVAL), ms(220));
+        // At that pace at most 20 tunnels start in the ~10 s a closed one lingers on the device (it refuses at ~24).
+        assert!(Duration::from_secs(10).as_millis() / TUNNEL_MIN_INTERVAL.as_millis() <= 20);
+    }
 
     /// DEV-02: a usbmuxd restart re-lists the device within 5 s. Reconnect attempts start 0.25 s after the loss and
     /// come at least every second for a minute, so any restart shorter than 4 s is seen within 5 s.

@@ -178,6 +178,63 @@ async fn run() -> russet_core::Result<()> {
                 &c.image_sha384[..16]
             );
         }
+        "follow-relaunch" => {
+            // device.md §6.7: a bundle's log stream follows a relaunch. Subscribes by bundle id, then launches the app
+            // with a console, kills it, launches it again and kills it; counts the entries per launch and source.
+            let h = mgr.get(&sel)?;
+            let bundle = args
+                .get(1)
+                .cloned()
+                .ok_or_else(|| russet_device::error::invalid_argument("follow-relaunch <bundle>"))?;
+            let filter = russet_device::LogFilter {
+                bundle_id: Some(bundle.clone()),
+                sources: vec![russet_device::logs::LogSourceKind::OsLog, russet_device::logs::LogSourceKind::Stdout],
+                ..Default::default()
+            };
+            let mut s = h.logs(filter).await?;
+            let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+            let collector = tokio::spawn(async move {
+                let mut counts: std::collections::BTreeMap<(u32, String), usize> = Default::default();
+                loop {
+                    let b = tokio::select! {
+                        _ = &mut stop_rx => break,
+                        b = s.next_batch() => b,
+                    };
+                    let Some(b) = b else { break };
+                    for e in b.entries {
+                        *counts.entry((e.pid.unwrap_or(0), format!("{:?}", e.source))).or_default() += 1;
+                    }
+                }
+                counts
+            });
+            let env: std::collections::BTreeMap<String, String> =
+                [("DYLD_PRINT_LIBRARIES".to_owned(), "1".to_owned())].into();
+            let mut pids = Vec::new();
+            for _ in 0..2 {
+                let p = h
+                    .launch(LaunchRequest {
+                        bundle_id: bundle.clone(),
+                        console: true,
+                        kill_existing: true,
+                        env: env.clone(),
+                        ..Default::default()
+                    })
+                    .await?;
+                pids.push(p.pid);
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                h.signal(p.pid, 9).await?;
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                drop(p);
+            }
+            let _ = stop_tx.send(());
+            let counts = collector.await.unwrap_or_default();
+            for (i, pid) in pids.iter().enumerate() {
+                let of = |src: &str| counts.get(&(*pid, src.to_owned())).copied().unwrap_or(0);
+                println!("launch {} (pid {pid}): os_trace {}, console {}", i + 1, of("Oslog"), of("Stdout"));
+            }
+            let others: usize = counts.iter().filter(|((p, _), _)| !pids.contains(p)).map(|(_, n)| n).sum();
+            println!("entries from other pids: {others}");
+        }
         "cryptexd-installed" => {
             // The raw cryptexd copy-installed reply, for the recorded fixture in ddi.rs. `--shape` prints only the key
             // paths and value types (to review what the reply holds before printing values).
@@ -579,10 +636,12 @@ async fn run() -> russet_core::Result<()> {
             let (mut ok, mut fail) = (0, 0);
             let mut times = Vec::new();
             let gap = Duration::from_millis(num(&args, "--gap-ms", 0u64));
-            for _ in 0..n {
+            let mut retried = Vec::new();
+            for i in 0..n {
                 conn.call(FacadeCall::new(facade::TUNNEL_CLOSE, serde_json::json!({"udid": h.udid().as_str()})))
                     .await?;
                 tokio::time::sleep(gap).await;
+                let before = conn.tunnel_open_retries();
                 let t = Instant::now();
                 match conn
                     .call(FacadeCall::new(facade::RSD_SERVICES, serde_json::json!({"udid": h.udid().as_str()})))
@@ -591,6 +650,10 @@ async fn run() -> russet_core::Result<()> {
                     Ok(_) => {
                         ok += 1;
                         times.push(t.elapsed());
+                        let r = conn.tunnel_open_retries() - before;
+                        if r > 0 {
+                            retried.push(format!("#{i}:{r}x/{}ms", t.elapsed().as_millis()));
+                        }
                     }
                     Err(e) => {
                         fail += 1;
@@ -601,8 +664,11 @@ async fn run() -> russet_core::Result<()> {
             times.sort();
             let p95 = times.get(times.len().saturating_mul(95) / 100).copied().unwrap_or_default();
             println!(
-                "{ok} ok, {fail} failed; median {:?}, p95 {p95:?}",
-                times.get(times.len() / 2).copied().unwrap_or_default()
+                "{ok} ok, {fail} failed; median {:?}, p95 {p95:?}; device refusals retried: {} in {} opens {:?}",
+                times.get(times.len() / 2).copied().unwrap_or_default(),
+                conn.tunnel_open_retries(),
+                retried.len(),
+                retried
             );
         }
         "bench-lockdown" => {

@@ -173,9 +173,9 @@ impl Tunnel {
     }
 
     /// Stops the adapter task; every stream of this generation dies. The adapter keeps running for
-    /// [`CLOSE_GRACE`] first, so the FIN exchanges of the streams just closed complete inside the tunnel: a tunnel
-    /// cut mid-handshake stays allocated on the device for seconds, and back-to-back open/close cycles then run into
-    /// CoreDeviceProxy's limit (measured on iOS 27.0, 2026-10-11).
+    /// [`CLOSE_GRACE`] first, so the FIN exchanges of the streams just closed complete inside the tunnel. (The grace
+    /// does not lift the device's limit on lingering tunnels: whether it is 0 or 200 ms, only the pace of opens
+    /// matters, see the live connector's tunnel budget; measured on iOS 27.0, 2026-10-11.)
     pub async fn close(mut self) {
         tokio::time::sleep(CLOSE_GRACE).await;
         let _ = self.handle.close().await;

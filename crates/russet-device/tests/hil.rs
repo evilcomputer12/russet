@@ -87,15 +87,14 @@ async fn hil_readiness_and_ddi_status() {
     eprintln!("ddi: {:?} {:?} {:?} source {:?}", ddi.kind, ddi.version, ddi.product_build, ddi.source);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
-async fn hil_100_session_opens_without_a_failure() {
-    let _serial = SERIAL.lock().await;
-    let Some(h) = hil().await else { return };
+/// Opens `n` sessions (a CoreDeviceProxy tunnel plus the RSD handshake), closing the tunnel before each and pausing
+/// `pause` after the close; returns the open times.
+async fn session_cycles(h: &Hil, n: usize, pause: Duration) -> Vec<Duration> {
     let udid = serde_json::json!({ "udid": h.handle.udid().as_str() });
     let mut times = Vec::new();
-    for i in 0..100 {
+    for i in 0..n {
         h.conn.call(FacadeCall::new(facade::TUNNEL_CLOSE, udid.clone())).await.expect("close");
+        tokio::time::sleep(pause).await;
         let t = Instant::now();
         h.conn
             .call(FacadeCall::new(facade::RSD_SERVICES, udid.clone()))
@@ -104,12 +103,51 @@ async fn hil_100_session_opens_without_a_failure() {
         times.push(t.elapsed());
     }
     times.sort();
+    times
+}
+
+/// DEV-04: 100 sequential session opens with 0 failures, p95 < 300 ms (device.md §15.4). The device keeps a closed
+/// tunnel about 10 s and refuses new ones while about two dozen linger, so the cycles run at a pace it sustains
+/// (a 350 ms pause after each close: about one tunnel per 0.6 s). "0 failures" counts device refusals the connector
+/// retried and opens it had to pace, not only errors that reached the caller.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
+async fn hil_100_session_opens_without_a_failure() {
+    let _serial = SERIAL.lock().await;
+    let Some(h) = hil().await else { return };
+    let times = session_cycles(&h, 100, Duration::from_millis(350)).await;
     let p95 = times[94];
-    let retries = h.conn.tunnel_open_retries();
-    eprintln!("100 session opens: median {:?}, p95 {p95:?}, refused-and-retried opens: {retries}", times[49]);
+    let (retries, waits) = (h.conn.tunnel_open_retries(), h.conn.tunnel_open_waits());
+    eprintln!(
+        "100 session opens: median {:?}, p95 {p95:?}, device refusals retried: {retries}, paced opens: {waits}",
+        times[49]
+    );
     assert!(p95 < Duration::from_millis(300), "p95 {p95:?}");
-    // "0 failures" counts the opens the connector retried behind the caller's back, too.
     assert_eq!(retries, 0, "the device refused {retries} tunnel open(s)");
+    assert_eq!(waits, 0, "{waits} open(s) waited for the device's tunnel budget");
+}
+
+/// Back-to-back tunnel cycles (no pause) exceed what the device sustains: the connector starts at most one tunnel per
+/// device per 500 ms instead of running into the device's refusals (about every 24th open otherwise), and every open
+/// succeeds.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "lane A: needs the iPhone (RUSSET_LANE=A, RUSSET_HIL_UDID); run with --ignored"]
+async fn hil_back_to_back_tunnels_are_paced_not_refused() {
+    let _serial = SERIAL.lock().await;
+    let Some(h) = hil().await else { return };
+    // Let the tunnels of the previous test age out first.
+    tokio::time::sleep(Duration::from_secs(11)).await;
+    let t = Instant::now();
+    let times = session_cycles(&h, 40, Duration::ZERO).await;
+    let (retries, waits) = (h.conn.tunnel_open_retries(), h.conn.tunnel_open_waits());
+    eprintln!(
+        "40 back-to-back session opens in {:?}: median {:?}, max {:?}, device refusals retried: {retries}, paced opens: {waits}",
+        t.elapsed(),
+        times[19],
+        times[39]
+    );
+    assert_eq!(retries, 0, "the device refused {retries} tunnel open(s) despite the pacing");
+    assert!(waits > 0, "back-to-back opens are paced");
 }
 
 #[tokio::test(flavor = "multi_thread")]
