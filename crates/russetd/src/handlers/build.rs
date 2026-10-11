@@ -17,10 +17,12 @@ use russet_build::{BuildEnv, BuildRequest, Builder, CleanScope, NullSink, Utf8Pa
 use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_core::proc::{CommandRunner, ProcessRunner};
+use russet_core::progress::EventSink;
 use russet_ipc::{RequestCtx, Router};
 use russet_protocol::build as p;
 use russet_protocol::project::{ProjectStack, TargetKind};
 use russet_sdk::DefaultSdkProvider;
+use tokio_util::sync::CancellationToken;
 
 use super::not_implemented;
 use crate::DaemonCtx;
@@ -263,10 +265,26 @@ pub fn inspect_dto(r: &russet_build::inspect::InspectReport) -> p::BuildInspectR
     }
 }
 
+/// Builds a project the way `build.start` does: the daemon's [`builder`], the account's bundle-ID prefix
+/// ([`with_account_policy`]), then [`Builder::build`] with the caller's sink and cancellation.
+///
+/// This is the one entry point for in-daemon callers. The run pipeline's build step (W7's `LiveBuilder`) calls it
+/// and maps the domain output: `out.app.path` is the unsigned `.app`, `out.app.bundle_id` the effective bundle ID,
+/// `out.signing_plan` the inside-out items with their entitlements files and `get-task-allow`, and `out.built` what
+/// the debugger needs (the executable, its UUIDs, the dSYMs, the SDK path for `target.sdk-path`).
+pub async fn build_project(
+    cx: &DaemonCtx,
+    request: BuildRequest,
+    sink: &dyn EventSink,
+    cancel: CancellationToken,
+) -> Result<russet_build::BuildOutput> {
+    let b = builder(cx)?;
+    let request = with_account_policy(&b, request, || account_xtool_prefix(cx)).await?;
+    b.build(request, sink, cancel).await
+}
+
 async fn build_start(cx: DaemonCtx, rq: RequestCtx, p: p::BuildStartParams) -> Result<p::BuildOutput> {
-    let b = builder(&cx)?;
-    let request = with_account_policy(&b, request_from(&p)?, || account_xtool_prefix(&cx)).await?;
-    let out = b.build(request, &NullSink, rq.cancel.clone()).await?;
+    let out = build_project(&cx, request_from(&p)?, &NullSink, rq.cancel.clone()).await?;
     Ok(output_dto(&out))
 }
 
