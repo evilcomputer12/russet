@@ -49,7 +49,7 @@ pub struct Args {
     /// Exit non-zero at or above the warning threshold
     #[arg(long)]
     pub strict: bool,
-    /// Read recorded API answers (runs.json, jobs-<id>.json) instead of calling gh
+    /// Read recorded API answers (`runs.json`, `jobs-<id>.json`) instead of calling gh
     #[arg(long, value_name = "DIR")]
     pub from_dir: Option<PathBuf>,
     /// Print one JSON object
