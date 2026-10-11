@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn constant_time_comparison() {
         assert!(constant_time_eq(b"abc", b"abc"));
-        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"abx"));
         assert!(!constant_time_eq(b"abc", b"abcd"));
     }
 }

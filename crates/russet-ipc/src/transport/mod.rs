@@ -29,6 +29,14 @@ pub(crate) mod windows;
 /// The longest Unix socket path (`sun_path` holds 108 bytes including the terminator).
 pub const MAX_SOCKET_PATH: usize = 107;
 
+/// The `RUSSET_DAEMON` value that selects the in-process daemon (`--no-daemon`, ARCHITECTURE §14.9).
+pub const IN_PROCESS: &str = "inproc";
+
+/// Whether `RUSSET_DAEMON=inproc` asks for the in-process daemon.
+pub fn in_process_requested() -> bool {
+    std::env::var("RUSSET_DAEMON").is_ok_and(|v| v.trim() == IN_PROCESS)
+}
+
 /// Where a daemon listens (ARCHITECTURE §7.1).
 #[derive(Debug)]
 pub enum Endpoint {
@@ -53,11 +61,12 @@ impl Endpoint {
         }
     }
 
-    /// The endpoint `RUSSET_DAEMON` names, or the default. `RUSSET_DAEMON=inproc` is the caller's business
-    /// (`--no-daemon`) and is refused here.
+    /// The endpoint `RUSSET_DAEMON` names, or the default. `RUSSET_DAEMON=inproc` (the same as `--no-daemon`,
+    /// ARCHITECTURE §14.9) names no endpoint: callers that serve or reach an in-process daemon check
+    /// [`in_process_requested`] first, and everyone else gets the default endpoint.
     pub fn from_env(dirs: &RussetDirs) -> Result<Self> {
         match std::env::var("RUSSET_DAEMON") {
-            Ok(v) if !v.trim().is_empty() => Self::parse(v.trim()),
+            Ok(v) if !v.trim().is_empty() && v.trim() != IN_PROCESS => Self::parse(v.trim()),
             _ => Ok(Self::default_for(dirs)),
         }
     }

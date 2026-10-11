@@ -378,6 +378,21 @@ startedAt: string,
 deviceBackend: string, };
 
 /**
+ * `details` of the `ipc.daemonUnavailable` (1102) that a stopping daemon answers to `initialize`: it keeps its
+ * endpoint until its jobs have had their grace (core §6.3), so a client waits for it to go and then starts a
+ * new daemon instead of racing the old one for `runtime/russetd.lock`.
+ */
+export type DaemonUnavailableDetails = { 
+/**
+ * The daemon is shutting down.
+ */
+shuttingDown: boolean, 
+/**
+ * How long the daemon still gives its jobs, at most (`0` when forced).
+ */
+graceMs?: number, };
+
+/**
  * JSON-RPC `error.data` (ARCHITECTURE §13.1), camelCase on the wire; optional fields are omitted.
  */
 export type ErrorData = { russetCode: string, hint?: string, details?: JsonValue, retryable: boolean, docs?: string, chain: Array<string>, };

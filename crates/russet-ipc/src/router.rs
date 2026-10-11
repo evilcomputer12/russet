@@ -8,8 +8,14 @@
 //! do not deserialize answer JSON-RPC `-32602` with `data.details.path` (ARCHITECTURE §13.1); handlers keep
 //! `core.invalidArgument` (1006) for semantic validation. An optional [`Layer`] wraps every dispatch: the
 //! daemon uses it to run long-running methods as jobs and to audit calls.
+//!
+//! [`Extensions`] carry whatever else a registration declares about its methods. The handler seam hands an
+//! area nothing but `register(r: &mut Router<DaemonCtx>)` (ARCHITECTURE §5.3), so russetd's registration hooks
+//! (job declarations, typed-confirmation texts, ownership resolvers, service factories) store their values on
+//! the router, and the daemon takes them off the router it built.
 
-use std::collections::BTreeMap;
+use std::any::{Any, TypeId};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
@@ -76,11 +82,61 @@ pub trait Layer<C>: Send + Sync + 'static {
     ) -> BoxFuture<Result<Value, RpcError>>;
 }
 
+/// Typed values, one per type, that registrations leave on a [`Router`] for the server that owns it (module
+/// docs).
+#[derive(Default)]
+pub struct Extensions {
+    map: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+}
+
+impl fmt::Debug for Extensions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Extensions").field("len", &self.map.len()).finish()
+    }
+}
+
+impl Extensions {
+    /// Stores `value`, returning the value of the same type it replaces.
+    pub fn insert<T: Send + Sync + 'static>(&mut self, value: T) -> Option<T> {
+        self.map.insert(TypeId::of::<T>(), Box::new(value)).and_then(|old| old.downcast::<T>().ok().map(|b| *b))
+    }
+
+    /// The value of type `T`.
+    pub fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
+        self.map.get(&TypeId::of::<T>()).and_then(|b| b.downcast_ref::<T>())
+    }
+
+    /// The value of type `T`, mutably.
+    pub fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
+        self.map.get_mut(&TypeId::of::<T>()).and_then(|b| b.downcast_mut::<T>())
+    }
+
+    /// The value of type `T`, inserting `T::default()` first when there is none.
+    pub fn get_or_default<T: Default + Send + Sync + 'static>(&mut self) -> &mut T {
+        let slot = self.map.entry(TypeId::of::<T>()).or_insert_with(|| Box::new(T::default()));
+        match slot.downcast_mut::<T>() {
+            Some(v) => v,
+            None => unreachable!("extensions are keyed by their own type"),
+        }
+    }
+
+    /// Takes the value of type `T` out.
+    pub fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
+        self.map.remove(&TypeId::of::<T>()).and_then(|b| b.downcast::<T>().ok().map(|b| *b))
+    }
+
+    /// Whether nothing is stored.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+}
+
 /// Method name → typed handler.
 pub struct Router<C: Clone + Send + Sync + 'static> {
     requests: BTreeMap<&'static str, (MethodInfo, RequestHandler<C>)>,
     notifications: BTreeMap<&'static str, NotificationHandler<C>>,
     layer: Option<Arc<dyn Layer<C>>>,
+    extensions: Extensions,
 }
 
 /// Deserializes `params` for `method`, naming the offending field on failure (`-32602`).
@@ -93,7 +149,22 @@ pub(crate) fn parse_params<T: DeserializeOwned>(method: &str, params: Value) -> 
 
 impl<C: Clone + Send + Sync + 'static> Router<C> {
     pub fn new() -> Self {
-        Self { requests: BTreeMap::new(), notifications: BTreeMap::new(), layer: None }
+        Self {
+            requests: BTreeMap::new(),
+            notifications: BTreeMap::new(),
+            layer: None,
+            extensions: Extensions::default(),
+        }
+    }
+
+    /// What registrations declared besides their handlers (module docs).
+    pub fn extensions(&self) -> &Extensions {
+        &self.extensions
+    }
+
+    /// [`Router::extensions`], mutably: registration hooks store their values here.
+    pub fn extensions_mut(&mut self) -> &mut Extensions {
+        &mut self.extensions
     }
 
     /// Registers the handler of method `M`. Registering a name twice is a programming error.
@@ -188,4 +259,26 @@ impl<C: Clone + Send + Sync + 'static> Default for Router<C> {
 /// Builds an `Error` result for a handler from a [`RpcError`] (a client-side helper).
 pub fn rpc_to_error(e: &RpcError) -> Error {
     e.to_error()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Default, PartialEq)]
+    struct Declared(Vec<&'static str>);
+
+    #[test]
+    fn extensions_hold_one_value_per_type() {
+        let mut r = Router::<()>::new();
+        assert!(r.extensions().is_empty());
+        r.extensions_mut().get_or_default::<Declared>().0.push("build.start");
+        r.extensions_mut().get_or_default::<Declared>().0.push("sdk.import");
+        assert_eq!(r.extensions().get::<Declared>(), Some(&Declared(vec!["build.start", "sdk.import"])));
+        assert_eq!(r.extensions_mut().insert(7u32), None);
+        assert_eq!(r.extensions_mut().insert(8u32), Some(7));
+        assert_eq!(r.extensions_mut().remove::<Declared>().map(|d| d.0.len()), Some(2));
+        assert!(r.extensions().get::<Declared>().is_none());
+        assert_eq!(r.extensions().get::<u32>(), Some(&8));
+    }
 }

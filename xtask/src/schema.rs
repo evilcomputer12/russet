@@ -97,7 +97,7 @@ fn sorted(v: &Value) -> Value {
 fn extra_types() -> Vec<(&'static str, TypeHooks)> {
     use russet_protocol::approval::ApprovalRequiredDetails;
     use russet_protocol::common::{CancelParams, ProgressParams};
-    use russet_protocol::initialize::{BuildMismatchDetails, ProtocolMismatchDetails};
+    use russet_protocol::initialize::{BuildMismatchDetails, DaemonUnavailableDetails, ProtocolMismatchDetails};
     use russet_protocol::job::BackgroundJob;
     vec![
         ("ErrorData", TypeHooks::of::<russet_protocol::ErrorData>()),
@@ -107,6 +107,7 @@ fn extra_types() -> Vec<(&'static str, TypeHooks)> {
         ("ApprovalRequiredDetails", TypeHooks::of::<ApprovalRequiredDetails>()),
         ("ProtocolMismatchDetails", TypeHooks::of::<ProtocolMismatchDetails>()),
         ("BuildMismatchDetails", TypeHooks::of::<BuildMismatchDetails>()),
+        ("DaemonUnavailableDetails", TypeHooks::of::<DaemonUnavailableDetails>()),
     ]
 }
 

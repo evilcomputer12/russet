@@ -939,6 +939,28 @@
       ],
       "type": "object"
     },
+    "DaemonUnavailableDetails": {
+      "description": "`details` of the `ipc.daemonUnavailable` (1102) that a stopping daemon answers to `initialize`: it keeps its\nendpoint until its jobs have had their grace (core §6.3), so a client waits for it to go and then starts a\nnew daemon instead of racing the old one for `runtime/russetd.lock`.",
+      "properties": {
+        "graceMs": {
+          "description": "How long the daemon still gives its jobs, at most (`0` when forced).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "shuttingDown": {
+          "description": "The daemon is shutting down.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "shuttingDown"
+      ],
+      "type": "object"
+    },
     "ErrorData": {
       "description": "JSON-RPC `error.data` (ARCHITECTURE §13.1), camelCase on the wire; optional fields are omitted.",
       "properties": {
@@ -5371,6 +5393,9 @@
     },
     "CancelParams": {
       "$ref": "#/$defs/CancelParams"
+    },
+    "DaemonUnavailableDetails": {
+      "$ref": "#/$defs/DaemonUnavailableDetails"
     },
     "ErrorData": {
       "$ref": "#/$defs/ErrorData"

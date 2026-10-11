@@ -15,6 +15,10 @@
 //!    protocol major that answers `ipc.protocolMismatch` with `restartable: true` shuts itself down the same
 //!    way.
 //!
+//! A daemon that is shutting down keeps its endpoint until its jobs have had their grace (core §6.3) and
+//! answers `initialize` with `ipc.daemonUnavailable` and `details.shuttingDown`; the client waits for it to go
+//! (at most [`SHUTDOWN_WAIT`]) and then starts a new one, rather than racing it for `runtime/russetd.lock`.
+//!
 //! `RUSSET_NO_AUTOSTART=1` turns step 2 into `ipc.daemonUnavailable`.
 
 use std::fs::File;
@@ -26,7 +30,7 @@ use russet_core::dirs::RussetDirs;
 use russet_core::error::{Error, Result, codes};
 use russet_core::platform::ExecutableId;
 use russet_protocol::daemon::{DaemonShutdown, DaemonShutdownParams, ShutdownReason};
-use russet_protocol::initialize::{BuildMismatchDetails, Initialize, InitializeResult};
+use russet_protocol::initialize::{BuildMismatchDetails, Initialize, InitializeResult, ServerInfo};
 
 use crate::peer::{Peer, Session};
 use crate::transport::Endpoint;
@@ -37,6 +41,16 @@ pub const FIRST_TRY: Duration = Duration::from_millis(200);
 
 /// How long a client waits for `runtime/spawn.lock`.
 pub const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
+
+/// How long a client waits for a stopping daemon to go: its jobs' grace (10 s, core §6.3) plus its cleanup.
+pub const SHUTDOWN_WAIT: Duration = Duration::from_secs(15);
+
+/// Whether `e` is a stopping daemon's answer to `initialize` (`ipc.daemonUnavailable` with
+/// `details.shuttingDown`).
+pub fn is_shutting_down(e: &Error) -> bool {
+    e.code() == codes::ipc::DAEMON_UNAVAILABLE
+        && e.details().and_then(|d| d.get("shuttingDown")).and_then(serde_json::Value::as_bool) == Some(true)
+}
 
 /// What a development client requires of the daemon it talks to (ARCHITECTURE §3.3 item 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,15 +162,19 @@ pub async fn connect_or_spawn(
                 peer.close();
                 match answer {
                     Ok(r) if r.accepted => {
-                        wait_until_gone(&endpoint, spawn.ready_timeout).await?;
+                        wait_until_gone(&endpoint, &client, Some(&result.server), spawn.ready_timeout).await?;
                         restarted = true;
                     }
                     _ => return Err(build_mismatch(&result, check, &why, false)),
                 }
             }
             Err(e) if e.code() == codes::ipc::PROTOCOL_MISMATCH && !restarted && restartable(&e) => {
-                wait_until_gone(&endpoint, spawn.ready_timeout).await?;
+                wait_until_gone(&endpoint, &client, None, spawn.ready_timeout).await?;
                 restarted = true;
+            }
+            Err(e) if is_shutting_down(&e) => {
+                tracing::info!("the daemon is shutting down: waiting for it to go before starting a new one");
+                wait_until_gone(&endpoint, &client, None, SHUTDOWN_WAIT).await?;
             }
             Err(e) if e.code() == codes::ipc::DAEMON_UNAVAILABLE => {}
             Err(e) => return Err(e),
@@ -184,6 +202,12 @@ pub async fn connect_or_spawn(
                         peer.close();
                         return Err(build_mismatch(&result, check, &why, false));
                     }
+                }
+            }
+            Err(e) if is_shutting_down(&e) => {
+                if let Err(e) = wait_until_gone(&endpoint, &client, None, SHUTDOWN_WAIT).await {
+                    drop(lock);
+                    return Err(e);
                 }
             }
             Err(e) if e.code() == codes::ipc::DAEMON_UNAVAILABLE => {}
@@ -238,22 +262,36 @@ fn build_mismatch(result: &InitializeResult, check: &DevelopmentCheck, why: &str
         .with_details(serde_json::to_value(details).unwrap_or_default())
 }
 
-/// Waits until nothing answers at `endpoint` (the old daemon has exited).
-async fn wait_until_gone(endpoint: &Endpoint, timeout: Duration) -> Result<()> {
+/// Waits until the daemon at `endpoint` has gone: nothing listens, or a daemon other than `old` answers
+/// `initialize` (another client started the next one meanwhile). While it stops, the old daemon answers
+/// `initialize` with `shuttingDown`, with `ipc.protocolMismatch` (another protocol major) or, briefly after
+/// accepting `daemon.shutdown`, as `old` itself.
+async fn wait_until_gone(
+    endpoint: &Endpoint,
+    client: &ClientInfo,
+    old: Option<&ServerInfo>,
+    timeout: Duration,
+) -> Result<()> {
     let deadline = Instant::now() + timeout;
     loop {
-        match endpoint.open(FIRST_TRY).await {
+        let still_there = match connect_with(endpoint, client.clone(), FIRST_TRY).await {
+            Err(e) if is_shutting_down(&e) => true,
+            Err(e) if matches!(e.code(), codes::ipc::PROTOCOL_MISMATCH | codes::ipc::CONNECTION_CLOSED) => true,
             Err(e) if e.code() == codes::ipc::DAEMON_UNAVAILABLE => return Ok(()),
             Err(e) => return Err(e),
-            Ok(peer) => {
+            Ok((peer, result)) => {
                 peer.close();
-                if Instant::now() >= deadline {
-                    return Err(Error::new(codes::ipc::DAEMON_UNAVAILABLE, "the old daemon did not exit in time")
-                        .with_hint("Stop it with `russet daemon stop --force`."));
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                old.is_some_and(|old| result.server.pid == old.pid && result.server.started_at == old.started_at)
             }
+        };
+        if !still_there {
+            return Ok(());
         }
+        if Instant::now() >= deadline {
+            return Err(Error::new(codes::ipc::DAEMON_UNAVAILABLE, "the old daemon did not exit in time")
+                .with_hint("Stop it with `russet daemon stop --force`."));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -321,4 +359,20 @@ fn spawn_daemon(spec: &SpawnSpec) -> Result<()> {
         })
         .map_err(|e| Error::io("starting the reaper thread", e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stopping_daemon_is_told_apart_from_a_missing_one() {
+        let stopping = Error::new(codes::ipc::DAEMON_UNAVAILABLE, "the daemon is shutting down")
+            .with_details(serde_json::json!({"shuttingDown": true, "graceMs": 10_000}));
+        assert!(is_shutting_down(&stopping));
+        assert!(!is_shutting_down(&Error::new(codes::ipc::DAEMON_UNAVAILABLE, "nothing listens")));
+        let other =
+            Error::new(codes::ipc::PROTOCOL_MISMATCH, "x").with_details(serde_json::json!({"shuttingDown": true}));
+        assert!(!is_shutting_down(&other));
+    }
 }

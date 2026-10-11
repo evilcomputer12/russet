@@ -12,4 +12,7 @@ renames or changes meaning. The schema itself is generated (`cargo xtask schema`
   `BackgroundJob` (`{jobId}`).
 - W2: `JobEvent` is `{seq, ts}` plus the `JobEventKind` of ARCHITECTURE §9.2 (`artifactKind`, never `kind`, for
   artifacts [D 96]).
+- W2: a daemon that is shutting down keeps its endpoint until its jobs have had their grace and answers
+  `initialize` with `ipc.daemonUnavailable` (1102, retryable) and `DaemonUnavailableDetails`
+  (`{shuttingDown: true, graceMs}`); clients wait for it to go, then start a new daemon (core §6.3).
 - W1: every method of ARCHITECTURE §8 and notification of §9 registered, with placeholder DTOs.

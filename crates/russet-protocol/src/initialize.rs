@@ -227,6 +227,20 @@ pub struct BuildMismatchDetails {
     pub restartable: bool,
 }
 
+/// `details` of the `ipc.daemonUnavailable` (1102) that a stopping daemon answers to `initialize`: it keeps its
+/// endpoint until its jobs have had their grace (core §6.3), so a client waits for it to go and then starts a
+/// new daemon instead of racing the old one for `runtime/russetd.lock`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonUnavailableDetails {
+    /// The daemon is shutting down.
+    pub shutting_down: bool,
+    /// How long the daemon still gives its jobs, at most (`0` when forced).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub grace_ms: Option<u64>,
+}
+
 crate::rpc_method!(
     /// `initialize` (class `none`). W2 (Wave 1).
     Initialize,

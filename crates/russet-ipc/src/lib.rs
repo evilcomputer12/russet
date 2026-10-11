@@ -42,10 +42,10 @@ pub mod transport;
 pub use client::{DevelopmentCheck, connect, connect_or_spawn, connect_with, initialize};
 pub use message::{Message, RequestId, RpcError};
 pub use peer::{BoxFuture, CallOptions, Handler, IncomingRequest, Peer, ProgressReporter, Role, Session};
-pub use router::{ConnCtx, Layer, Next, RequestCtx, Router};
+pub use router::{ConnCtx, Extensions, Layer, Next, RequestCtx, Router};
 pub use russet_protocol::initialize::Grant;
 pub use server::{Server, serve_peer};
-pub use transport::Endpoint;
+pub use transport::{Endpoint, in_process_requested};
 
 /// Frames are at most 16 MiB (ARCHITECTURE §7.2).
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
