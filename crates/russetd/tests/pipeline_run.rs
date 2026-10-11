@@ -452,14 +452,14 @@ async fn debug_prepare_launches_suspended_and_pre_attaches_the_broker() {
     assert!(r.attach_commands.iter().any(|c| {
         c.starts_with("target modules search-paths add \"/private/var/containers/Bundle/Application/1C2/Probe.app\"")
     }));
-    assert_eq!(r.attach_commands.last().unwrap(), &format!("process connect -p gdb-remote {}", r.broker.lldb_url));
+    assert_eq!(r.attach_commands.last().unwrap(), &format!("process connect -p gdb-remote \"{}\"", r.broker.lldb_url));
     assert!(r.init_commands.iter().any(|c| c == "settings set target.sdk-path \"/sdk/iPhoneOS27.0.sdk\""));
     assert!(!russet_debug::lldb::uses_python(&r.attach_commands) && !russet_debug::lldb::uses_python(&r.init_commands));
     // attach.lldb under <project>/.russet/debug/<sid>/.
     let script = PathBuf::from(r.attach_script.clone().unwrap());
     assert_eq!(script, f.project.join(".russet/debug").join(r.session_id.as_str()).join("attach.lldb"));
     let text = std::fs::read_to_string(&script).unwrap();
-    assert!(text.contains("process connect -p gdb-remote unix-connect:///"));
+    assert!(text.contains("process connect -p gdb-remote \"unix-connect:///"));
     // The tools: lldb with its env; lldb-dap reported missing rather than failing the call.
     assert_eq!(r.lldb.env.get("PYTHONHOME").map(String::as_str), Some("/pbs"));
     assert_eq!((r.lldb.component.as_str(), r.lldb.provenance.as_str()), ("lldb", "uv"));

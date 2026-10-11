@@ -714,7 +714,7 @@ settings set interpreter.stop-command-source-on-error false     # lldb CLI scrip
 platform select remote-ios --sysroot "<symbol cache>/<build>/<dsc-uuid>"     # only when local symbols exist [V7]
 target create --arch arm64-apple-ios "<local executable (unsigned build product or signed copy)>"
 target modules search-paths add "<device .app dir>" "<local .app dir>"     # belt and braces; UUID match suffices [V5]
-process connect -p gdb-remote <broker url>                                # unix-connect:///… or connect://127.0.0.1:N
+process connect -p gdb-remote "<broker url>"                              # unix-connect:///… or connect://127.0.0.1:N
 ```
 
 With no `--sysroot`, use `platform select remote-ios`.

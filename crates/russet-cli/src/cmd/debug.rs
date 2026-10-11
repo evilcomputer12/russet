@@ -330,7 +330,7 @@ mod tests {
                 "platform select remote-ios".into(),
                 "target create --arch arm64-apple-ios \"/p/.russet/build/debug-iphoneos/RussetProbe.app/RussetProbe\""
                     .into(),
-                "process connect -p gdb-remote unix-connect:///r/gdb.sock".into(),
+                "process connect -p gdb-remote \"unix-connect:///r/gdb.sock\"".into(),
             ],
             dap_config: serde_json::json!({}),
             dap: None,

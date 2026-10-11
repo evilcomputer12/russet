@@ -127,7 +127,7 @@ async fn batch_detach_leaves_the_app_running_with_a_detached_debugger() {
     assert_eq!(s.summary().state, WireSessionState::Ready);
     assert_eq!(s.debugger(), DebuggerState::None);
     let script = std::fs::read_to_string(prepared.attach_script.as_ref().unwrap()).unwrap();
-    assert!(script.contains("process connect -p gdb-remote unix-connect:///"), "{script}");
+    assert!(script.contains("process connect -p gdb-remote \"unix-connect:///"), "{script}");
     assert!(!lldb::uses_python(&script.lines().map(str::to_owned).collect::<Vec<_>>()));
 
     let t = run_batch(&f, &prepared, BatchEnd::Detach).await;

@@ -134,7 +134,7 @@ pub fn attach_commands(plan: &AttachPlan) -> Vec<String> {
     if let (Some(device), Some(local)) = (&plan.device_app_dir, &plan.local_app_dir) {
         out.push(format!("target modules search-paths add {} {}", quote(device), quote_path(local)));
     }
-    out.push(format!("process connect -p gdb-remote {}", plan.broker_url));
+    out.push(format!("process connect -p gdb-remote {}", quote(&plan.broker_url)));
     out
 }
 
@@ -166,7 +166,7 @@ pub fn legacy_async_commands(plan: &AttachPlan, pid: u32, device_executable: Opt
         ));
     }
     out.push("script lldb.debugger.SetAsync(True)".to_owned());
-    out.push(format!("process connect -p gdb-remote {}", plan.broker_url));
+    out.push(format!("process connect -p gdb-remote {}", quote(&plan.broker_url)));
     out.push("script import time; time.sleep(2)".to_owned());
     out.push("script lldb.debugger.SetAsync(False)".to_owned());
     out.push(format!("process attach --pid {pid}"));
@@ -449,7 +449,7 @@ mod tests {
                 "platform select remote-ios",
                 "target create --arch arm64-apple-ios \"/home/u/RussetProbe/.russet/build/debug-iphoneos/RussetProbe.app/RussetProbe\"",
                 "target modules search-paths add \"/private/var/containers/Bundle/Application/1C2/RussetProbe.app\" \"/home/u/RussetProbe/.russet/build/debug-iphoneos/signed/RussetProbe.app\"",
-                "process connect -p gdb-remote unix-connect:///run/user/1000/russet/sessions/ses_7k2/gdb.sock",
+                "process connect -p gdb-remote \"unix-connect:///run/user/1000/russet/sessions/ses_7k2/gdb.sock\"",
             ]
         );
         let sysroot = AttachPlan {
