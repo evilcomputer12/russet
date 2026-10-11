@@ -70,10 +70,12 @@ lead-only = [
 "xtask" = "dev"
 
 [layer-rules]
-# SPDX ids that count as permissive for layer F and its dependencies (ARCHITECTURE §5.2, §19).
+# SPDX ids that count as permissive for layer F and its dependencies (ARCHITECTURE §5.2, §19). `bzip2-1.0.6`
+# (libbz2-rs-sys under russet-xar's optional udif reader) is a reviewed deny.toml exception awaiting the lead's
+# sign-off [D 48]; drop it here if the lead drops udif instead.
 permissive = [
     "MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "CC0-1.0",
-    "Unicode-3.0", "Unicode-DFS-2016", "BSL-1.0", "Unlicense",
+    "Unicode-3.0", "Unicode-DFS-2016", "BSL-1.0", "Unlicense", "bzip2-1.0.6",
 ]
 # No L3 crate uses the transport (ARCHITECTURE §5.2).
 l3-never = ["russet-ipc"]

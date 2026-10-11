@@ -20,6 +20,7 @@ accepted = [
     "GPL-3.0-or-later",
     "BlueOak-1.0.0",
     "CDLA-Permissive-2.0",
+    "bzip2-1.0.6",
 ]
 targets = [
     "x86_64-unknown-linux-gnu",

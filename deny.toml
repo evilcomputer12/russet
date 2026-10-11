@@ -5,14 +5,15 @@
 # advisories check joins once W8 wires the advisory database into CI.
 
 [graph]
-# Every platform Russet ships on (core §15), so Windows-only dependencies are checked too.
+# Every platform Russet ships on (core §15), so Windows-only dependencies are checked too, and every feature of
+# every workspace crate, so optional dependencies (russet-xar's udif, hfsplus and cms readers) are checked too.
 targets = [
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
     "x86_64-pc-windows-msvc",
     "aarch64-pc-windows-msvc",
 ]
-all-features = false
+all-features = true
 
 [advisories]
 # W16b adds RUSTSEC-2023-0071 here with its reason: `rsa` is verify-only in russet-xar (ARCHITECTURE §5.1).
@@ -39,17 +40,26 @@ allow = [
 confidence-threshold = 0.93
 # The allowlist is binding policy (ARCHITECTURE §19), not tuned to today's graph.
 unused-allowed-license = "allow"
-# Per-crate exceptions after a written review [D 48]. Review by W1 (2026-10-11), for the lead's sign-off at merge:
-# - BlueOak-1.0.0 (Blue Oak Model License 1.0.0): an OSI-approved permissive licence (copyright and patent grant;
-#   keep the notice), compatible with GPL-3.0-or-later. minicbor is a hard dependency of apple-codesign 0.29.0
-#   (ARCHITECTURE §16.7), so russet-sign cannot avoid it.
-# - CDLA-Permissive-2.0: a permissive data licence for Mozilla's CA root list (no copyleft; keep the agreement text),
-#   compatible with GPL-3.0-or-later. webpki-roots comes in through idevice's `tss` feature (DDI personalization),
-#   reqwest and tokio-tungstenite. W26's notices (cargo-about) list both licences.
+# Per-crate exceptions after a written review [D 48]. Review by W1 (2026-10-11); each needs the lead's sign-off
+# (docs/decisions.md, or a contract-change PR adding it to ARCHITECTURE §19) before W1 merges. Licence texts were
+# read in the registry sources; all three are permissive (no copyleft) and compatible with GPL-3.0-or-later.
+# - BlueOak-1.0.0 (Blue Oak Model License 1.0.0; OSI-approved): copyright and patent grant, keep the notice.
+#   minicbor 0.25.1 and minicbor-derive 0.15.3 are unconditional dependencies of apple-codesign 0.29.0
+#   (ARCHITECTURE §16.7), so russet-sign cannot avoid them.
+# - CDLA-Permissive-2.0 (Community Data License Agreement, Permissive 2.0): Mozilla's CA root list as data; keep
+#   the agreement text. webpki-roots 1.0.9 and 0.26.11 come in through idevice's `tss` feature (DDI
+#   personalization), hyper-rustls under reqwest 0.12.28 and 0.13.5, and tokio-tungstenite.
+# - bzip2-1.0.6 (the bzip2 and libbzip2 licence): BSD-style; keep the notice, mark altered versions, no
+#   endorsement. libbz2-rs-sys 0.2.5 (a Rust port of libbzip2) is what bzip2 0.6.1 uses by default, and udif
+#   0.4.2 (russet-xar's optional UDIF reader, ARCHITECTURE §5.1) needs bzip2 0.6 with no feature to drop it.
+#   `.config/workstreams.toml` lists it as permissive for layer F. The alternative is to drop the optional udif
+#   dependency and have W16b read UDIF itself (bzip2 chunks are optional, ARCHITECTURE §5.1).
+# W26's notices (cargo-about) list all three licences.
 exceptions = [
     { crate = "minicbor", allow = ["BlueOak-1.0.0"] },
     { crate = "minicbor-derive", allow = ["BlueOak-1.0.0"] },
     { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+    { crate = "libbz2-rs-sys", allow = ["bzip2-1.0.6"] },
 ]
 
 [licenses.private]

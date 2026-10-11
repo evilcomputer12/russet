@@ -12,13 +12,15 @@
 //!   and build dependencies) must be permissive.
 //!
 //! Normal and build dependencies count; dev-dependencies do not (tests may use the testkit, ARCHITECTURE §5.1).
+//! The graph is resolved with **all features** of every workspace package, so optional dependencies (for
+//! example russet-xar's `udif`, `hfsplus` and `cms` readers) are checked too; `deny.toml` does the same.
 //! Owner: W1.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use anyhow::{Context, Result};
-use cargo_metadata::{DependencyKind, MetadataCommand};
+use cargo_metadata::{CargoOpt, DependencyKind, MetadataCommand};
 
 use crate::workstreams::{self, LayerRules, Workstreams};
 
@@ -33,8 +35,11 @@ pub struct Args {
 pub fn run(args: Args) -> Result<()> {
     let root = workstreams::repo_root();
     let cfg = workstreams::load(&root)?;
-    let metadata =
-        MetadataCommand::new().manifest_path(root.join("Cargo.toml")).exec().context("running cargo metadata")?;
+    let metadata = MetadataCommand::new()
+        .manifest_path(root.join("Cargo.toml"))
+        .features(CargoOpt::AllFeatures)
+        .exec()
+        .context("running cargo metadata --all-features")?;
     let graph = Graph::from_metadata(&metadata);
     if args.verbose {
         for p in graph.packages.values().filter(|p| p.workspace) {
@@ -46,7 +51,10 @@ pub fn run(args: Args) -> Result<()> {
     let violations = check(&graph, &cfg);
     let members = graph.packages.values().filter(|p| p.workspace).count();
     if violations.is_empty() {
-        println!("check-layers: {members} workspace packages, {} packages in the graph: ok", graph.packages.len());
+        println!(
+            "check-layers: {members} workspace packages, {} packages in the graph (all features): ok",
+            graph.packages.len()
+        );
         return Ok(());
     }
     for v in &violations {
