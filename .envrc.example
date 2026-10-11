@@ -6,10 +6,13 @@
 # ---- Lane D (default) -----------------------------------------------------------------------------------
 # One daemon per worktree: socket, locks, state, config, caches and the keyring entry all move here.
 export RUSSET_HOME="$PWD/.russet-dev"
-# Never the phone: W8's testkit provides the scenario; until it exists, RUSSET_DEVICE_BACKEND=none also never
-# constructs a live connector.
-export RUSSET_DEVICE_BACKEND="scripted:$PWD/crates/russet-testkit/scenarios/default.toml"
-# The cargo target slot from your card: `a` at tier AMBER for everyone; `b` from tier GREEN for its cards.
+# Never the phone. `none` never constructs a live connector (ARCHITECTURE §14.9); switch to the scripted backend
+# once W8 lands crates/russet-testkit/scenarios/default.toml:
+export RUSSET_DEVICE_BACKEND=none
+# export RUSSET_DEVICE_BACKEND="scripted:$PWD/crates/russet-testkit/scenarios/default.toml"
+# The cargo target slot from your card: `a` at tier AMBER for everyone; `b` from tier GREEN for its cards. Slots
+# are shared between worktrees; the worktree guard in .cargo/config.toml makes cargo rebuild the workspace crates
+# after another worktree used the slot (AGENTS.md §6). Run cargo from inside this worktree.
 export CARGO_TARGET_DIR="$HOME/.cache/russet-dev/target-a"
 export CARGO_BUILD_JOBS=6
 export CARGO_INCREMENTAL=0

@@ -48,7 +48,14 @@ card in PLAN.md completely before you start.
 - Only the **lane-A** agent talks to the iPhone: every `russet device|app|run|debug|logs|…` command against a real
   device, idevice tools, pymobiledevice3, LLDB against the phone, `cargo xtask lab`.
 - **Lane D** (everyone else) develops against `RUSSET_DEVICE_BACKEND=scripted:<scenario.toml>`, replay traces or
-  the mock device, and files device checks in `docs/lab/queue.md` (PLAN §11).
+  the mock device, and files device checks in `docs/lab/queue.md` (PLAN §11). Until W8 lands
+  `crates/russet-testkit/scenarios/default.toml`, export `RUSSET_DEVICE_BACKEND=none`, which never constructs a
+  live connector either (ARCHITECTURE §14.9).
+- **A device check** in `docs/lab/queue.md` gives its id `DC-nn` (PLAN §11), the requester, the exact commands or
+  script, the expected result and the commit to test. Lane A runs the queue in batches (at least once per working
+  day while a wave is active) and records redacted results in `docs/lab/results/<date>-DC-nn.md`.
+- **Lane C** (heavy disk: the Flutter SDK, Code-OSS and gen_snapshot builds) runs one agent at a time, and only at
+  tier GREEN or BLUE, or in CI (PLAN §2).
 - **One daemon per worktree:** lane-D worktrees export `RUSSET_HOME=<worktree>/.russet-dev` (see `.envrc.example`).
   Development daemons refuse the `live` backend unless `RUSSET_LANE=A` is set.
 - **Lane A** exports `RUSSET_LANE=A` and the persistent `RUSSET_HOME=$HOME/russet-lab/home-A`, shared by every
@@ -67,7 +74,8 @@ VM.
 ## 6. Disk, downloads and build hygiene
 
 - Before heavy work run `cargo xtask disk-guard --need <GiB>` (until W8 lands it: `df -h /home`). Tiers: RED
-  < 8 GiB, AMBER 8–25, GREEN 25–45, BLUE >= 45 with a 20 GiB reserve.
+  < 8 GiB, AMBER 8–25, GREEN 25–45, BLUE >= 45 with a 20 GiB reserve. Plan for **AMBER** in Waves 1–2 (free
+  space has swung between about 12 and 98 GiB) and re-measure before anything heavy.
 - **Never download more than 500 MB without the owner's explicit OK**, whatever the tier.
 - Delete your own scratch output; never touch files Russet did not create.
 - Cargo target slots: `CARGO_TARGET_DIR=$HOME/.cache/russet-dev/target-<slot>` with the slot (`a` or `b`) from
@@ -101,6 +109,7 @@ VM.
 - Swift 6.4 is at `/usr/lib/swift/usr/bin`; the Darwin SDK `~/.swiftpm/swift-sdks/darwin.artifactbundle` is
   read-only to Russet. Until W3 lands, Swift's LLDB needs
   `LD_LIBRARY_PATH=$HOME/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib PYTHONHOME=$HOME/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu`.
+- `~/.local/opt/python-3.12` is being retired (PLAN §14): never point anything at it.
 
 ## 8. Secrets and personal data
 
