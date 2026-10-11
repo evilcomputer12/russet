@@ -71,6 +71,32 @@ pub struct ExitWatcher {
     rx: watch::Receiver<Option<ExitInfo>>,
 }
 
+/// Reports a process's exit to its [`ExitWatcher`]s; the first report wins.
+#[derive(Debug, Clone)]
+pub struct ExitReporter {
+    tx: Arc<watch::Sender<Option<ExitInfo>>>,
+}
+
+impl ExitReporter {
+    /// Records the exit; `false` when one was already recorded.
+    pub fn report(&self, info: ExitInfo) -> bool {
+        self.tx.send_if_modified(|e| {
+            if e.is_none() {
+                *e = Some(info);
+                true
+            } else {
+                false
+            }
+        })
+    }
+}
+
+/// A connected exit reporter and watcher (fake devices and tests; launches make their own).
+pub fn exit_channel() -> (ExitReporter, ExitWatcher) {
+    let (tx, rx) = watch::channel(None);
+    (ExitReporter { tx: Arc::new(tx) }, ExitWatcher { rx })
+}
+
 impl ExitWatcher {
     /// Waits for the exit.
     pub async fn wait(&mut self) -> ExitInfo {
@@ -263,6 +289,26 @@ impl std::fmt::Debug for LaunchedProcess {
 }
 
 impl LaunchedProcess {
+    /// A launched process without a device behind it, for fake devices and tests: no stdin, no launch channel.
+    pub fn from_parts(
+        pid: u32,
+        executable: String,
+        via: LaunchVia,
+        output: Option<Arc<OutputHub>>,
+        exit: ExitWatcher,
+    ) -> Self {
+        Self {
+            pid,
+            executable,
+            via,
+            output,
+            exit,
+            stdin: None,
+            channel: None,
+            stop: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
     /// Writes to the app's stdin (CoreDevice console only).
     pub async fn write_stdin(&mut self, bytes: &[u8]) -> Result<()> {
         let w = self.stdin.as_mut().ok_or_else(|| {

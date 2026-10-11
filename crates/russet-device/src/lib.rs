@@ -39,6 +39,7 @@ pub mod perf;
 pub mod process;
 pub mod rpc;
 pub mod screen;
+pub mod serve;
 pub mod symbols;
 pub mod tunnel;
 pub mod wifi;
@@ -51,7 +52,9 @@ pub use logs::{LogFilter, LogStream};
 pub use manager::{DdiConfig, DeviceConfig, DeviceEvent, DeviceHandle, DeviceManager};
 pub use model::{DeviceInfo, DeviceSelector, DeviceSummary, Readiness, Udid};
 pub use perf::{SysmonOptions, SysmonStream};
-pub use process::{LaunchRequest, LaunchVia, LaunchedProcess, ProcessInfo};
+pub use process::{
+    ExitInfo, ExitReporter, ExitWatcher, LaunchRequest, LaunchVia, LaunchedProcess, ProcessInfo, exit_channel,
+};
 pub use screen::{InputEvent, MirrorHandle, MirrorOptions, Screenshot};
 
 /// A plaintext device stream, as [`io::ServiceConnector`] returns it.

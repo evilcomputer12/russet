@@ -401,6 +401,96 @@ async fn a_connector_with_only_lockdown_get_value_still_drives_the_device_plane(
     assert!(calls.iter().any(|c| c == "lockdown.get_value"), "{calls:?}");
 }
 
+/// DEV-19 / ARCHITECTURE §6.3: a dropped connection ends its `forward` lease and its reservation 2 s later (the
+/// lease grace), not before; russetd's handlers run exactly these (`russet_device::serve`).
+#[tokio::test(start_paused = true)]
+async fn leases_end_at_the_grace_after_their_owner_left() {
+    use russet_device::serve::{hold_forward, hold_reservation, owner_gone};
+    let (_tmp, _conn, m) = start(vec![FakeDevice::iphone12(UDID_A)]).await;
+    let h = m.get(&DeviceSelector::Only).expect("device");
+    let fwd = h
+        .forward(echo_target(), russet_device::BindSpec::Tcp("127.0.0.1:0".parse().expect("addr")))
+        .await
+        .expect("forward");
+    let owner = Caller { conn: "c-1".into(), shared_lease: None };
+    let lease = rpc::device_reserve(&m, &owner, Default::default()).expect("reserve").lease_id;
+    let (closed_tx, closed_rx) = tokio::sync::watch::channel(false);
+    let closed = move || {
+        let mut rx = closed_rx.clone();
+        async move {
+            let _ = rx.wait_for(|c| *c).await;
+        }
+    };
+    let grace = Duration::from_secs(2);
+    let f = tokio::spawn(hold_forward(fwd, owner_gone(closed(), grace)));
+    let r = tokio::spawn(hold_reservation(Arc::clone(&m), lease.clone(), owner_gone(closed(), grace)));
+    // While the owner is connected nothing ends, however long.
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(m.forwards().len(), 1);
+    let other = Caller { conn: "c-2".into(), shared_lease: None };
+    assert_eq!(rpc::handle_for(&m, None, &other).expect_err("reserved").code(), codes::device::RESERVED);
+    // The connection drops: both survive the grace, then end.
+    closed_tx.send(true).expect("closed");
+    tokio::time::sleep(Duration::from_millis(1900)).await;
+    assert_eq!(m.forwards().len(), 1, "the forward survives the grace");
+    assert!(rpc::handle_for(&m, None, &other).is_err(), "the reservation survives the grace");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    f.await.expect("forward lease");
+    r.await.expect("reservation lease");
+    for _ in 0..100 {
+        if m.forwards().is_empty() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(m.forwards().is_empty(), "the forward ended 2 s after the owner left");
+    rpc::handle_for(&m, None, &other).expect("the reservation ended 2 s after the owner left");
+    assert!(!m.release(&lease));
+}
+
+/// `device.watch` sends attach, identity and detach as `device.changed` until the connection closes.
+#[tokio::test]
+async fn device_watch_notifies_changes_until_the_connection_closes() {
+    use russet_protocol::device::DeviceChange;
+    let (_tmp, conn, m) = start(vec![FakeDevice::iphone12(UDID_A)]).await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let s2 = Arc::clone(&seen);
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
+    let sub = russet_device::ids::new_subscription_id();
+    let task = tokio::spawn(russet_device::serve::serve_watch(
+        sub.clone(),
+        m.events(),
+        async {
+            let _ = closed_rx.await;
+        },
+        move |n| {
+            s2.lock().expect("lock").push(n);
+            true
+        },
+    ));
+    conn.attach(FakeDevice::iphone12(UDID_B));
+    let wait = |want: DeviceChange| {
+        let seen = Arc::clone(&seen);
+        async move {
+            for _ in 0..250 {
+                if seen.lock().expect("lock").iter().any(|n| n.change == want && n.device.udid == UDID_B) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            panic!("no {want:?} for the new device");
+        }
+    };
+    wait(DeviceChange::Added).await;
+    // The watcher counts as a client asking: the identity follows as an update.
+    wait(DeviceChange::Updated).await;
+    conn.detach(UDID_B);
+    wait(DeviceChange::Removed).await;
+    assert!(seen.lock().expect("lock").iter().all(|n| n.subscription_id == sub));
+    drop(closed_tx);
+    tokio::time::timeout(Duration::from_secs(5), task).await.expect("ends with the connection").expect("join");
+}
+
 /// Canary (PLAN §0 DoD: no secrets in logs): device errors never carry a UDID, only its redacted form.
 #[tokio::test]
 async fn errors_never_carry_a_udid() {

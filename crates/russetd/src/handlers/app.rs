@@ -5,13 +5,16 @@
 //!
 //! `app.launch` creates an `app-launch` lease (ARCHITECTURE §6.3): the launched process (and its CoreDevice launch
 //! channel) stays with a task that sends `app.output` lines and `app.exited` to the caller, until the app exits or
-//! the caller is gone (+ `lease-grace`). Ending the lease does not kill the app.
+//! the caller is gone (+ `lease-grace`). Ending the lease does not kill the app. The task is
+//! [`russet_device::serve::serve_launch`], tested in russet-device.
 
 use russet_core::Result;
 use russet_core::error::codes;
 use russet_device::rpc;
 use russet_ipc::{RequestCtx, Router};
 use russet_protocol::app as p;
+
+use russet_device::serve::LaunchEvent;
 
 use super::device::{caller, manager, owner_gone};
 use super::not_implemented;
@@ -50,66 +53,11 @@ async fn app_launch(cx: DaemonCtx, rq: RequestCtx, p: p::AppLaunchParams) -> Res
         p::AppLaunchResult { pid: launched.pid, executable: launched.executable.clone(), lease_id: lease_id.clone() };
     let (peer, grace) = (rq.peer.clone(), m.config().lease_grace);
     tokio::spawn(async move {
-        let launched = launched;
-        let mut exit = launched.exit.clone();
-        let mut output = launched.output.as_ref().map(|o| o.subscribe());
-        let gone = owner_gone(&peer, grace);
-        tokio::pin!(gone);
-        // Backlog first (lines written between the launch and this task).
-        if let Some((backlog, _)) = output.as_mut() {
-            for e in std::mem::take(backlog) {
-                let n = p::AppOutputParams {
-                    lease_id: lease_id.clone(),
-                    stream: p::AppOutputStream::Stdout,
-                    data: e.message,
-                };
-                if peer.notify::<p::AppOutput>(n).is_err() {
-                    return;
-                }
-            }
-        }
-        loop {
-            // `Some(Some(line))`, `Some(None)` after a lag (lines were lost; keep going), `None` at the console's end.
-            let line = async {
-                match output.as_mut() {
-                    Some((_, rx)) => match rx.recv().await {
-                        Ok(e) => Some(Some(e)),
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Some(None),
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
-                    },
-                    None => std::future::pending().await,
-                }
-            };
-            tokio::select! {
-                _ = &mut gone => return,
-                e = exit.wait() => {
-                    let n = p::AppExitedParams {
-                        lease_id: lease_id.clone(),
-                        pid: launched.pid,
-                        code: e.code,
-                        signal: e.signal,
-                        crash_id: None,
-                    };
-                    let _ = peer.notify::<p::AppExited>(n);
-                    return;
-                }
-                l = line => match l {
-                    Some(None) => {}
-                    Some(Some(entry)) => {
-                        let n = p::AppOutputParams {
-                            lease_id: lease_id.clone(),
-                            stream: p::AppOutputStream::Stdout,
-                            data: entry.message,
-                        };
-                        if peer.notify::<p::AppOutput>(n).is_err() {
-                            return;
-                        }
-                    }
-                    // The console ended: keep waiting for the exit only.
-                    None => output = None,
-                },
-            }
-        }
+        let notify = |ev: LaunchEvent| match ev {
+            LaunchEvent::Output(n) => peer.notify::<p::AppOutput>(n).is_ok(),
+            LaunchEvent::Exited(n) => peer.notify::<p::AppExited>(n).is_ok(),
+        };
+        russet_device::serve::serve_launch(lease_id, launched, owner_gone(&peer, grace), notify).await;
     });
     Ok(result)
 }

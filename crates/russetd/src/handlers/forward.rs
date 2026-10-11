@@ -25,11 +25,7 @@ async fn forward_open(cx: DaemonCtx, rq: RequestCtx, p: p::ForwardOpenParams) ->
     let (result, handle) = rpc::forward_open(&m, &caller(&rq), p).await?;
     let (peer, grace) = (rq.peer.clone(), m.config().lease_grace);
     tokio::spawn(async move {
-        tokio::select! {
-            _ = owner_gone(&peer, grace) => {}
-            _ = handle.closed() => {}
-        }
-        drop(handle);
+        russet_device::serve::hold_forward(handle, owner_gone(&peer, grace)).await;
     });
     Ok(result)
 }

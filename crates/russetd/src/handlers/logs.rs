@@ -22,27 +22,12 @@ pub fn register(r: &mut Router<DaemonCtx>) {
 
 async fn logs_subscribe(cx: DaemonCtx, rq: RequestCtx, p: p::LogsSubscribeParams) -> Result<p::LogsSubscribeResult> {
     let m = manager(&cx).await?;
-    let mut stream = rpc::logs_subscribe(&m, &p).await?;
+    let stream = rpc::logs_subscribe(&m, &p).await?;
     let subscription_id = russet_device::ids::new_subscription_id();
     let (peer, sub) = (rq.peer.clone(), subscription_id.clone());
     tokio::spawn(async move {
-        let closed = peer.closed();
-        tokio::pin!(closed);
-        loop {
-            let batch = tokio::select! {
-                _ = &mut closed => return,
-                b = stream.next_batch() => b,
-            };
-            let Some(batch) = batch else { return };
-            let params = p::LogsEntriesParams {
-                subscription_id: sub.clone(),
-                entries: batch.entries,
-                dropped: (batch.dropped > 0).then_some(batch.dropped),
-            };
-            if peer.notify::<p::LogsEntries>(params).is_err() {
-                return;
-            }
-        }
+        let notify = |n: p::LogsEntriesParams| peer.notify::<p::LogsEntries>(n).is_ok();
+        russet_device::serve::serve_logs(sub, stream, peer.closed(), notify).await;
     });
     Ok(p::LogsSubscribeResult { subscription_id })
 }

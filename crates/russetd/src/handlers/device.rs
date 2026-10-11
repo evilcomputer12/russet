@@ -35,8 +35,7 @@ pub(crate) fn caller(rq: &RequestCtx) -> Caller {
 
 /// Resolves once the connection is gone and the lease grace (ARCHITECTURE §6.3, `[device] lease-grace`) passed.
 pub(crate) async fn owner_gone(peer: &Peer, grace: Duration) {
-    peer.closed().await;
-    tokio::time::sleep(grace).await;
+    russet_device::serve::owner_gone(peer.closed(), grace).await;
 }
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
@@ -61,33 +60,16 @@ async fn device_list(cx: DaemonCtx, _rq: RequestCtx, _p: p::DeviceListParams) ->
     rpc::device_list(manager(&cx).await?.as_ref()).await
 }
 
-/// `device.watch`: forwards registry events as `device.changed` until the connection closes.
+/// `device.watch`: forwards registry events as `device.changed` until the connection closes
+/// ([`russet_device::serve::serve_watch`]).
 async fn device_watch(cx: DaemonCtx, rq: RequestCtx, _p: p::DeviceWatchParams) -> Result<p::DeviceWatchResult> {
     let m = manager(&cx).await?;
     let subscription_id = russet_device::ids::new_subscription_id();
-    let mut events = m.events();
-    let peer = rq.peer.clone();
-    let sub = subscription_id.clone();
+    let events = m.events();
+    let (peer, sub) = (rq.peer.clone(), subscription_id.clone());
     tokio::spawn(async move {
-        let closed = peer.closed();
-        tokio::pin!(closed);
-        loop {
-            let ev = tokio::select! {
-                _ = &mut closed => return,
-                ev = events.recv() => ev,
-            };
-            match ev {
-                Ok(ev) => {
-                    let (change, device) = rpc::device_change(&ev);
-                    let params = p::DeviceChangedParams { subscription_id: sub.clone(), change, device };
-                    if peer.notify::<p::DeviceChanged>(params).is_err() {
-                        return;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(_) => return,
-            }
-        }
+        let notify = |n: p::DeviceChangedParams| peer.notify::<p::DeviceChanged>(n).is_ok();
+        russet_device::serve::serve_watch(sub, events, peer.closed(), notify).await;
     });
     Ok(p::DeviceWatchResult { subscription_id })
 }
@@ -134,8 +116,7 @@ async fn device_reserve(cx: DaemonCtx, rq: RequestCtx, p: p::DeviceReserveParams
     let result = rpc::device_reserve(&m, &caller(&rq), p)?;
     let (peer, lease, grace) = (rq.peer.clone(), result.lease_id.clone(), m.config().lease_grace);
     tokio::spawn(async move {
-        owner_gone(&peer, grace).await;
-        m.release(&lease);
+        russet_device::serve::hold_reservation(m, lease, owner_gone(&peer, grace)).await;
     });
     Ok(result)
 }
