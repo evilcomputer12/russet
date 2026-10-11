@@ -565,7 +565,8 @@ pub fn open_default(dirs: &RussetDirs, cfg: &SecretsConfig) -> Result<Arc<dyn Se
 > `gc(dry_run)` returns a `GcReport`, and `Toolchains::{new, load, subscribe, resolve_build_env, candidates, unmet,
 > set_min_free_space, with_runner}` exist; `probe_all` lists every candidate (a rejected system LLD too) in the
 > ARCHITECTURE §16.1 order, and `unmet` says why a candidate misses a project's pin (`toolchain.list` with a
-> project). A resolve error that a managed install fixes names it in `details.install` (`darwin-tools`,
+> project). `resolve_build_env` prefers the chosen SDK bundle's own darwin-tools `ld64.lld` when several bundles
+> carry one (unless the project names a linker path). A resolve error that a managed install fixes names it in `details.install` (`darwin-tools`,
 > `python-shared`). Probes run through an `Exec` seam with a cache in `cache/toolchain-probes.json` keyed by path,
 > mtime, size, arguments and env; `RunnerExec` runs them through russet-core's `CommandRunner` [D 73] once the
 > daemon passes its `ProcessRunner` (`with_runner`, after W2's F1), `tokio::process` until then.

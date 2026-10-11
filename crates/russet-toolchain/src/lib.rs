@@ -713,8 +713,21 @@ impl Toolchains {
             .with_hint(format!("Install Swift {needed} (\"this SDK is not supported by the compiler\" otherwise)."))
             .with_details(serde_json::json!({ "sdk": sdk.id, "swiftRequired": needed.to_string(), "swiftFound": found.to_string() })));
         }
-        let linker =
-            self.resolve(Component::Linker, &Requirement { version: None, flavor: project.linker.clone() }).await?;
+        let linker_req = Requirement { version: None, flavor: project.linker.clone() };
+        let linker = self.resolve(Component::Linker, &linker_req).await?;
+        // With several SDK bundles, the chosen SDK's own darwin-tools linker comes first (it is the one built
+        // for that SDK's TBDs), unless the project names a linker path.
+        let from_sdk =
+            |t: &ToolInfo| matches!(&t.provenance, Provenance::XtoolBundle { bundle } if *bundle == sdk.bundle);
+        let linker = if linker_req.path().is_none() && !from_sdk(&linker) {
+            self.candidates(Component::Linker, &linker_req)
+                .await
+                .into_iter()
+                .find(|t| t.ok && from_sdk(t) && self.unmet(t, &linker_req).is_none())
+                .unwrap_or(linker)
+        } else {
+            linker
+        };
         let mut env = BTreeMap::new();
         for t in [&swift, &linker] {
             env.extend(t.env.clone());

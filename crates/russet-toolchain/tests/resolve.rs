@@ -62,6 +62,22 @@ async fn a_project_pin_that_the_host_does_not_have_is_a_version_mismatch() {
 }
 
 #[tokio::test]
+async fn the_build_env_links_with_the_chosen_sdks_own_darwin_tools() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let bin = common::swift_toolchain(&tmp.path().join("swift-6.4"), "6.4");
+    let first = tmp.path().join("sdks-a");
+    let second = tmp.path().join("sdks-b");
+    common::sdk_bundle(&first, "27.0", "27A266a", "1.1.0", "21.1.6");
+    let chosen = common::sdk_bundle(&second, "27.0", "27A300", "1.1.0", "21.1.7");
+    let tc = toolchains(tmp.path(), common::host(vec![bin], vec![first, second], tmp.path()));
+    let pinned = ToolchainSection { xcode_sdk: Some("27A300".into()), ..ToolchainSection::default() };
+    let env = tc.resolve_build_env(&pinned).await.expect("27A300 resolves");
+    assert_eq!(env.sdk.id, "xcode-27.0-27A300");
+    assert_eq!(env.linker.version, "21.1.7", "{:?}", env.linker);
+    assert_eq!(env.linker.provenance, Provenance::XtoolBundle { bundle: chosen });
+}
+
+#[tokio::test]
 async fn an_old_darwin_tools_bundle_and_an_old_system_lld_are_linker_unsupported() {
     let tmp = tempfile::tempdir().expect("tmp");
     let bin = common::swift_toolchain(&tmp.path().join("swift-6.4"), "6.4");
