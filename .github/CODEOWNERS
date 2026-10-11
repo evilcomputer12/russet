@@ -20,5 +20,7 @@
 /deny.toml                          @evilcomputer12
 /packaging/                         @evilcomputer12
 
-# The guards' allowlists (provenance roots, private-track term digests)
+# The guards and their allowlists (provenance roots, private-track term digests, synthetic test values, uploads)
 /xtask/src/guard.rs                 @evilcomputer12
+/.github/synthetic-secrets.toml     @evilcomputer12
+/.github/upload-safe.toml           @evilcomputer12

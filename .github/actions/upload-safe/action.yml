@@ -7,18 +7,21 @@
 # only exception is .github/upload-safe.toml, which names apple-release.yml's own RussetProbe Mach-O outputs by
 # job and path; the calling workflow file and job id select its entries.
 #
-# The job must have the Rust toolchain installed (the guard is `cargo xtask`). A path that does not exist is a
-# note, not a failure, like `if-no-files-found: warn`.
+# `path` is one plain file or directory: actions/upload-artifact expands globs, `!` exclusions, `~` and several
+# lines, which the guard would not see, so such a path fails here before anything is uploaded (call the action
+# once per path). The guard follows symlinks as upload-artifact does. A path that does not exist is handled as
+# `if-no-files-found` says (the default `warn` uploads nothing, so it scans nothing). The job must have the Rust
+# toolchain installed (the guard is `cargo xtask`).
 
 name: upload-safe
-description: Guard a directory or file against Apple files and secrets, then upload it as an artifact
+description: Guard one file or directory against Apple files and secrets, then upload it as an artifact
 
 inputs:
   name:
     description: Artifact name
     required: true
   path:
-    description: File or directory to guard and upload
+    description: One file or directory to guard and upload (no globs, exclusions, ~ or several lines)
     required: true
   retention-days:
     description: Days to keep the artifact (QA §4.4 - 14 for test reports)
@@ -36,13 +39,20 @@ runs:
       shell: bash
       env:
         UPLOAD_PATH: ${{ inputs.path }}
+        IF_MISSING: ${{ inputs.if-no-files-found }}
         WORKFLOW_REF: ${{ github.workflow_ref }}
         JOB_ID: ${{ github.job }}
       run: |
         set -euo pipefail
+        case "$UPLOAD_PATH" in
+          "" | *$'\n'* | *$'\r'* | *'*'* | *'?'* | *'['* | *']'* | *'{'* | *'}'* | '!'* | '~'*)
+            echo "::error title=upload-safe::path must be one plain file or directory: no globs, '!' exclusions, '~' or several lines, which actions/upload-artifact would expand past the guard"
+            exit 1
+            ;;
+        esac
         workflow="${WORKFLOW_REF%%@*}"
         workflow="${workflow##*/}"
-        cargo xtask guard apple-files secrets --artifacts "$UPLOAD_PATH" \
+        cargo xtask guard apple-files secrets --artifacts "$UPLOAD_PATH" --if-missing "$IF_MISSING" \
           --upload-allowlist .github/upload-safe.toml --workflow "$workflow" --job "$JOB_ID"
     - name: Upload
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

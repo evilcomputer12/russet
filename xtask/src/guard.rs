@@ -6,19 +6,20 @@
 //! | Check | What it fails on |
 //! |---|---|
 //! | `apple-files` (alias `check-no-apple`) | Apple-format magic, Apple file extensions and Apple copyright headers ([`crate::no_apple`]), except generated fixtures that the provenance allowlist admits ([`provenance_allows`], [D 88]) |
-//! | `secrets` | gitleaks when installed, and always the built-in scan: PEM private keys, AWS, GitHub, Slack and Google keys, JWTs, real-looking UDIDs and the owner's local denylist of private identifiers |
+//! | `secrets` | the built-in scan (PEM and PGP private keys, AWS, GitHub, Slack and Google keys, JWTs, real-looking UDIDs, the owner's local denylist of private identifiers) and gitleaks over the branch's history when installed; reviewed synthetic test values ([`SYNTHETIC_ALLOWLIST`]) pass |
 //! | `reuse` | `reuse lint` (REUSE 3.3: SPDX headers everywhere) |
 //! | `typos` | `typos` with the reviewed allowlist in `typos.toml` |
-//! | `public-terms` | the private track's identifying terms, compared as SHA-256 digests of lowercased tokens and token pairs, outside the Q34 allowlist ([D 91]) |
-//! | `zizmor` | GitHub Actions findings of medium severity or above |
+//! | `public-terms` | the private track's identifying terms, compared as SHA-256 digests of lowercased tokens and token pairs, outside the allowlist ([D 91]) |
+//! | `zizmor` | GitHub Actions findings of medium severity or above (offline audits; `--zizmor-online` adds the online ones) |
 //! | `commits` | commit subjects of the branch that are not Conventional Commits |
 //! | `dco` | commits of the branch without a `Signed-off-by:` trailer (not in `all` during the private phase; CONTRIBUTING.md) |
 //!
-//! `all` (the default) runs every check but `dco`. `--artifacts DIR` makes `apple-files` and `secrets` scan
-//! those directories instead of the git tree (the `upload-safe` action, caches); `--upload-allowlist` with
-//! `--workflow` and `--job` then admits the Mach-O outputs that `.github/upload-safe.toml` names for that job.
-//! An external tool that is missing skips its check with a note, unless `--require-tools` (CI). Findings never
-//! print a secret's value. Owner: W8.
+//! `all` (the default) runs every check but `dco`. `--artifacts PATH` makes `apple-files` and `secrets` scan that
+//! file or directory instead of the git tree (the `upload-safe` action, the CI cache), following symlinks the way
+//! `actions/upload-artifact` does and refusing globs it would expand; `--upload-allowlist` with `--workflow` and
+//! `--job` then admits the Mach-O outputs that `.github/upload-safe.toml` names for that job. An external tool
+//! that is missing skips its check with a note, unless `--require-tools` (CI). Findings never print a secret's
+//! value; `--suggest-allowlist` (never on CI) prints reviewed-allowlist entries for them. Owner: W8.
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -40,9 +41,12 @@ pub struct Args {
     /// Guards to run: apple-files, secrets, reuse, typos, public-terms, zizmor, commits, dco, all (default: all)
     #[arg(value_name = "CHECK")]
     pub checks: Vec<String>,
-    /// Scan these directories (upload artifacts, caches) instead of the git tree, for apple-files and secrets
-    #[arg(long = "artifacts", value_name = "DIR")]
+    /// Scan this file or directory (an upload, the CI cache) instead of the git tree, for apple-files and secrets
+    #[arg(long = "artifacts", value_name = "PATH")]
     pub artifacts: Vec<PathBuf>,
+    /// What a missing --artifacts path means (the upload-safe action passes its if-no-files-found)
+    #[arg(long, value_enum, default_value_t = IfMissing::Error)]
+    pub if_missing: IfMissing,
     /// The upload allowlist (.github/upload-safe.toml): Mach-O outputs a workflow job may upload
     #[arg(long, value_name = "FILE", requires_all = ["workflow", "job"])]
     pub upload_allowlist: Option<PathBuf>,
@@ -67,6 +71,28 @@ pub struct Args {
     /// The owner's local denylist of private identifiers (default: ~/.config/russet/private-identifiers)
     #[arg(long, value_name = "FILE")]
     pub private_identifiers: Option<PathBuf>,
+    /// The reviewed allowlist of synthetic test values (default: .github/synthetic-secrets.toml)
+    #[arg(long, value_name = "FILE")]
+    pub synthetic_allowlist: Option<PathBuf>,
+    /// Print allowlist entries (with the values' SHA-256) for the secrets findings; local only, never on CI
+    #[arg(long)]
+    pub suggest_allowlist: bool,
+    /// Run zizmor's online audits too (impostor commits, known-vulnerable actions); needs GH_TOKEN
+    #[arg(long)]
+    pub zizmor_online: bool,
+}
+
+/// What a missing `--artifacts` path means. `actions/upload-artifact` uploads nothing for it either, so `warn` and
+/// `ignore` are safe once the path is known to be a plain path ([`plain_path`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum IfMissing {
+    /// Fail (the default outside the upload-safe action).
+    #[default]
+    Error,
+    /// Print a warning and scan nothing (upload-artifact's default `if-no-files-found: warn`).
+    Warn,
+    /// Scan nothing, silently.
+    Ignore,
 }
 
 /// One guard.
@@ -131,6 +157,7 @@ impl Check {
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     pub artifacts: Vec<PathBuf>,
+    pub if_missing: IfMissing,
     pub upload: Option<UploadAllow>,
     pub require_tools: bool,
     pub base: Option<String>,
@@ -140,6 +167,11 @@ pub struct Options {
     pub private_identifiers: Option<PathBuf>,
     /// Never read the default denylist (tests).
     pub no_default_denylist: bool,
+    /// The synthetic allowlist; `None` reads [`SYNTHETIC_ALLOWLIST`] under the root if it exists.
+    pub synthetic_allowlist: Option<PathBuf>,
+    /// Collect allowlist entries for the secrets findings.
+    pub suggest_allowlist: bool,
+    pub zizmor_online: bool,
     /// Never run external tools (tests of the built-in scans).
     pub builtin_only: bool,
 }
@@ -174,10 +206,14 @@ pub fn run(args: Args) -> Result<()> {
     if args.hash_terms {
         let mut text = String::new();
         std::io::stdin().read_to_string(&mut text).context("reading terms from stdin")?;
-        for term in text.lines().map(str::trim).filter(|t| !t.is_empty() && !t.starts_with('#')) {
-            println!("{}", hex(&term_digest(term)));
+        for digest in hash_terms(&text)? {
+            println!("{}", hex(&digest));
         }
         return Ok(());
+    }
+    if args.suggest_allowlist && crate::ci::on_ci() {
+        // The digest of a real identifier is brute-forceable; it never goes into a CI log.
+        bail!("--suggest-allowlist runs only locally (CI is set): review the findings on your machine");
     }
     let root = crate::workstreams::repo_root();
     let mut checks = Vec::new();
@@ -204,12 +240,16 @@ pub fn run(args: Args) -> Result<()> {
     };
     let opts = Options {
         artifacts: args.artifacts,
+        if_missing: args.if_missing,
         upload,
         require_tools: args.require_tools,
         base: args.base,
         extra_digests,
         private_identifiers: args.private_identifiers,
         no_default_denylist: false,
+        synthetic_allowlist: args.synthetic_allowlist,
+        suggest_allowlist: args.suggest_allowlist,
+        zizmor_online: args.zizmor_online,
         builtin_only: false,
     };
     let summary = run_checks(&root, &checks, &opts)?;
@@ -266,6 +306,15 @@ pub fn run_checks(root: &Path, checks: &[Check], opts: &Options) -> Result<Summa
             println!("{}: {f}", check.name());
             summary.findings.push(format!("{}: {f}", check.name()));
         }
+        if opts.suggest_allowlist && !result.suggestions.is_empty() {
+            println!(
+                "# Entries for {SYNTHETIC_ALLOWLIST}: add one only after checking that its value is synthetic (a test \
+                 value, never a real key, token or device identifier), and say why in `reason`."
+            );
+            for s in &result.suggestions {
+                println!("{s}");
+            }
+        }
         if let Some(tool) = &result.missing_tool {
             summary.missing_tools.push(tool.clone());
         }
@@ -296,6 +345,8 @@ pub fn run_checks(root: &Path, checks: &[Check], opts: &Options) -> Result<Summa
 #[derive(Debug, Clone, Default)]
 struct CheckResult {
     findings: Vec<String>,
+    /// Allowlist entries for the findings (`--suggest-allowlist`).
+    suggestions: Vec<String>,
     skipped: Option<String>,
     missing_tool: Option<String>,
     error: Option<String>,
@@ -346,20 +397,63 @@ pub fn tree_files(root: &Path) -> Result<Vec<String>> {
     Ok(files)
 }
 
-/// Every regular file below `dir` (or `dir` itself), without following symlinks.
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    let meta = std::fs::symlink_metadata(dir)?;
+/// Every regular file below `path` (or `path` itself), following symlinks as `actions/upload-artifact` does
+/// (its globber follows them by default), so a link to an Apple file is scanned where the upload would read it.
+/// `stack` holds the canonical directories being walked, which stops symlink loops; a directory reached through
+/// two different paths is walked twice, because the upload carries it twice. A dangling link becomes a note.
+fn walk_artifact(path: &Path, out: &mut Vec<PathBuf>, stack: &mut Vec<PathBuf>, notes: &mut Vec<String>) -> Result<()> {
+    let meta = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if std::fs::symlink_metadata(path).is_ok() => {
+            notes.push(format!("{}: a dangling symlink ({e}); nothing to scan", path.display()));
+            return Ok(());
+        }
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
     if meta.is_file() {
-        out.push(dir.to_path_buf());
+        out.push(path.to_path_buf());
         return Ok(());
     }
     if !meta.is_dir() {
+        // Sockets and FIFOs carry no file content to upload.
         return Ok(());
     }
-    let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<std::io::Result<_>>()?;
+    let canonical = std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;
+    if stack.contains(&canonical) {
+        notes.push(format!("{}: a symlink loop; not followed again", path.display()));
+        return Ok(());
+    }
+    stack.push(canonical);
+    let mut entries: Vec<_> = std::fs::read_dir(path)
+        .and_then(|rd| rd.collect::<std::io::Result<Vec<_>>>())
+        .with_context(|| format!("listing {}", path.display()))?;
     entries.sort_by_key(|e| e.path());
     for e in entries {
-        walk(&e.path(), out)?;
+        walk_artifact(&e.path(), out, stack, notes)?;
+    }
+    stack.pop();
+    Ok(())
+}
+
+/// Refuses an `--artifacts` path that `actions/upload-artifact` would read differently from the guard: glob
+/// characters (`* ? [ ] { }`), a `!` exclusion, a leading `~`, or several lines. The guard scans exactly one
+/// literal file or directory, so the upload must name exactly that.
+pub fn plain_path(path: &Path) -> Result<()> {
+    let s = path.to_string_lossy();
+    if s.trim().is_empty() {
+        bail!("an empty --artifacts path");
+    }
+    if s.contains(['\n', '\r']) {
+        bail!("--artifacts {s:?} has several lines, which actions/upload-artifact would expand: one path per flag");
+    }
+    if s.contains(['*', '?', '[', ']', '{', '}']) {
+        bail!(
+            "--artifacts {s:?} has glob characters, which actions/upload-artifact would expand: pass one plain file \
+             or directory"
+        );
+    }
+    if s.starts_with('!') || s.starts_with('~') {
+        bail!("--artifacts {s:?}: a `!` exclusion or a `~` path is expanded by actions/upload-artifact, not here");
     }
     Ok(())
 }
@@ -373,7 +467,7 @@ struct ScanItem {
     rel: String,
 }
 
-/// Every file to scan, plus notes about artifact directories that do not exist.
+/// Every file to scan, plus notes (artifact paths that do not exist under `--if-missing warn`, dangling links).
 fn scan_set(root: &Path, files: Option<&[String]>, opts: &Options) -> Result<(Vec<ScanItem>, Vec<String>)> {
     let mut notes = Vec::new();
     let mut out = Vec::new();
@@ -383,14 +477,23 @@ fn scan_set(root: &Path, files: Option<&[String]>, opts: &Options) -> Result<(Ve
         }
         None => {
             for dir in &opts.artifacts {
-                if !dir.exists() {
-                    notes.push(format!("{} does not exist; nothing to scan", dir.display()));
+                plain_path(dir)?;
+                // Neither a file nor a (possibly dangling) link: the upload finds nothing there either.
+                if std::fs::symlink_metadata(dir).is_err() {
+                    match opts.if_missing {
+                        IfMissing::Error => bail!("{} does not exist (--if-missing error)", dir.display()),
+                        IfMissing::Warn => {
+                            notes.push(format!("warning: {} does not exist; nothing to scan", dir.display()))
+                        }
+                        IfMissing::Ignore => {}
+                    }
                     continue;
                 }
                 let mut found = Vec::new();
-                walk(dir, &mut found).with_context(|| format!("scanning {}", dir.display()))?;
+                walk_artifact(dir, &mut found, &mut Vec::new(), &mut notes)?;
+                let single_file = dir.is_file();
                 for p in found {
-                    let rel = if dir.is_file() {
+                    let rel = if single_file {
                         p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
                     } else {
                         slash(p.strip_prefix(dir).unwrap_or(&p))
@@ -603,54 +706,147 @@ impl UploadAllow {
 
 // ---- secrets -----------------------------------------------------------------------------------------------
 
-/// A secret-shaped match: the rule and its 1-based position. The value itself is never kept.
+/// A secret-shaped match: the rule, its 1-based position and the SHA-256 of the matched value. Only the reviewed
+/// synthetic allowlist reads the digest ([`SyntheticAllowlist`]); findings never print it, and the value itself is
+/// never kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
     pub rule: &'static str,
     pub line: usize,
     pub col: usize,
+    /// `None` for the owner's private identifiers, which no allowlist admits.
+    pub digest: Option<[u8; 32]>,
 }
 
-/// Lines carrying one of these markers are not reported (gitleaks' own marker is honoured too).
+impl Hit {
+    fn new(rule: &'static str, line: usize, col: usize, value: &[u8]) -> Self {
+        Self { rule, line, col, digest: Some(value_digest(rule, value)) }
+    }
+}
+
+/// The SHA-256 the synthetic allowlist compares: of the value as found, upper-cased for UDIDs (hex digits are
+/// case-insensitive).
+pub fn value_digest(rule: &str, value: &[u8]) -> [u8; 32] {
+    if rule == "udid" { Sha256::digest(value.to_ascii_uppercase()).into() } else { Sha256::digest(value).into() }
+}
+
+/// Lines carrying one of these markers are not reported (gitleaks' own marker is honoured too), except for the
+/// owner's private identifiers, which no marker hides.
 const ALLOW_MARKERS: &[&str] = &["gitleaks:allow", "russet-guard:allow"];
+
+/// The reviewed allowlist of synthetic test values (owner review through `.github/CODEOWNERS`).
+pub const SYNTHETIC_ALLOWLIST: &str = ".github/synthetic-secrets.toml";
+
+/// Synthetic test values shaped like secrets or device identifiers (a test JWT, a UDID with a hand-typed ECID),
+/// admitted by the SHA-256 of the value ([`value_digest`]; gitleaks findings by the digest of the secret it
+/// reports). Value digests, not file positions, so an entry survives rebases and covers the history gitleaks
+/// reads; a value that is not listed fails wherever it appears.
+#[derive(Debug, Clone, Default)]
+pub struct SyntheticAllowlist {
+    digests: HashSet<[u8; 32]>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SyntheticFile {
+    schema: u32,
+    #[serde(default)]
+    synthetic: Vec<SyntheticEntry>,
+}
+
+/// One reviewed value.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SyntheticEntry {
+    /// The rule that found it (`udid`, `jwt`, or a gitleaks rule id such as `generic-api-key`); documentation.
+    rule: String,
+    /// SHA-256 of the value ([`value_digest`]).
+    sha256: String,
+    /// The workstream (or `lead`) whose test uses the value.
+    owner: String,
+    /// Where it is and why it is synthetic.
+    reason: String,
+}
+
+impl SyntheticAllowlist {
+    pub fn parse(text: &str) -> Result<Self> {
+        let file: SyntheticFile = toml::from_str(text)?;
+        anyhow::ensure!(file.schema == 1, "unknown schema {}", file.schema);
+        let mut digests = HashSet::new();
+        for e in &file.synthetic {
+            anyhow::ensure!(!e.rule.trim().is_empty(), "an entry without a rule");
+            anyhow::ensure!(!e.owner.trim().is_empty(), "the entry {} has no owner", e.sha256);
+            anyhow::ensure!(e.reason.trim().len() >= 10, "the entry {} needs a reason", e.sha256);
+            digests.insert(parse_digest(e.sha256.trim()).context("sha256")?);
+        }
+        Ok(Self { digests })
+    }
+
+    /// `--synthetic-allowlist FILE`, else [`SYNTHETIC_ALLOWLIST`] under `root` if it exists.
+    fn load(root: &Path, opts: &Options) -> Result<Self> {
+        let (path, required) = match &opts.synthetic_allowlist {
+            Some(p) => (p.clone(), true),
+            None => (root.join(SYNTHETIC_ALLOWLIST), false),
+        };
+        if !required && !path.is_file() {
+            return Ok(Self::default());
+        }
+        let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        Self::parse(&text).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    pub fn admits(&self, digest: &[u8; 32]) -> bool {
+        self.digests.contains(digest)
+    }
+}
+
+/// An allowlist entry for `--suggest-allowlist`.
+fn suggestion(rule: &str, digest: &[u8; 32], place: &str) -> String {
+    format!(
+        "[[synthetic]]\nrule = \"{rule}\"\nsha256 = \"{}\"\nowner = \"W??\"\nreason = \"{place}: why the value is synthetic\"\n",
+        hex(digest)
+    )
+}
 
 fn secrets(root: &Path, files: Option<&[String]>, opts: &Options) -> Result<CheckResult> {
     let (set, notes) = scan_set(root, files, opts)?;
     let denylist = load_denylist(opts)?;
+    let synthetic = SyntheticAllowlist::load(root, opts)?;
     let mut r = CheckResult::default();
+    let mut admitted = 0;
+    let mut suggested: HashSet<[u8; 32]> = HashSet::new();
     for ScanItem { shown, abs, .. } in &set {
         let Some(text) = read_text(abs) else { continue };
         for hit in scan_secrets(&text, &denylist) {
+            if hit.digest.is_some_and(|d| synthetic.admits(&d)) {
+                admitted += 1;
+                continue;
+            }
             r.findings.push(format!("{shown}:{}:{}: {} (value not shown)", hit.line, hit.col, hit.rule));
+            if let Some(d) = hit.digest
+                && opts.suggest_allowlist
+                && suggested.insert(d)
+            {
+                r.suggestions.push(suggestion(hit.rule, &d, &format!("{shown}:{}", hit.line)));
+            }
         }
     }
     let mut note = format!("built-in scan of {} files", set.len());
     if !denylist.is_empty() {
         note.push_str(&format!(", {} private identifier(s)", denylist.len()));
     }
-    // gitleaks adds its rule set when installed.
+    // gitleaks adds its rule set and the branch's history when installed.
     if !opts.builtin_only {
         if crate::ci::has_program("gitleaks") {
-            let mut cmd = Command::new("gitleaks");
-            let common = ["--no-banner", "--no-color", "--redact", "--verbose", "--exit-code", "1"];
-            match files {
-                // The history of the checked-out branch only: a local repository shared by several worktrees
-                // holds every card's branches, and gitleaks would otherwise read them all.
-                Some(_) => {
-                    cmd.arg("git").args(common).arg("--log-opts=HEAD").arg(root);
-                }
-                None => {
-                    cmd.arg("dir").args(common);
-                    cmd.args(opts.artifacts.iter().filter(|d| d.exists()));
+            let g = gitleaks(root, files.is_some(), opts, &synthetic)?;
+            admitted += g.admitted;
+            r.findings.extend(g.findings);
+            for (rule, d, place) in g.unlisted {
+                if opts.suggest_allowlist && suggested.insert(d) {
+                    r.suggestions.push(suggestion(&rule, &d, &place));
                 }
             }
-            let out = cmd.output().context("running gitleaks")?;
-            if out.status.success() {
-                note.push_str("; gitleaks: no leaks");
-            } else {
-                let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
-                r.findings.push(format!("gitleaks reported leaks (redacted):\n{}", text.trim()));
-            }
+            note.push_str(&format!("; gitleaks: {}", g.summary));
         } else {
             note.push_str("; gitleaks not installed");
             r.missing_tool = Some("gitleaks".into());
@@ -659,11 +855,98 @@ fn secrets(root: &Path, files: Option<&[String]>, opts: &Options) -> Result<Chec
             }
         }
     }
+    if admitted > 0 {
+        note.push_str(&format!("; {admitted} reviewed synthetic value(s) admitted ({SYNTHETIC_ALLOWLIST})"));
+    }
     for n in notes {
         note.push_str(&format!("; {n}"));
     }
     r.note = Some(note);
     Ok(r)
+}
+
+/// What gitleaks found once the synthetic allowlist is applied.
+#[derive(Debug, Default)]
+struct GitleaksOutcome {
+    findings: Vec<String>,
+    /// `(rule, digest, place)` of every finding, for `--suggest-allowlist`.
+    unlisted: Vec<(String, [u8; 32], String)>,
+    admitted: usize,
+    summary: String,
+}
+
+/// Applies the synthetic allowlist to a gitleaks JSON report (an array of findings with `RuleID`, `File`,
+/// `StartLine`, `Commit` and `Secret`), adding what remains to `out` without the values. Returns how many findings
+/// the report held.
+fn filter_gitleaks_report(report: &str, synthetic: &SyntheticAllowlist, out: &mut GitleaksOutcome) -> Result<usize> {
+    let items: Vec<serde_json::Value> = serde_json::from_str(report).context("parsing the gitleaks report")?;
+    for item in &items {
+        let field = |k: &str| item.get(k).and_then(serde_json::Value::as_str).unwrap_or_default();
+        let digest: [u8; 32] = Sha256::digest(field("Secret").as_bytes()).into();
+        if synthetic.admits(&digest) {
+            out.admitted += 1;
+            continue;
+        }
+        let line = item.get("StartLine").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let place = format!("{}:{line}", field("File"));
+        let commit = field("Commit");
+        let commit =
+            if commit.is_empty() { String::new() } else { format!(", commit {}", commit.get(..10).unwrap_or(commit)) };
+        out.findings.push(format!("{place}: {} (gitleaks{commit}; value not shown)", field("RuleID")));
+        out.unlisted.push((field("RuleID").to_string(), digest, place));
+    }
+    Ok(items.len())
+}
+
+/// gitleaks' exit code for "leaks found", distinct from its exit code 1 for errors.
+const GITLEAKS_LEAKS_EXIT: i32 = 3;
+
+/// Runs gitleaks with a JSON report in a private temporary directory (it holds the matched values, so it is never
+/// printed and is deleted at once), then applies the synthetic allowlist to the reported secrets. The git tree
+/// is scanned through the checked-out branch's history (`--log-opts=HEAD`): a local repository shared by several
+/// worktrees holds every card's branches, and gitleaks' default would read them all. A `.gitleaksignore` in the
+/// repository root is honoured, as gitleaks does by itself.
+fn gitleaks(root: &Path, tree: bool, opts: &Options, synthetic: &SyntheticAllowlist) -> Result<GitleaksOutcome> {
+    let scratch = ScratchDir::new("russet-gitleaks")?;
+    let report = scratch.0.join("report.json");
+    let mut targets: Vec<Vec<std::ffi::OsString>> = Vec::new();
+    if tree {
+        targets.push(vec!["git".into(), "--log-opts=HEAD".into(), root.as_os_str().to_owned()]);
+    } else {
+        for dir in opts.artifacts.iter().filter(|d| d.exists()) {
+            targets.push(vec!["dir".into(), "--follow-symlinks".into(), dir.as_os_str().to_owned()]);
+        }
+    }
+    let mut out = GitleaksOutcome::default();
+    let mut reported = 0;
+    for target in &targets {
+        let _ = std::fs::remove_file(&report);
+        let output = Command::new("gitleaks")
+            .args(&target[..1])
+            .args(["--no-banner", "--no-color", "--log-level", "error", "--report-format", "json"])
+            .arg("--report-path")
+            .arg(&report)
+            .args(["--exit-code", &GITLEAKS_LEAKS_EXIT.to_string()])
+            .args(&target[1..])
+            .current_dir(root)
+            .output()
+            .context("running gitleaks")?;
+        match output.status.code() {
+            Some(0) => {}
+            Some(GITLEAKS_LEAKS_EXIT) => {
+                let text = std::fs::read_to_string(&report).context("reading the gitleaks report")?;
+                let _ = std::fs::remove_file(&report);
+                reported += filter_gitleaks_report(&text, synthetic, &mut out)?;
+            }
+            _ => bail!("gitleaks failed with {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim()),
+        }
+    }
+    out.summary = if reported == 0 {
+        "no leaks".into()
+    } else {
+        format!("{reported} report(s), {} reviewed synthetic", out.admitted)
+    };
+    Ok(out)
 }
 
 /// The owner's local denylist (QA §3.5.3): one identifier per line, `#` comments. Never printed.
@@ -693,10 +976,19 @@ fn load_denylist(opts: &Options) -> Result<Vec<String>> {
 pub fn scan_secrets(text: &str, denylist: &[String]) -> Vec<Hit> {
     let mut hits = Vec::new();
     for (i, line) in text.lines().enumerate() {
+        let n = i + 1;
+        // The owner's private identifiers count on every line: an allow marker never hides them.
+        if !denylist.is_empty() {
+            let lower = line.to_lowercase();
+            for id in denylist {
+                if let Some(at) = lower.find(id.as_str()) {
+                    hits.push(Hit { rule: "private-identifier", line: n, col: at + 1, digest: None });
+                }
+            }
+        }
         if ALLOW_MARKERS.iter().any(|m| line.contains(m)) {
             continue;
         }
-        let n = i + 1;
         let b = line.as_bytes();
         for r in TOKEN_RULES {
             for p in r.prefixes {
@@ -707,28 +999,21 @@ pub fn scan_secrets(text: &str, denylist: &[String]) -> Vec<Hit> {
                     let tail = &b[at + p.len()..];
                     let len = tail.iter().take_while(|c| (r.class)(**c)).count();
                     if len >= r.min && r.exact.is_none_or(|e| len == e) {
-                        hits.push(Hit { rule: r.rule, line: n, col: at + 1 });
+                        hits.push(Hit::new(r.rule, n, at + 1, &b[at..at + p.len() + len]));
                     }
                 }
             }
         }
         for at in find_all(line, "eyJ") {
-            if is_jwt(&b[at..]) && (at == 0 || !is_base64url(b[at - 1])) {
-                hits.push(Hit { rule: "jwt", line: n, col: at + 1 });
+            if (at == 0 || !is_base64url(b[at - 1]))
+                && let Some(len) = jwt_len(&b[at..])
+            {
+                hits.push(Hit::new("jwt", n, at + 1, &b[at..at + len]));
             }
         }
         for at in find_all(line, "0000") {
             if let Some(col) = udid_at(b, at) {
-                hits.push(Hit { rule: "udid", line: n, col });
-            }
-        }
-        if !denylist.is_empty() {
-            let lower = line.to_lowercase();
-            for (k, id) in denylist.iter().enumerate() {
-                if let Some(at) = lower.find(id.as_str()) {
-                    let _ = k;
-                    hits.push(Hit { rule: "private-identifier", line: n, col: at + 1 });
-                }
+                hits.push(Hit::new("udid", n, col, &b[at..at + 25]));
             }
         }
     }
@@ -798,28 +1083,26 @@ fn find_all<'a>(hay: &'a str, needle: &'a str) -> impl Iterator<Item = usize> + 
     hay.match_indices(needle).map(|(i, _)| i)
 }
 
-/// `eyJ<≥10>.eyJ<≥10>.<≥10>` in base64url: a JSON Web Token (ASC tokens are ES256 JWTs).
-fn is_jwt(b: &[u8]) -> bool {
+/// `eyJ<≥10>.eyJ<≥10>.<≥10>` in base64url: a JSON Web Token (ASC tokens are ES256 JWTs). Its length, if one
+/// starts at `b`.
+fn jwt_len(b: &[u8]) -> Option<usize> {
     let mut parts = Vec::new();
     let mut i = 0;
-    for _ in 0..3 {
+    for k in 0..3 {
         let start = i;
         while i < b.len() && is_base64url(b[i]) {
             i += 1;
         }
         parts.push(&b[start..i]);
-        if parts.len() < 3 {
+        if k < 2 {
             if i < b.len() && b[i] == b'.' {
                 i += 1;
             } else {
-                return false;
+                return None;
             }
         }
     }
-    parts.len() == 3
-        && parts[0].starts_with(b"eyJ")
-        && parts[1].starts_with(b"eyJ")
-        && parts.iter().all(|p| p.len() >= 10)
+    (parts[0].starts_with(b"eyJ") && parts[1].starts_with(b"eyJ") && parts.iter().all(|p| p.len() >= 10)).then_some(i)
 }
 
 /// A modern UDID `0000XXXX-XXXXXXXXXXXXXXXX` (chip id, ECID) at `at`, as a 1-based column. Two synthetic
@@ -836,38 +1119,76 @@ fn udid_at(b: &[u8], at: usize) -> Option<usize> {
     (shaped && bounded && !synthetic).then_some(at + 1)
 }
 
-/// PEM private-key blocks with a body of at least 64 base64 characters, like gitleaks' rule: a bare
-/// `BEGIN … PRIVATE KEY` line in documentation or a test is not a key.
+/// Private-key blocks, the way gitleaks' `private-key` rule sees them: `-----BEGIN`, up to 100 characters of
+/// `[ A-Za-z0-9_-]`, `PRIVATE KEY` (PEM) or `PRIVATE KEY BLOCK` (PGP armour), `-----`, then a body of at least 64
+/// characters (64 of them base64) up to the first `KEY-----` or `KEY BLOCK-----`. The body may span lines or sit
+/// on one line with `\n` escapes (a key in a string literal). A bare header in documentation or a test is not a
+/// key. An allow marker on the line where the block starts suppresses it, as gitleaks does.
 fn private_keys(text: &str) -> Vec<Hit> {
-    let begin = concat!("-----", "BEGIN ");
-    let end = concat!("-----", "END ");
+    let begin = concat!("-----", "BEGIN");
+    let bytes = text.as_bytes();
     let mut hits = Vec::new();
     let mut from = 0;
     while let Some(off) = text[from..].find(begin) {
         let at = from + off;
         from = at + begin.len();
-        let header_end = text[at..].find('\n').map_or(text.len(), |e| at + e);
-        let header = &text[at..header_end];
-        if !header.contains("PRIVATE KEY-----") || header.len() > 120 {
-            continue;
-        }
-        // An allow marker on the line where the block starts suppresses it, as gitleaks does.
+        let Some(header_end) = private_key_header_end(bytes, at + begin.len()) else { continue };
         let line_start = text[..at].rfind('\n').map_or(0, |n| n + 1);
-        if ALLOW_MARKERS.iter().any(|m| text[line_start..header_end].contains(m)) {
+        let line_end = text[at..].find('\n').map_or(text.len(), |e| at + e);
+        if ALLOW_MARKERS.iter().any(|m| text[line_start..line_end].contains(m)) {
             continue;
         }
-        let Some(end_off) = text[header_end..].find(end) else { continue };
-        let body = &text[header_end..header_end + end_off];
-        let base64 = body.bytes().filter(|c| is_base64(*c)).count();
-        let footer = &text[header_end + end_off..];
-        let footer_line = footer.lines().next().unwrap_or_default();
-        if base64 >= 64 && footer_line.contains("PRIVATE KEY-----") && body.len() < 64 * 1024 {
-            let line = text[..at].matches('\n').count() + 1;
-            let col = at - text[..at].rfind('\n').map_or(0, |n| n + 1) + 1;
-            hits.push(Hit { rule: "private-key", line, col });
+        let Some(end) = private_key_footer_end(bytes, header_end) else { continue };
+        let body = &bytes[header_end..end];
+        if body.iter().filter(|c| is_base64(**c)).count() < 64 {
+            continue;
         }
+        let line = text[..at].matches('\n').count() + 1;
+        hits.push(Hit::new("private-key", line, at - line_start + 1, &bytes[at..end]));
+        from = end;
     }
     hits
+}
+
+/// After `-----BEGIN` at `i`: the end of `<label>PRIVATE KEY[ BLOCK]-----`, if that header follows.
+fn private_key_header_end(b: &[u8], i: usize) -> Option<usize> {
+    let mut j = i;
+    while j <= i + 100 && j < b.len() {
+        let rest = &b[j..];
+        if rest.len() >= 11 && rest[..11].eq_ignore_ascii_case(b"PRIVATE KEY") {
+            let mut k = j + 11;
+            if b.get(k..k + 6).is_some_and(|s| s.eq_ignore_ascii_case(b" BLOCK")) {
+                k += 6;
+            }
+            return b.get(k..k + 5).is_some_and(|s| s == b"-----").then_some(k + 5);
+        }
+        let c = b[j];
+        if !(c.is_ascii_alphanumeric() || c == b' ' || c == b'_' || c == b'-') {
+            return None;
+        }
+        j += 1;
+    }
+    None
+}
+
+/// The end of the first `KEY-----` or `KEY BLOCK-----` at least 64 bytes after `start`, within 64 KiB.
+fn private_key_footer_end(b: &[u8], start: usize) -> Option<usize> {
+    let limit = b.len().min(start + 64 * 1024);
+    let mut j = start + 64;
+    while j < limit {
+        let rest = &b[j..limit];
+        if rest.len() >= 3 && rest[..3].eq_ignore_ascii_case(b"KEY") {
+            let mut k = j + 3;
+            if b.get(k..k + 6).is_some_and(|s| s.eq_ignore_ascii_case(b" BLOCK")) {
+                k += 6;
+            }
+            if b.get(k..k + 5).is_some_and(|s| s == b"-----") {
+                return Some(k + 5);
+            }
+        }
+        j += 1;
+    }
+    None
 }
 
 // ---- public terms ------------------------------------------------------------------------------------------
@@ -878,14 +1199,37 @@ fn private_keys(text: &str) -> Vec<Hit> {
 /// has nothing to compare and says so.
 pub const PUBLIC_TERM_DIGESTS: &[&str] = &[];
 
-/// The only files that may mention the private track until the owner answers Q34; this list must be empty
-/// before the repository goes public (PLAN §5.9).
-pub const PUBLIC_TERMS_ALLOWLIST: &[&str] = &["docs/decisions.md", "docs/research/macos-on-x86-feasibility-2026-10.md"];
+/// The only files that may mention the private track. Q34 is answered (decisions.md keeps one neutral line, the
+/// details live in the private repository), so `docs/decisions.md` left the list; the research file stays until
+/// PLAN §5.9 item 4 decides it. The list must be empty before the repository goes public (PLAN §5.9 item 1).
+pub const PUBLIC_TERMS_ALLOWLIST: &[&str] = &["docs/research/macos-on-x86-feasibility-2026-10.md"];
 
 /// The digest of one term, normalized the way the scan tokenizes text: lowercased tokens joined by one space.
 pub fn term_digest(term: &str) -> [u8; 32] {
     let tokens: Vec<String> = tokens(term).map(|(t, _)| t).collect();
     Sha256::digest(tokens.join(" ").as_bytes()).into()
+}
+
+/// `--hash-terms`: the digests of the terms in `text`, one per line (`#` comments and blank lines skipped). The
+/// scan compares single tokens and adjacent token pairs only (ARCHITECTURE §19 [D 91]), so a line with no token
+/// or with three or more is refused, naming its line number but never the term: such a digest could never match.
+pub fn hash_terms(text: &str) -> Result<Vec<[u8; 32]>> {
+    let mut out = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let term = line.trim();
+        if term.is_empty() || term.starts_with('#') {
+            continue;
+        }
+        let n = tokens(term).count();
+        anyhow::ensure!(
+            n == 1 || n == 2,
+            "line {}: the term has {n} tokens, but the guard compares single tokens and adjacent pairs only \
+             (ARCHITECTURE §19); split it into tokens or pairs",
+            i + 1
+        );
+        out.push(term_digest(term));
+    }
+    Ok(out)
 }
 
 /// Lowercased alphanumeric tokens with their 1-based line numbers.
@@ -1053,10 +1397,15 @@ fn reuse(root: &Path, files: Option<&[String]>, opts: &Options) -> Result<CheckR
 struct ScratchDir(PathBuf);
 
 impl ScratchDir {
+    /// A new directory under the system temp dir, private to the user (0700): gitleaks' report in it holds the
+    /// matched values.
     fn new(prefix: &str) -> Result<Self> {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
         let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
-        std::fs::create_dir(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder.create(&dir).with_context(|| format!("creating {}", dir.display()))?;
         Ok(Self(dir))
     }
 }
@@ -1067,14 +1416,29 @@ impl Drop for ScratchDir {
     }
 }
 
+/// The variables zizmor reads its GitHub token from.
+const ZIZMOR_TOKEN_ENV: &[&str] = &["GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_GITHUB_TOKEN"];
+
 fn zizmor(root: &Path, opts: &Options) -> Result<CheckResult> {
     if !root.join(".github").is_dir() {
         return Ok(CheckResult::skip("no .github directory"));
     }
-    // Offline: no GitHub API calls; medium severity and above fail (QA-03).
-    external_tree(opts, "zizmor", root, |cmd| {
-        cmd.args(["--offline", "--min-severity", "medium", "--no-progress", ".github"]);
-    })
+    if opts.zizmor_online && !ZIZMOR_TOKEN_ENV.iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty())) {
+        bail!("--zizmor-online needs a GitHub token in GH_TOKEN (CI: the job's github.token)");
+    }
+    // Medium severity and above fail (QA-03). Offline by default: no GitHub API calls. Online, zizmor also checks
+    // that every pinned SHA belongs to its action's repository (impostor-commit) and is not a known-vulnerable
+    // version.
+    let mut r = external_tree(opts, "zizmor", root, |cmd| {
+        if !opts.zizmor_online {
+            cmd.arg("--offline");
+        }
+        cmd.args(["--min-severity", "medium", "--no-progress", ".github"]);
+    })?;
+    if r.skipped.is_none() {
+        r.note = Some(if opts.zizmor_online { "online and offline audits" } else { "offline audits" }.into());
+    }
+    Ok(r)
 }
 
 // ---- commits -----------------------------------------------------------------------------------------------
@@ -1236,6 +1600,21 @@ mod tests {
         format!("{}PRIVATE KEY-----\n{body}{}PRIVATE KEY-----\n", concat!("-----", "BEGIN "), concat!("-----", "END "))
     }
 
+    /// A synthetic PGP armoured private key: armour headers around made-up base64, never a real key.
+    fn fake_pgp() -> String {
+        let body: String = (0..4).map(|i| format!("{}\n", "WFla".repeat(16).replace('W', &i.to_string()))).collect();
+        format!(
+            "{}PGP PRIVATE KEY BLOCK-----\nComment: synthetic\n\n{body}=AbCd\n{}PGP PRIVATE KEY BLOCK-----\n",
+            concat!("-----", "BEGIN "),
+            concat!("-----", "END ")
+        )
+    }
+
+    /// Rule, line and column of each hit.
+    fn spots(hits: &[Hit]) -> Vec<(&'static str, usize, usize)> {
+        hits.iter().map(|h| (h.rule, h.line, h.col)).collect()
+    }
+
     fn sha(bytes: &[u8]) -> String {
         hex(&Sha256::digest(bytes))
     }
@@ -1265,6 +1644,8 @@ mod tests {
         repo.write("tests/fixtures/xip/PROVENANCE.toml", manifest.as_bytes());
         // secrets
         repo.write("notes/key.txt", fake_pem().as_bytes());
+        repo.write("notes/pgp.asc", fake_pgp().as_bytes());
+        repo.write("src/escaped.rs", format!("let key = {:?};\n", fake_pem()).as_bytes());
         repo.write("notes/token.md", format!("token: {}{}\n", "ghp_", "a1B2".repeat(9)).as_bytes());
         repo.write("notes/aws.md", format!("id = {}{}\n", "AKIA", "Z7".repeat(8)).as_bytes());
         repo.write(
@@ -1278,10 +1659,12 @@ mod tests {
             )
             .as_bytes(),
         );
-        // public terms: a canary term outside the allowlist, and the same term inside it
+        // public terms: a canary term outside the allowlist, and the same term inside it; decisions.md left the
+        // allowlist once Q34 was answered
         let canary = "zebracanary quietword";
         repo.write("docs/leak.md", format!("We must not say {canary} here.\n").as_bytes());
-        repo.write("docs/decisions.md", format!("The owner allowed {canary} here (Q34).\n").as_bytes());
+        repo.write("docs/decisions.md", format!("The owner answered Q34; {canary}.\n").as_bytes());
+        repo.write(PUBLIC_TERMS_ALLOWLIST[0], format!("The research may say {canary} (Q34).\n").as_bytes());
         repo.commit("chore: seed");
 
         let opts = builtin(vec![term_digest(canary)]);
@@ -1299,6 +1682,8 @@ mod tests {
 
         let secrets = joined("secrets");
         assert!(secrets.contains("notes/key.txt:1:1: private-key"), "{secrets}");
+        assert!(secrets.contains("notes/pgp.asc:1:1: private-key"), "a PGP armoured key: {secrets}");
+        assert!(secrets.contains("src/escaped.rs:1:12: private-key"), "a key with \\n escapes: {secrets}");
         assert!(secrets.contains("notes/token.md:1:8: github-token"), "{secrets}");
         assert!(secrets.contains("notes/aws.md:1:6: aws-access-key-id"), "{secrets}");
         assert!(secrets.contains("notes/udid.md:1:6: udid"), "{secrets}");
@@ -1308,7 +1693,8 @@ mod tests {
 
         let terms = joined("public-terms");
         assert!(terms.contains("docs/leak.md:1: private-track term"), "{terms}");
-        assert!(!terms.contains("decisions.md"), "the Q34 allowlist holds: {terms}");
+        assert!(terms.contains("docs/decisions.md:1: private-track term"), "Q34 is answered: {terms}");
+        assert!(!terms.contains("macos-on-x86"), "the allowlist holds: {terms}");
         assert!(!terms.contains(canary), "the term itself is never printed");
 
         assert_eq!(summary.failed, ["apple-files", "secrets", "public-terms"]);
@@ -1368,9 +1754,74 @@ mod tests {
         // Another job of the same workflow gets nothing.
         let other = UploadAllow::parse(allow, "apple-release.yml", "lint").expect("parse");
         assert!(!other.admits("RussetProbe.app/RussetProbe", &["Mach-O magic"]));
-        // A missing artifact directory is a note, not a failure.
-        let missing = Options { artifacts: vec![d.join("nope")], ..builtin(Vec::new()) };
-        assert!(run_checks(Path::new("."), &[Check::AppleFiles], &missing).expect("guard").failed.is_empty());
+    }
+
+    /// A missing path fails by default; the upload-safe action passes `if-no-files-found` (warn, ignore), which is
+    /// safe because upload-artifact uploads nothing for a plain path that does not exist either.
+    #[test]
+    fn a_missing_artifact_path_follows_if_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let run = |if_missing| {
+            let opts = Options { artifacts: vec![dir.path().join("nope")], if_missing, ..builtin(Vec::new()) };
+            run_checks(Path::new("."), &[Check::AppleFiles, Check::Secrets], &opts).expect("guard")
+        };
+        assert_eq!(run(IfMissing::Error).failed, ["apple-files", "secrets"]);
+        assert!(run(IfMissing::Warn).failed.is_empty());
+        assert!(run(IfMissing::Ignore).failed.is_empty());
+    }
+
+    /// upload-artifact expands globs, exclusions, `~` and several lines; the guard refuses them instead of
+    /// scanning something else than what would be uploaded.
+    #[test]
+    fn upload_paths_must_be_plain() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(dir.path().join("probe.dylib"), [0xcf, 0xfa, 0xed, 0xfe]).expect("write");
+        let glob = format!("{}/*.dylib", dir.path().display());
+        let lines = format!("{}\n{}", dir.path().display(), dir.path().display());
+        for bad in [glob.as_str(), lines.as_str(), "!target/x", "~/x", "out[1]", "out{a,b}", "x?", " "] {
+            assert!(plain_path(Path::new(bad)).is_err(), "{bad:?}");
+            let opts =
+                Options { artifacts: vec![PathBuf::from(bad)], if_missing: IfMissing::Ignore, ..builtin(Vec::new()) };
+            let s = run_checks(Path::new("."), &[Check::AppleFiles], &opts).expect("guard");
+            assert_eq!(s.failed, ["apple-files"], "{bad:?} must fail, not scan nothing");
+        }
+        plain_path(dir.path()).expect("a plain directory");
+        plain_path(Path::new("target/nextest/ci/junit.xml")).expect("a plain file");
+    }
+
+    /// upload-artifact follows symlinks, so the guard scans their targets under the link's own path.
+    #[cfg(unix)]
+    #[test]
+    fn artifact_scans_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+        let outside = tempfile::tempdir().expect("tempdir");
+        fs::write(outside.path().join("libapple.dylib"), [0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1]).expect("write");
+        fs::create_dir(outside.path().join("sub")).expect("mkdir");
+        fs::write(outside.path().join("sub/Foo.mobileprovision"), b"x").expect("write");
+        let up = tempfile::tempdir().expect("tempdir");
+        let d = up.path();
+        fs::write(d.join("report.xml"), b"<testsuites/>").expect("write");
+        symlink(outside.path().join("libapple.dylib"), d.join("innocent.txt")).expect("link");
+        symlink(outside.path().join("sub"), d.join("linked-dir")).expect("link");
+        symlink(d, d.join("loop")).expect("link");
+        symlink(d.join("gone"), d.join("dangling")).expect("link");
+        let opts = Options { artifacts: vec![d.to_path_buf()], ..builtin(Vec::new()) };
+        let s = run_checks(Path::new("."), &[Check::AppleFiles], &opts).expect("guard");
+        let text = s.findings.join("\n");
+        assert!(text.contains("innocent.txt: Mach-O magic"), "a link to a Mach-O file: {text}");
+        assert!(text.contains("linked-dir/Foo.mobileprovision: Apple file extension"), "a linked directory: {text}");
+        assert_eq!(s.failed, ["apple-files"]);
+        // The upload allowlist matches the path the upload uses, the link's.
+        let allow = UploadAllow::parse(
+            "schema = 1\n[[allow]]\nworkflow = \"w.yml\"\njob = \"j\"\npaths = [\"innocent.txt\"]\n",
+            "w.yml",
+            "j",
+        )
+        .expect("parse");
+        assert!(allow.admits("innocent.txt", &["Mach-O magic"]));
+        // A link to a single file given directly is scanned too.
+        let single = Options { artifacts: vec![d.join("innocent.txt")], ..builtin(Vec::new()) };
+        assert_eq!(run_checks(Path::new("."), &[Check::AppleFiles], &single).expect("guard").failed, ["apple-files"]);
     }
 
     #[test]
@@ -1384,7 +1835,9 @@ mod tests {
         );
         assert_eq!(scan_secrets(docs, none), Vec::<Hit>::new());
         let jwt = format!("Bearer {}.{}.{}", "eyJhbGciOiJFUzI1NiJ9", "eyJpc3MiOiJ0ZXN0In0", "c2lnbmF0dXJlcGFydA");
-        assert_eq!(scan_secrets(&jwt, none), vec![Hit { rule: "jwt", line: 1, col: 8 }]);
+        assert_eq!(spots(&scan_secrets(&jwt, none)), [("jwt", 1, 8)]);
+        // The digest is of the token alone, which is what gitleaks reports as the secret.
+        assert_eq!(scan_secrets(&jwt, none)[0].digest, Some(value_digest("jwt", &jwt.as_bytes()[7..])));
         let slack = format!("{}{}", "xoxb-", "1234567890-abc");
         assert_eq!(scan_secrets(&slack, none)[0].rule, "slack-token");
         let google = format!("k={}{}", "AIza", "S".repeat(35));
@@ -1397,13 +1850,124 @@ mod tests {
         // A longer run of key characters is not an AWS key id.
         let longer = format!("{}{}", "AKIA", "Q".repeat(20));
         assert!(scan_secrets(&longer, none).is_empty());
+        // PGP armour and a PEM block written on one line with \n escapes are keys too; a bare header is not.
+        assert_eq!(spots(&scan_secrets(&fake_pgp(), none)), [("private-key", 1, 1)]);
+        let escaped = format!("const K: &str = {:?};", fake_pem());
+        assert_eq!(spots(&scan_secrets(&escaped, none)), [("private-key", 1, 18)]);
+        let header_only = format!("{}PGP PRIVATE KEY BLOCK-----\n", concat!("-----", "BEGIN "));
+        assert!(scan_secrets(&header_only, none).is_empty());
+        // UDIDs are compared upper-cased.
+        let udid = format!("{}-{}", "00008101", "001a2b3c4d5e6f70");
+        assert_eq!(scan_secrets(&udid, none)[0].digest, Some(value_digest("udid", udid.to_uppercase().as_bytes())));
     }
 
     #[test]
     fn the_private_denylist_matches_case_insensitively_and_is_never_echoed() {
         let deny = vec!["owner's phone".to_string()];
         let hits = scan_secrets("Connected to Owner's Phone today\n", &deny);
-        assert_eq!(hits, vec![Hit { rule: "private-identifier", line: 1, col: 14 }]);
+        assert_eq!(hits, vec![Hit { rule: "private-identifier", line: 1, col: 14, digest: None }]);
+        // An allow marker hides the line from the secret rules, never from the denylist.
+        let marked = format!("{}{} owner's phone # gitleaks:allow\n", "AKIA", "Q".repeat(16));
+        assert_eq!(spots(&scan_secrets(&marked, &deny)), [("private-identifier", 1, 22)]);
+    }
+
+    #[test]
+    fn the_synthetic_allowlist_admits_reviewed_values_only() {
+        let repo = Repo::new();
+        let synthetic = format!("{}-{}", "00008101", "0123456789ABCDEF");
+        let other = format!("{}-{}", "00008101", "0FEDCBA987654321");
+        repo.write("tests/devices.rs", format!("{synthetic}\n{}\n{other}\n", synthetic.to_lowercase()).as_bytes());
+        repo.commit("test: two synthetic udids");
+        let entry = format!(
+            "schema = 1\n[[synthetic]]\nrule = \"udid\"\nsha256 = \"{}\"\nowner = \"W4\"\nreason = \"a hand-typed test UDID\"\n",
+            hex(&value_digest("udid", synthetic.as_bytes()))
+        );
+        repo.write(SYNTHETIC_ALLOWLIST, entry.as_bytes());
+        let s = run_checks(repo.path(), &[Check::Secrets], &builtin(Vec::new())).expect("guard");
+        let found = by_check(&s.findings);
+        // Both spellings of the listed value pass; the unlisted one fails.
+        assert_eq!(found["secrets"], ["tests/devices.rs:3:1: udid (value not shown)"], "{found:?}");
+        // Suggestions carry the digest of what is left, for a reviewer to add.
+        let suggest = Options { suggest_allowlist: true, ..builtin(Vec::new()) };
+        let r = secrets(repo.path(), Some(&tree_files(repo.path()).expect("files")), &suggest).expect("secrets");
+        assert_eq!(r.suggestions.len(), 1);
+        assert!(r.suggestions[0].contains(&hex(&value_digest("udid", other.as_bytes()))), "{:?}", r.suggestions);
+        // Entries need a valid digest, an owner and a reason.
+        for bad in [
+            "schema = 2\n",
+            "schema = 1\n[[synthetic]]\nrule = \"udid\"\nsha256 = \"zz\"\nowner = \"W4\"\nreason = \"a reason here\"\n",
+            &entry.replace("a hand-typed test UDID", "x"),
+            &entry.replace("owner = \"W4\"", "owner = \"\""),
+            &entry.replace("reason", "why"),
+        ] {
+            assert!(SyntheticAllowlist::parse(bad).is_err(), "{bad}");
+        }
+        // An explicit allowlist path must exist.
+        let missing = Options { synthetic_allowlist: Some(repo.path().join("nope.toml")), ..builtin(Vec::new()) };
+        assert!(run_checks(repo.path(), &[Check::Secrets], &missing).expect("guard").failed == ["secrets"]);
+    }
+
+    /// gitleaks' report is filtered by the digest of the secret it reports, and printed without it.
+    #[test]
+    fn gitleaks_reports_are_filtered_by_the_allowlist() {
+        let listed = format!("{}{}", "ghp_", "Z9".repeat(18));
+        let unlisted = format!("{}{}", "ghp_", "Y8".repeat(18));
+        let report = serde_json::json!([
+            {"RuleID": "github-pat", "File": "a.rs", "StartLine": 3, "Commit": "0123456789abcdef", "Secret": listed},
+            {"RuleID": "github-pat", "File": "b.rs", "StartLine": 9, "Commit": "fedcba9876543210", "Secret": unlisted},
+            {"RuleID": "jwt", "File": "/up/report.xml", "StartLine": 1, "Commit": "", "Secret": "eyJx"},
+        ])
+        .to_string();
+        let allow = SyntheticAllowlist::parse(&format!(
+            "schema = 1\n[[synthetic]]\nrule = \"github-pat\"\nsha256 = \"{}\"\nowner = \"lead\"\nreason = \"a test token\"\n",
+            sha(listed.as_bytes())
+        ))
+        .expect("parse");
+        let mut out = GitleaksOutcome::default();
+        assert_eq!(filter_gitleaks_report(&report, &allow, &mut out).expect("filter"), 3);
+        assert_eq!(out.admitted, 1);
+        assert_eq!(
+            out.findings,
+            [
+                "b.rs:9: github-pat (gitleaks, commit fedcba9876; value not shown)",
+                "/up/report.xml:1: jwt (gitleaks; value not shown)"
+            ]
+        );
+        assert!(!out.findings.concat().contains("Y8Y8"), "values are never printed");
+        assert!(filter_gitleaks_report("not json", &allow, &mut out).is_err());
+    }
+
+    /// With gitleaks installed (CI installs it), a leak in an old commit fails even after the file is fixed, and
+    /// a reviewed synthetic value passes in every commit.
+    #[test]
+    fn gitleaks_reads_the_branch_history() {
+        if !crate::ci::has_program("gitleaks") {
+            println!("gitleaks is not installed: skipped");
+            return;
+        }
+        let repo = Repo::new();
+        // gitleaks wants a token with entropy: 36 base62 characters derived from a hash at test time.
+        let alnum = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let seed = Sha256::digest(b"russet guard test token");
+        let body: String = (0..36).map(|i| alnum[usize::from(seed[i % 32] ^ (i as u8)) % 62] as char).collect();
+        let token = format!("{}{body}", "ghp_");
+        repo.write("src/lib.rs", format!("const T: &str = \"{token}\";\n").as_bytes());
+        repo.commit("feat: a token");
+        repo.write("src/lib.rs", b"const T: &str = \"\";\n");
+        repo.commit("fix: drop the token");
+        let opts = Options { no_default_denylist: true, ..Options::default() };
+        let s = run_checks(repo.path(), &[Check::Secrets], &opts).expect("guard");
+        let text = s.findings.join("\n");
+        assert_eq!(s.failed, ["secrets"], "{text}");
+        assert!(text.contains("src/lib.rs:1:") && text.contains("(gitleaks, commit "), "{text}");
+        assert!(!text.contains(&body), "values are never printed: {text}");
+        let entry = format!(
+            "schema = 1\n[[synthetic]]\nrule = \"github-pat\"\nsha256 = \"{}\"\nowner = \"lead\"\nreason = \"a test token\"\n",
+            sha(token.as_bytes())
+        );
+        repo.write(SYNTHETIC_ALLOWLIST, entry.as_bytes());
+        let s = run_checks(repo.path(), &[Check::Secrets], &opts).expect("guard");
+        assert!(s.failed.is_empty(), "{:?}", s.findings);
     }
 
     #[test]
@@ -1416,6 +1980,12 @@ mod tests {
         assert_eq!(hex(&term_digest("  Beta   gamma ")), hex(&term_digest("beta gamma")));
         assert!(parse_digest("zz").is_err());
         assert_eq!(parse_digest(&hex(&term_digest("x"))).expect("parse"), term_digest("x"));
+        // --hash-terms takes tokens and pairs only: a longer term could never match, so it is refused, by line.
+        let digests = hash_terms("# private list\nAlpha\n\nbeta GAMMA\n").expect("hash");
+        assert_eq!(digests, [term_digest("alpha"), term_digest("beta gamma")]);
+        let err = hash_terms("alpha\nalpha beta gamma\n").expect_err("three tokens").to_string();
+        assert!(err.contains("line 2") && err.contains("3 tokens") && !err.contains("gamma"), "{err}");
+        assert!(hash_terms("--\n").expect_err("no token").to_string().contains("0 tokens"));
     }
 
     #[test]
@@ -1449,7 +2019,7 @@ mod tests {
         assert!(Check::parse("everything").is_err());
         assert!(!Check::ALL.contains(&Check::Dco));
         assert!(PROVENANCE_ROOTS.iter().all(|r| r.ends_with('/')));
-        assert_eq!(PUBLIC_TERMS_ALLOWLIST.len(), 2, "only the files Q34 covers");
+        assert_eq!(PUBLIC_TERMS_ALLOWLIST, ["docs/research/macos-on-x86-feasibility-2026-10.md"], "Q34 is answered");
         for d in PUBLIC_TERM_DIGESTS {
             parse_digest(d).expect("every compiled-in digest is 64 hex digits");
         }
@@ -1468,6 +2038,24 @@ mod tests {
         for (workflow, job) in [("ci.yml", "release"), ("apple-release.yml", "build-other"), ("nightly.yml", "full")] {
             let other = UploadAllow::load(&file, workflow, job).expect("parse");
             assert!(!other.admits("RussetProbe.app/RussetProbe", &["Mach-O magic"]), "{workflow}/{job}");
+        }
+    }
+
+    /// The committed synthetic allowlist parses, and every entry names its owner.
+    #[test]
+    fn the_committed_synthetic_allowlist_is_well_formed() {
+        let path = crate::workstreams::repo_root().join(SYNTHETIC_ALLOWLIST);
+        let text = fs::read_to_string(&path).expect("read");
+        SyntheticAllowlist::parse(&text).expect("parse");
+        let raw: SyntheticFile = toml::from_str(&text).expect("toml");
+        for e in &raw.synthetic {
+            let owners_ok = e.owner.split(", ").all(|o| {
+                o == "lead"
+                    || o.strip_prefix('W')
+                        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric()))
+            });
+            assert!(owners_ok, "owner {:?} of {}", e.owner, e.sha256);
+            assert_eq!(e.sha256, e.sha256.to_lowercase(), "lowercase hex");
         }
     }
 
