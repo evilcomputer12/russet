@@ -254,7 +254,13 @@ pub fn sweep_slot(slot: &Path, o: &Options) -> Result<SlotReport> {
     Ok(report)
 }
 
-/// Takes cargo's locks of every profile directory without waiting. `None` when a build holds one.
+/// How long a held lock is retried before the slot counts as busy. A build holds its lock for its whole run; a
+/// lock can also outlive its holder for an instant, while a child that another thread forked still has the
+/// descriptor before its exec closes it, and that must not make an idle slot look busy.
+const LOCK_RETRY: Duration = Duration::from_millis(500);
+
+/// Takes cargo's locks of every profile directory, retrying for [`LOCK_RETRY`] at most. `None` when a build holds
+/// one.
 fn try_lock_slot(slot: &Path) -> Result<Option<Vec<File>>> {
     let mut held = Vec::new();
     for profile in profile_dirs(slot) {
@@ -265,11 +271,20 @@ fn try_lock_slot(slot: &Path) -> Result<Option<Vec<File>>> {
             }
             let f =
                 File::options().read(true).write(true).open(&path).with_context(|| format!("{}", path.display()))?;
-            match f.try_lock() {
-                Ok(()) => held.push(f),
-                Err(fs::TryLockError::WouldBlock) => return Ok(None),
-                Err(fs::TryLockError::Error(e)) => {
-                    return Err(e).with_context(|| format!("locking {}", path.display()));
+            let deadline = std::time::Instant::now() + LOCK_RETRY;
+            loop {
+                match f.try_lock() {
+                    Ok(()) => {
+                        held.push(f);
+                        break;
+                    }
+                    Err(fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                    Err(fs::TryLockError::WouldBlock) => return Ok(None),
+                    Err(fs::TryLockError::Error(e)) => {
+                        return Err(e).with_context(|| format!("locking {}", path.display()));
+                    }
                 }
             }
         }

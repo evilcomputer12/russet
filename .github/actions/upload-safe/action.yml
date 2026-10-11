@@ -7,11 +7,13 @@
 # only exception is .github/upload-safe.toml, which names apple-release.yml's own RussetProbe Mach-O outputs by
 # job and path; the calling workflow file and job id select its entries.
 #
-# `path` is one plain file or directory: actions/upload-artifact expands globs, `!` exclusions, `~` and several
-# lines, which the guard would not see, so such a path fails here before anything is uploaded (call the action
-# once per path). The guard follows symlinks as upload-artifact does. A path that does not exist is handled as
-# `if-no-files-found` says (the default `warn` uploads nothing, so it scans nothing). The job must have the Rust
-# toolchain installed (the guard is `cargo xtask`).
+# `path` is one plain file or directory: actions/upload-artifact trims it, expands globs, `!` exclusions, `~` and
+# several lines, skips `#` comments and (on Linux and macOS) reads `\` as an escape, none of which the guard would
+# see, so such a path fails here before anything is uploaded (call the action once per path). The shell check
+# below is a quick first pass; the guard's own check (`plain_path` in xtask/src/guard.rs) is the complete one and
+# also runs before the upload step. The guard follows symlinks as upload-artifact does. A path that does not exist
+# is handled as `if-no-files-found` says (the default `warn` uploads nothing, so it scans nothing). The job must
+# have the Rust toolchain installed (the guard is `cargo xtask`).
 
 name: upload-safe
 description: Guard one file or directory against Apple files and secrets, then upload it as an artifact
@@ -45,11 +47,20 @@ runs:
       run: |
         set -euo pipefail
         case "$UPLOAD_PATH" in
-          "" | *$'\n'* | *$'\r'* | *'*'* | *'?'* | *'['* | *']'* | *'{'* | *'}'* | '!'* | '~'*)
-            echo "::error title=upload-safe::path must be one plain file or directory: no globs, '!' exclusions, '~' or several lines, which actions/upload-artifact would expand past the guard"
+          "" | *$'\n'* | *$'\r'* | *'*'* | *'?'* | *'['* | *']'* | *'{'* | *'}'* | '!'* | '~'* | '#'* | \
+            [[:space:]]* | *[[:space:]])
+            echo "::error title=upload-safe::path must be one plain file or directory: no globs, '!' exclusions, '~', '#' comments, several lines or surrounding whitespace, which actions/upload-artifact would read past the guard"
             exit 1
             ;;
         esac
+        if [ "$RUNNER_OS" != Windows ]; then
+          case "$UPLOAD_PATH" in
+            *\\*)
+              echo "::error title=upload-safe::path must not contain a backslash: actions/upload-artifact reads it as an escape character on $RUNNER_OS"
+              exit 1
+              ;;
+          esac
+        fi
         workflow="${WORKFLOW_REF%%@*}"
         workflow="${workflow##*/}"
         cargo xtask guard apple-files secrets --artifacts "$UPLOAD_PATH" --if-missing "$IF_MISSING" \

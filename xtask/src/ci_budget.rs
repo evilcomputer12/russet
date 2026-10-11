@@ -11,7 +11,10 @@
 //! 1. from the account's billing usage report (`gh api /users/<owner>/settings/billing/usage`), when the token
 //!    has the `user` scope: the gross amount of the `actions` product divided by the Linux per-minute price;
 //! 2. otherwise from the repository's workflow runs of the month and their jobs (`repo` scope is enough): each
-//!    job's duration rounded up to a whole minute, as GitHub bills it, times the runner's price ratio.
+//!    job's duration rounded up to a whole minute, as GitHub bills it, times the runner's price ratio. The
+//!    included minutes belong to the account, not the repository, so this count covers this repository only and
+//!    is a lower bound; the output says so (`scope: repository`) and names the scope to add
+//!    (`gh auth refresh -h github.com -s user`).
 //!
 //! A public repository pays nothing on standard runners, and the command says so. Larger runners (`-large`,
 //! `-xlarge`) never use included minutes; they are counted apart. `--from-dir` reads recorded API answers
@@ -117,7 +120,32 @@ pub struct Usage {
     pub runs: usize,
     pub jobs: usize,
     pub source: &'static str,
+    /// What the count covers: [`Scope::Account`] (the billing report) or [`Scope::Repository`] (one repository's
+    /// runs, a lower bound of the account's use).
+    pub scope: Scope,
 }
+
+/// What a [`Usage`] counts. GitHub Free's included minutes are shared by every private repository of the account.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Scope {
+    /// The account's billing report: every repository, every runner.
+    Account,
+    /// One repository's workflow runs: other private repositories of the account are missing.
+    #[default]
+    Repository,
+}
+
+impl Scope {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Account => "account",
+            Self::Repository => "repository",
+        }
+    }
+}
+
+/// How to let `gh` read the billing report (the account-wide count).
+pub const USER_SCOPE_HINT: &str = "gh auth refresh -h github.com -s user";
 
 pub fn run(args: Args) -> Result<()> {
     let (year, month) = match &args.month {
@@ -141,12 +169,14 @@ pub fn run(args: Args) -> Result<()> {
                 Some(u) => u,
                 None => {
                     let runs = list_runs(&repo, year, month)?;
-                    usage_from_runs(
+                    let mut u = usage_from_runs(
                         &runs,
                         |id| gh_json(&format!("repos/{repo}/actions/runs/{id}/jobs?per_page=100&filter=all")),
                         year,
                         month,
-                    )?
+                    )?;
+                    u.source = "workflow runs and jobs of this repository";
+                    u
                 }
             }
         }
@@ -165,27 +195,41 @@ pub fn run(args: Args) -> Result<()> {
             "runs": usage.runs,
             "jobs": usage.jobs,
             "source": usage.source,
+            "scope": usage.scope.name(),
+            // A repository count leaves out the account's other private repositories: a lower bound.
+            "lowerBound": usage.scope == Scope::Repository,
+            "hint": (usage.scope == Scope::Repository).then_some(USER_SCOPE_HINT),
         });
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
         let by: Vec<String> = usage.minutes.iter().map(|(k, v)| format!("{k} {v} min")).collect();
+        let at_least = if usage.scope == Scope::Repository { "at least " } else { "" };
         println!(
-            "ci-budget {year:04}-{month:02}: {:.0} of {:.0} included minutes ({percent:.1} %), Linux-equivalent; \
-             {} run(s), {} job(s){}; source: {}",
+            "ci-budget {year:04}-{month:02}: {at_least}{:.0} of {:.0} included minutes ({at_least}{percent:.1} %), \
+             Linux-equivalent; {} run(s), {} job(s){}; source: {} (scope: {})",
             usage.linux_equivalent,
             args.included,
             usage.runs,
             usage.jobs,
             if by.is_empty() { String::new() } else { format!(" ({})", by.join(", ")) },
-            usage.source
+            usage.source,
+            usage.scope.name()
         );
+        if usage.scope == Scope::Repository {
+            println!(
+                "note: this counts this repository's runs only, while the included minutes are shared by every \
+                 private repository of the account, so the account's use is at least this. The account-wide \
+                 billing report needs the token's `user` scope: {USER_SCOPE_HINT}"
+            );
+        }
         if usage.minutes.get(Runner::Larger.name()).is_some_and(|m| *m > 0) {
             println!("warning: larger runners ran; they never use included minutes (QA §4.2: never use them)");
         }
         if over {
             println!(
-                "warning: {percent:.0} % of the included minutes used (threshold {:.0} %): batch merges into fewer \
-                 main pushes; the lead's local `cargo xtask ci --profile full` stays the merge gate (QA §4.8)",
+                "warning: {at_least}{percent:.0} % of the included minutes used (threshold {:.0} %): batch merges \
+                 into fewer main pushes; the lead's local `cargo xtask ci --profile full` stays the merge gate \
+                 (QA §4.8)",
                 args.warn_percent
             );
         }
@@ -238,7 +282,7 @@ fn billing_usage(owner: &str, year: i64, month: u32) -> Option<Usage> {
 /// Linux-equivalent minutes from a billing usage report: the `actions` gross amount over the Linux price.
 pub fn usage_from_billing(v: &Value) -> Option<Usage> {
     let items = v.get("usageItems")?.as_array()?;
-    let mut u = Usage { source: "billing usage report", ..Usage::default() };
+    let mut u = Usage { source: "billing usage report", scope: Scope::Account, ..Usage::default() };
     for it in items {
         if !it["product"].as_str().is_some_and(|p| p.eq_ignore_ascii_case("actions")) {
             continue;
@@ -299,7 +343,7 @@ pub fn usage_from_runs(
     year: i64,
     month: u32,
 ) -> Result<Usage> {
-    let mut u = Usage { source: "workflow runs and jobs", ..Usage::default() };
+    let mut u = Usage { source: "workflow runs and jobs", scope: Scope::Repository, ..Usage::default() };
     for run in runs {
         let Some(id) = run["id"].as_u64() else { continue };
         if let Some(created) = run["created_at"].as_str().and_then(parse_rfc3339)
@@ -464,6 +508,7 @@ mod tests {
             })
         };
         let u = usage_from_runs(&runs, jobs, 2026, 10).expect("usage");
+        assert_eq!(u.scope, Scope::Repository, "one repository's runs are a lower bound of the account's use");
         assert_eq!(u.runs, 2);
         assert_eq!(u.minutes["linux"], 13, "12 min 1 s bills 13 minutes; a skipped job bills nothing");
         assert_eq!(u.minutes["windows"], 20);
@@ -479,6 +524,7 @@ mod tests {
             {"product": "Packages", "sku": "Packages storage", "unitType": "GigabyteHours", "quantity": 1.0, "grossAmount": 1.0},
         ]});
         let u = usage_from_billing(&v).expect("usage");
+        assert_eq!(u.scope, Scope::Account, "the billing report covers the whole account");
         assert!((u.linux_equivalent - (1200.0 + 80.0 * PRICE_WINDOWS / PRICE_LINUX)).abs() < 1e-6, "{u:?}");
         assert_eq!(u.minutes["windows"], 80);
         assert!(usage_from_billing(&json!({"message": "Not Found"})).is_none());

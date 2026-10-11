@@ -5,8 +5,8 @@
 //!
 //! | Check | What it fails on |
 //! |---|---|
-//! | `apple-files` (alias `check-no-apple`) | Apple-format magic, Apple file extensions and Apple copyright headers ([`crate::no_apple`]), except generated fixtures that the provenance allowlist admits ([`provenance_allows`], [D 88]) |
-//! | `secrets` | the built-in scan (PEM and PGP private keys, AWS, GitHub, Slack and Google keys, JWTs, real-looking UDIDs, the owner's local denylist of private identifiers) and gitleaks over the branch's history when installed; reviewed synthetic test values ([`SYNTHETIC_ALLOWLIST`]) pass |
+//! | `apple-files` (alias `check-no-apple`) | Apple-format magic, Apple file extensions and Apple copyright headers ([`crate::no_apple`]), except the magic and extensions of generated fixtures that the provenance allowlist admits ([`provenance_allows`], [D 88]) |
+//! | `secrets` | the built-in scan (PEM and PGP private keys, AWS, GitHub, Slack and Google keys, JWTs, real-looking UDIDs, the owner's local denylist of private identifiers) and gitleaks over the branch's history when installed; reviewed synthetic test values ([`SYNTHETIC_ALLOWLIST`]) pass, and allow markers never hide a UDID |
 //! | `reuse` | `reuse lint` (REUSE 3.3: SPDX headers everywhere) |
 //! | `typos` | `typos` with the reviewed allowlist in `typos.toml` |
 //! | `public-terms` | the private track's identifying terms, compared as SHA-256 digests of lowercased tokens and token pairs, outside the allowlist ([D 91]) |
@@ -16,7 +16,8 @@
 //!
 //! `all` (the default) runs every check but `dco`. `--artifacts PATH` makes `apple-files` and `secrets` scan that
 //! file or directory instead of the git tree (the `upload-safe` action, the CI cache), following symlinks the way
-//! `actions/upload-artifact` does and refusing globs it would expand; `--upload-allowlist` with `--workflow` and
+//! `actions/upload-artifact` does and refusing any path it would read differently ([`plain_path`]: globs,
+//! exclusions, comments, several lines, surrounding whitespace, escapes); `--upload-allowlist` with `--workflow` and
 //! `--job` then admits the Mach-O outputs that `.github/upload-safe.toml` names for that job. An external tool
 //! that is missing skips its check with a note, unless `--require-tools` (CI). Findings never print a secret's
 //! value; `--suggest-allowlist` (never on CI) prints reviewed-allowlist entries for them. Owner: W8.
@@ -435,9 +436,13 @@ fn walk_artifact(path: &Path, out: &mut Vec<PathBuf>, stack: &mut Vec<PathBuf>, 
     Ok(())
 }
 
-/// Refuses an `--artifacts` path that `actions/upload-artifact` would read differently from the guard: glob
-/// characters (`* ? [ ] { }`), a `!` exclusion, a leading `~`, or several lines. The guard scans exactly one
-/// literal file or directory, so the upload must name exactly that.
+/// Refuses an `--artifacts` path that `actions/upload-artifact` would read differently from the guard. The action
+/// trims its `path` input and hands each line to `@actions/glob`, which expands glob characters (`* ? [ ] { }`
+/// here, more than it needs), `!` exclusions and a leading `~`, skips lines starting with `#` (comments), and on
+/// Linux and macOS reads `\` as an escape character. So a path is refused with several lines, whitespace or a
+/// byte-order mark at either end, control characters or Unicode line separators, glob characters, a leading `!`,
+/// `~` or `#`, or (outside Windows) a backslash. The guard scans exactly one literal file or directory, so the
+/// upload must name exactly that.
 pub fn plain_path(path: &Path) -> Result<()> {
     let s = path.to_string_lossy();
     if s.trim().is_empty() {
@@ -446,14 +451,34 @@ pub fn plain_path(path: &Path) -> Result<()> {
     if s.contains(['\n', '\r']) {
         bail!("--artifacts {s:?} has several lines, which actions/upload-artifact would expand: one path per flag");
     }
+    // JavaScript's trim() also removes U+FEFF, which Rust does not count as whitespace.
+    let trimmed_away = |c: Option<char>| c.is_some_and(|c| c.is_whitespace() || c == '\u{feff}');
+    if trimmed_away(s.chars().next()) || trimmed_away(s.chars().next_back()) {
+        bail!(
+            "--artifacts {s:?} starts or ends with whitespace, which actions/upload-artifact trims before it reads \
+             the path: pass the path without it"
+        );
+    }
+    if s.chars().any(|c| c.is_control() || matches!(c, '\u{feff}' | '\u{2028}' | '\u{2029}')) {
+        bail!("--artifacts {s:?} has control characters or invisible separators: pass one plain file or directory");
+    }
     if s.contains(['*', '?', '[', ']', '{', '}']) {
         bail!(
             "--artifacts {s:?} has glob characters, which actions/upload-artifact would expand: pass one plain file \
              or directory"
         );
     }
-    if s.starts_with('!') || s.starts_with('~') {
-        bail!("--artifacts {s:?}: a `!` exclusion or a `~` path is expanded by actions/upload-artifact, not here");
+    if s.starts_with('!') || s.starts_with('~') || s.starts_with('#') {
+        bail!(
+            "--artifacts {s:?}: actions/upload-artifact reads a leading `!` as an exclusion, `~` as the home \
+             directory and `#` as a comment, not as part of the path"
+        );
+    }
+    if cfg!(not(windows)) && s.contains('\\') {
+        bail!(
+            "--artifacts {s:?} has a backslash, which actions/upload-artifact's globber reads as an escape \
+             character on Linux and macOS: pass the path without it"
+        );
     }
     Ok(())
 }
@@ -531,9 +556,19 @@ pub const PROVENANCE_ROOTS: &[&str] = &["tests/fixtures/xip/", "fuzz/russet-xar/
 
 /// Whether a provenance allowlist admits an Apple-format file (ARCHITECTURE §19 [D 88]): only under the roots
 /// compiled in here (`tests/fixtures/xip/`, `fuzz/russet-xar/corpus/`), only when that root's
-/// `PROVENANCE.toml` lists the file with a matching SHA-256 and a committed generator script.
+/// `PROVENANCE.toml` lists the file with a matching SHA-256 and a committed generator script, and only when every
+/// reason it was flagged for is one the allowlist may admit ([`provenance_admissible`]).
 pub fn provenance_allows(root: &Path, finding: &Finding) -> bool {
-    matches!(provenance_verdict(root, &finding.path), Verdict::Allowed)
+    finding.reasons.iter().all(|r| provenance_admissible(r))
+        && matches!(provenance_verdict(root, &finding.path), Verdict::Allowed)
+}
+
+/// The reasons a provenance entry may excuse (ARCHITECTURE §19 [D 88]): Apple-format magic (including UDIF's
+/// `koly` trailer) and an Apple file extension. Anything else, such as an Apple copyright header, stays a finding
+/// whatever `PROVENANCE.toml` says: a fixture generated from open tools has no reason to carry one, and a reason
+/// the guard learns later is refused until this list names it.
+pub fn provenance_admissible(reason: &str) -> bool {
+    reason == "Apple file extension" || reason.ends_with(" magic") || reason == "UDIF koly trailer"
 }
 
 /// How the provenance allowlist treats a path.
@@ -634,7 +669,15 @@ fn apple_files(root: &Path, files: Option<&[String]>, opts: &Options) -> Result<
         }
         if files.is_some() {
             match provenance_verdict(root, shown) {
-                Verdict::Allowed => continue,
+                Verdict::Allowed => {
+                    let kept: Vec<&str> = reasons.iter().copied().filter(|r| !provenance_admissible(r)).collect();
+                    if !kept.is_empty() {
+                        r.findings.push(format!(
+                            "{shown}: {} (provenance admits only Apple-format magic and Apple file extensions)",
+                            kept.join(", ")
+                        ));
+                    }
+                }
                 Verdict::NotUnderRoot => r.findings.push(format!("{shown}: {}", reasons.join(", "))),
                 Verdict::Rejected(why) => {
                     r.findings.push(format!("{shown}: {} (provenance: {why})", reasons.join(", ")));
@@ -730,8 +773,10 @@ pub fn value_digest(rule: &str, value: &[u8]) -> [u8; 32] {
     if rule == "udid" { Sha256::digest(value.to_ascii_uppercase()).into() } else { Sha256::digest(value).into() }
 }
 
-/// Lines carrying one of these markers are not reported (gitleaks' own marker is honoured too), except for the
-/// owner's private identifiers, which no marker hides.
+/// Lines carrying one of these markers are not reported by the token, JWT and private-key rules (gitleaks' own
+/// marker is honoured too). They never hide a UDID, which only a reviewed [`SYNTHETIC_ALLOWLIST`] entry or a
+/// synthetic shape ([`udid_at`]) admits, because gitleaks has no UDID rule of its own, and they never hide the
+/// owner's private identifiers.
 const ALLOW_MARKERS: &[&str] = &["gitleaks:allow", "russet-guard:allow"];
 
 /// The reviewed allowlist of synthetic test values (owner review through `.github/CODEOWNERS`).
@@ -988,10 +1033,17 @@ pub fn scan_secrets(text: &str, denylist: &[String]) -> Vec<Hit> {
                 }
             }
         }
+        let b = line.as_bytes();
+        // UDIDs count on every line, like the private identifiers: a marker could otherwise hide a real
+        // device's UDID, which gitleaks does not look for.
+        for at in find_all(line, "0000") {
+            if let Some(col) = udid_at(b, at) {
+                hits.push(Hit::new("udid", n, col, &b[at..at + 25]));
+            }
+        }
         if ALLOW_MARKERS.iter().any(|m| line.contains(m)) {
             continue;
         }
-        let b = line.as_bytes();
         for r in TOKEN_RULES {
             for p in r.prefixes {
                 for at in find_all(line, p) {
@@ -1011,11 +1063,6 @@ pub fn scan_secrets(text: &str, denylist: &[String]) -> Vec<Hit> {
                 && let Some(len) = jwt_len(&b[at..])
             {
                 hits.push(Hit::new("jwt", n, at + 1, &b[at..at + len]));
-            }
-        }
-        for at in find_all(line, "0000") {
-            if let Some(col) = udid_at(b, at) {
-                hits.push(Hit::new("udid", n, col, &b[at..at + 25]));
             }
         }
     }
@@ -1637,11 +1684,25 @@ mod tests {
         repo.write("tests/fixtures/xip/unlisted.xar", b"xar!\x00\x1c\x00\x01unlisted");
         repo.write("tests/fixtures/xip/changed.xar", b"xar!\x00\x1c\x00\x01changed later");
         repo.write("tests/fixtures/xip/good.xar", good);
+        // Listed with matching hashes, but carrying an Apple copyright header, which provenance never excuses
+        // (ARCHITECTURE §19 scopes it to Apple-format magic and Apple file extensions).
+        let header = format!("// {} (c) 2020 Apple Inc. All rights reserved.\n", "Copyright");
+        let headed_dmg = format!("{header}not an image\n");
+        let headed_text = format!("{header}int x;\n");
+        repo.write("tests/fixtures/xip/headed.dmg", headed_dmg.as_bytes());
+        repo.write("tests/fixtures/xip/headed.h", headed_text.as_bytes());
+        let entry = |path: &str, bytes: &[u8]| {
+            format!(
+                "\n[[file]]\npath = \"{path}\"\nsha256 = \"{}\"\ngenerator = \"tests/fixtures/xip/gen/make.sh\"\n",
+                sha(bytes)
+            )
+        };
         let manifest = format!(
-            "schema = 1\n\n[[file]]\npath = \"changed.xar\"\nsha256 = \"{}\"\ngenerator = \"tests/fixtures/xip/gen/make.sh\"\n\n\
-             [[file]]\npath = \"good.xar\"\nsha256 = \"{}\"\ngenerator = \"tests/fixtures/xip/gen/make.sh\"\n",
-            sha(b"xar!\x00\x1c\x00\x01original"),
-            sha(good)
+            "schema = 1\n{}{}{}{}",
+            entry("changed.xar", b"xar!\x00\x1c\x00\x01original"),
+            entry("good.xar", good),
+            entry("headed.dmg", headed_dmg.as_bytes()),
+            entry("headed.h", headed_text.as_bytes())
         );
         repo.write("tests/fixtures/xip/PROVENANCE.toml", manifest.as_bytes());
         // secrets
@@ -1681,6 +1742,12 @@ mod tests {
         assert!(apple.contains("tests/fixtures/xip/unlisted.xar: xar magic (provenance: not listed"), "{apple}");
         assert!(apple.contains("tests/fixtures/xip/changed.xar: xar magic (provenance: its SHA-256"), "{apple}");
         assert!(!apple.contains("good.xar"), "a listed file with a matching hash passes: {apple}");
+        assert!(
+            apple.contains("tests/fixtures/xip/headed.dmg: Apple copyright header (provenance admits only"),
+            "the extension is excused, the header is not: {apple}"
+        );
+        assert!(apple.contains("tests/fixtures/xip/headed.h: Apple copyright header (provenance"), "{apple}");
+        assert!(!apple.contains("headed.dmg: Apple file extension"), "{apple}");
 
         let secrets = joined("secrets");
         assert!(secrets.contains("notes/key.txt:1:1: private-key"), "{secrets}");
@@ -1723,6 +1790,16 @@ mod tests {
         assert_eq!(provenance_verdict(repo.path(), "fuzz/russet-xar/corpus/seed1"), Verdict::Allowed);
         let finding = Finding { path: "fuzz/russet-xar/corpus/seed1".into(), reasons: vec!["pbzx magic"] };
         assert!(provenance_allows(repo.path(), &finding));
+        // check-no-apple asks the same question: a copyright header is never excused, whatever is listed.
+        let headed = Finding {
+            path: "fuzz/russet-xar/corpus/seed1".into(),
+            reasons: vec!["pbzx magic", "Apple copyright header"],
+        };
+        assert!(!provenance_allows(repo.path(), &headed));
+        for reason in ["Mach-O magic", "fat Mach-O magic", "IMG4 magic", "UDIF koly trailer", "Apple file extension"] {
+            assert!(provenance_admissible(reason), "{reason}");
+        }
+        assert!(!provenance_admissible("Apple copyright header"));
         // Only the compiled-in roots count, whatever PROVENANCE.toml files exist elsewhere.
         assert_eq!(provenance_verdict(repo.path(), "tests/fixtures/other/seed1"), Verdict::NotUnderRoot);
     }
@@ -1772,15 +1849,38 @@ mod tests {
         assert!(run(IfMissing::Ignore).failed.is_empty());
     }
 
-    /// upload-artifact expands globs, exclusions, `~` and several lines; the guard refuses them instead of
-    /// scanning something else than what would be uploaded.
+    /// upload-artifact trims its input, expands globs, exclusions, `~` and several lines, skips `#` comments and
+    /// reads `\` as an escape outside Windows; the guard refuses all of them instead of scanning something else
+    /// than what would be uploaded.
     #[test]
     fn upload_paths_must_be_plain() {
         let dir = tempfile::tempdir().expect("tempdir");
         fs::write(dir.path().join("probe.dylib"), [0xcf, 0xfa, 0xed, 0xfe]).expect("write");
         let glob = format!("{}/*.dylib", dir.path().display());
         let lines = format!("{}\n{}", dir.path().display(), dir.path().display());
-        for bad in [glob.as_str(), lines.as_str(), "!target/x", "~/x", "out[1]", "out{a,b}", "x?", " "] {
+        let mut bad = vec![
+            glob.clone(),
+            lines,
+            "!target/x".into(),
+            "~/x".into(),
+            "#out".into(),
+            "out[1]".into(),
+            "out{a,b}".into(),
+            "x?".into(),
+            " ".into(),
+            "out ".into(),
+            " out".into(),
+            "out\t".into(),
+            "\u{feff}out".into(),
+            "out\u{a0}".into(),
+            "out\rx".into(),
+            "out\u{2028}x".into(),
+            "out\u{7}x".into(),
+        ];
+        if cfg!(not(windows)) {
+            bad.push("out\\x".into());
+        }
+        for bad in &bad {
             assert!(plain_path(Path::new(bad)).is_err(), "{bad:?}");
             let opts =
                 Options { artifacts: vec![PathBuf::from(bad)], if_missing: IfMissing::Ignore, ..builtin(Vec::new()) };
@@ -1789,6 +1889,15 @@ mod tests {
         }
         plain_path(dir.path()).expect("a plain directory");
         plain_path(Path::new("target/nextest/ci/junit.xml")).expect("a plain file");
+        plain_path(Path::new("out dir/report one.xml")).expect("inner spaces are part of the name for both");
+        // The review's case: `out ` must not pass as "missing, nothing to scan" while the upload reads `out`.
+        let out = dir.path().join("out");
+        fs::create_dir(&out).expect("mkdir");
+        fs::write(out.join("libapple.dylib"), [0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1]).expect("write");
+        let spaced = PathBuf::from(format!("{} ", out.display()));
+        let opts = Options { artifacts: vec![spaced], if_missing: IfMissing::Warn, ..builtin(Vec::new()) };
+        let s = run_checks(Path::new("."), &[Check::AppleFiles, Check::Secrets], &opts).expect("guard");
+        assert_eq!(s.failed, ["apple-files", "secrets"], "{:?}", s.findings);
     }
 
     /// upload-artifact follows symlinks, so the guard scans their targets under the link's own path.
@@ -1861,6 +1970,12 @@ mod tests {
         // UDIDs are compared upper-cased.
         let udid = format!("{}-{}", "00008101", "001a2b3c4d5e6f70");
         assert_eq!(scan_secrets(&udid, none)[0].digest, Some(value_digest("udid", udid.to_uppercase().as_bytes())));
+        // An allow marker never hides a UDID: gitleaks has no UDID rule, so only a reviewed allowlist entry or a
+        // synthetic shape may let one in.
+        for marker in ALLOW_MARKERS {
+            let marked = format!("let device = \"{udid}\"; // {marker}");
+            assert_eq!(spots(&scan_secrets(&marked, none)), [("udid", 1, 15)], "{marker}");
+        }
     }
 
     #[test]
