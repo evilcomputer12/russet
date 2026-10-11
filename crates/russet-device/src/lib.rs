@@ -53,6 +53,9 @@ pub use perf::{SysmonOptions, SysmonStream};
 pub use process::{LaunchRequest, LaunchVia, LaunchedProcess, ProcessInfo};
 pub use screen::{InputEvent, MirrorHandle, MirrorOptions, Screenshot};
 
+/// A plaintext device stream, as [`io::ServiceConnector`] returns it.
+pub type ReadWriteBox = Box<dyn idevice::ReadWrite>;
+
 /// Device doctor checks (DEV-25: mux, pairing, Developer Mode, DDI status, lock hint), for russetd's
 /// doctor seam.
 pub fn checks() -> Vec<Arc<dyn russet_doctor::Check>> {

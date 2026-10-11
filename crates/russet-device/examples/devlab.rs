@@ -222,27 +222,30 @@ async fn run() -> russet_core::Result<()> {
             let mut kill_at = None;
             let mut seen = 0u64;
             while start.elapsed() < wait {
-                if let Some(ms) = sigcont {
-                    if !sent_cont && start.elapsed() >= Duration::from_millis(ms) {
-                        h.signal(p.pid, 19).await?;
-                        println!("SIGCONT sent at {:?}", start.elapsed());
-                        sent_cont = true;
-                    }
+                if let Some(ms) = sigcont
+                    && !sent_cont
+                    && start.elapsed() >= Duration::from_millis(ms)
+                {
+                    h.signal(p.pid, 19).await?;
+                    println!("SIGCONT sent at {:?}", start.elapsed());
+                    sent_cont = true;
                 }
-                if let Some(ms) = close_channel {
-                    if !closed && start.elapsed() >= Duration::from_millis(ms) {
-                        p.close_channel();
-                        println!("launch channel closed at {:?}", start.elapsed());
-                        closed = true;
-                    }
+                if let Some(ms) = close_channel
+                    && !closed
+                    && start.elapsed() >= Duration::from_millis(ms)
+                {
+                    p.close_channel();
+                    println!("launch channel closed at {:?}", start.elapsed());
+                    closed = true;
                 }
-                if let Some(ms) = kill {
-                    if !sent_kill && start.elapsed() >= Duration::from_millis(ms) {
-                        h.signal(p.pid, 9).await?;
-                        kill_at = Some(Instant::now());
-                        println!("SIGKILL sent at {:?}", start.elapsed());
-                        sent_kill = true;
-                    }
+                if let Some(ms) = kill
+                    && !sent_kill
+                    && start.elapsed() >= Duration::from_millis(ms)
+                {
+                    h.signal(p.pid, 9).await?;
+                    kill_at = Some(Instant::now());
+                    println!("SIGKILL sent at {:?}", start.elapsed());
+                    sent_kill = true;
                 }
                 if let Some(e) = p.exit.exited() {
                     println!("exited ({}) {:?} after the kill", e.detected_by, kill_at.map(|k| k.elapsed()));
