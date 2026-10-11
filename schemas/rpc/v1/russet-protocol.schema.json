@@ -495,6 +495,96 @@
       ],
       "type": "object"
     },
+    "BuildBackend": {
+      "description": "The SwiftPM build backend (`[build] backend`).",
+      "enum": [
+        "swiftbuild",
+        "native",
+        "xtool",
+        "pif"
+      ],
+      "type": "string"
+    },
+    "BuildCleanParams": {
+      "description": "Params of `build.clean`.",
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/CleanScope"
+        }
+      },
+      "required": [
+        "project",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "BuildCleanResult": {
+      "description": "Result of `build.clean`.",
+      "properties": {
+        "freedBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "freedBytes"
+      ],
+      "type": "object"
+    },
+    "BuildInspectParams": {
+      "description": "Params of `build.inspect`.",
+      "properties": {
+        "path": {
+          "description": "An `.app` directory or an `.ipa` file.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "BuildInspectResult": {
+      "description": "Result of `build.inspect`.",
+      "properties": {
+        "car": {
+          "description": "The asset catalog summary; omitted until the CAR reader exists (W21)."
+        },
+        "dt": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The DT* keys.",
+          "type": "object"
+        },
+        "infoPlist": {
+          "description": "The Info.plist's JSON form (as `project.infoPlist`'s `plist`)."
+        },
+        "lints": {
+          "items": {
+            "$ref": "#/$defs/LintFinding"
+          },
+          "type": "array"
+        },
+        "machO": {
+          "items": {
+            "$ref": "#/$defs/MachOSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "infoPlist",
+        "machO",
+        "lints",
+        "dt"
+      ],
+      "type": "object"
+    },
     "BuildMismatchDetails": {
       "description": "`details` of `ipc.buildMismatch` (1107; development builds).",
       "properties": {
@@ -520,6 +610,358 @@
       ],
       "type": "object"
     },
+    "BuildOutput": {
+      "description": "Result of `build.start` (ARCHITECTURE §5.3 `BuildOutput`).",
+      "properties": {
+        "app": {
+          "$ref": "#/$defs/BundleInfo"
+        },
+        "buildId": {
+          "$ref": "#/$defs/JobId",
+          "description": "The build's job id (`job_…`)."
+        },
+        "bundleIds": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Original → effective bundle IDs (the signing area rewrites entitlements with it).",
+          "type": "object"
+        },
+        "dsyms": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/BundleInfo"
+          },
+          "type": "array"
+        },
+        "ipa": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lints": {
+          "items": {
+            "$ref": "#/$defs/LintFinding"
+          },
+          "type": "array"
+        },
+        "reportPath": {
+          "description": "`build-report.json`.",
+          "type": "string"
+        },
+        "signingPlan": {
+          "$ref": "#/$defs/SigningPlan"
+        }
+      },
+      "required": [
+        "buildId",
+        "app",
+        "extensions",
+        "bundleIds",
+        "signingPlan",
+        "dsyms",
+        "reportPath",
+        "lints",
+        "durationMs"
+      ],
+      "type": "object"
+    },
+    "BuildPlanResult": {
+      "description": "Result of `build.plan`: what a build would do (no tool runs, nothing is written into the project).",
+      "properties": {
+        "appPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "backend": {
+          "$ref": "#/$defs/BuildBackend"
+        },
+        "bundleIds": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "configuration": {
+          "type": "string"
+        },
+        "deploymentTarget": {
+          "description": "`[app] deployment-target`; omitted when the package's `.iOS` platform decides at build time.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extensions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "description": "`none`, `minimal`, `sdk` or `xcode-compat` (ARCHITECTURE §16.4).",
+          "type": "string"
+        },
+        "package": {
+          "$ref": "#/$defs/PackageKind"
+        },
+        "product": {
+          "description": "The app product; omitted when only the package description can tell.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "release": {
+          "type": "boolean"
+        },
+        "reportPath": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "sdk": {
+          "$ref": "#/$defs/PlanSdk"
+        },
+        "stack": {
+          "$ref": "#/$defs/ProjectStack"
+        },
+        "stages": {
+          "description": "`resolve`, `prepare`, `compile`, `resources`, `assemble`, `lint`, `package`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "root",
+        "stack",
+        "extensions",
+        "configuration",
+        "release",
+        "backend",
+        "package",
+        "metadata",
+        "sdk",
+        "bundleIds",
+        "reportPath",
+        "stages",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "BuildStartParams": {
+      "description": "Params of `build.start` and `build.plan`.",
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BuildBackend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bundleIdPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BundleIdPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The signing area's policy; `[signing] bundle-id-policy` when omitted."
+        },
+        "clean": {
+          "description": "Remove the SwiftPM scratch and the profile's outputs first.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "configuration": {
+          "description": "`debug`, `release`, `profile` or a named profile; `[build] default-profile` when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "overrides": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Build-setting overrides (`KEY = VALUE`), on top of `[build] overrides`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "package": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project": {
+          "description": "The absolute project root (or a directory inside it).",
+          "type": "string"
+        },
+        "target": {
+          "description": "The app product; `[build.swiftpm] product` when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "BundleIdPolicy": {
+      "description": "How effective bundle IDs are derived (ARCHITECTURE §16.5) [D 18].",
+      "oneOf": [
+        {
+          "description": "`[app] bundle-id` exactly (paid teams).",
+          "properties": {
+            "kind": {
+              "const": "exact",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`<id>.<TEAMID>` (free teams).",
+          "properties": {
+            "kind": {
+              "const": "team-suffix",
+              "type": "string"
+            },
+            "teamId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "teamId"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`XTL-<PREFIX>.<id>`, the prefix being the first segment of the xtool identity id.",
+          "properties": {
+            "kind": {
+              "const": "xtool-prefix",
+              "type": "string"
+            },
+            "prefix": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "prefix"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An explicit original → effective map.",
+          "properties": {
+            "kind": {
+              "const": "custom",
+              "type": "string"
+            },
+            "map": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "map"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BundleInfo": {
+      "description": "One built bundle.",
+      "properties": {
+        "buildNumber": {
+          "description": "`CFBundleVersion`.",
+          "type": "string"
+        },
+        "bundleId": {
+          "description": "The effective `CFBundleIdentifier`.",
+          "type": "string"
+        },
+        "executable": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/TargetKind"
+        },
+        "originalBundleId": {
+          "description": "The canonical ID before the bundle-ID policy.",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "product": {
+          "type": "string"
+        },
+        "version": {
+          "description": "`CFBundleShortVersionString`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "executable",
+        "bundleId",
+        "originalBundleId",
+        "kind",
+        "product",
+        "version",
+        "buildNumber"
+      ],
+      "type": "object"
+    },
     "CancelParams": {
       "description": "Params of the LSP built-in notification `$/cancelRequest` (ARCHITECTURE §7.6).",
       "properties": {
@@ -531,6 +973,21 @@
         "id"
       ],
       "type": "object"
+    },
+    "CleanScope": {
+      "description": "What `build.clean` removes.",
+      "oneOf": [
+        {
+          "const": "build",
+          "description": "`.russet/work` and `.russet/build`.",
+          "type": "string"
+        },
+        {
+          "const": "all",
+          "description": "All of `.russet`, logs included.",
+          "type": "string"
+        }
+      ]
     },
     "ClientCapabilities": {
       "description": "What the client can do when the daemon asks (ARCHITECTURE §7.4, §9.3).",
@@ -2623,6 +3080,47 @@
       "description": "Result of `lease.release`: `{}`.",
       "type": "object"
     },
+    "LintFinding": {
+      "description": "A lint finding (build §4.7).",
+      "properties": {
+        "fixed": {
+          "description": "Whether the build fixed it.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "`L001` … `L012`.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/LintSeverity"
+        }
+      },
+      "required": [
+        "id",
+        "severity",
+        "message",
+        "fixed"
+      ],
+      "type": "object"
+    },
+    "LintSeverity": {
+      "description": "Lint severities.",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "type": "string"
+    },
     "LogStream": {
       "description": "The stream a log line came from (`JobEvent` kind `log`).",
       "enum": [
@@ -2632,6 +3130,81 @@
         "warn"
       ],
       "type": "string"
+    },
+    "MachOSummary": {
+      "description": "One Mach-O file of an inspected bundle.",
+      "properties": {
+        "archs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dylibs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "encrypted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "minos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Relative to the bundle's parent (`RussetProbe.app/RussetProbe`).",
+          "type": "string"
+        },
+        "platform": {
+          "description": "`LC_BUILD_VERSION` platform (2 = iOS).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "rpaths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sdk": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tools": {
+          "description": "`lld 21.1.6`, …",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "archs",
+        "tools",
+        "rpaths",
+        "dylibs"
+      ],
+      "type": "object"
     },
     "ManagedComponent": {
       "description": "A component Russet downloads and installs itself (`toolchain.install`). Wave 1: `python-shared` and\n`darwin-tools`.",
@@ -2666,6 +3239,27 @@
       ],
       "type": "string"
     },
+    "PackageKind": {
+      "description": "What to package after the build.",
+      "oneOf": [
+        {
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "ipa-dev",
+          "description": "A stored (uncompressed) IPA for fast development installs.",
+          "type": "string"
+        },
+        {
+          "const": "ipa-store",
+          "description": "A deflated IPA with `SwiftSupport/` for App Store uploads.",
+          "type": "string"
+        }
+      ]
+    },
     "Permission": {
       "description": "Permission classes (ARCHITECTURE §7.5). Wire values are kebab-case.",
       "enum": [
@@ -2696,6 +3290,51 @@
       "required": [
         "id",
         "source"
+      ],
+      "type": "object"
+    },
+    "PlanSdk": {
+      "description": "The SDK a plan resolved.",
+      "properties": {
+        "build": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bundle": {
+          "description": "The bundle the SDK was read from.",
+          "type": "string"
+        },
+        "canonicalName": {
+          "description": "`iphoneos27.0`.",
+          "type": "string"
+        },
+        "id": {
+          "description": "`xcode-27.0-27A266a`.",
+          "type": "string"
+        },
+        "swiftRequired": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "xcodeBuild": {
+          "type": "string"
+        },
+        "xcodeVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "canonicalName",
+        "version",
+        "xcodeVersion",
+        "xcodeBuild",
+        "swiftRequired",
+        "bundle"
       ],
       "type": "object"
     },
@@ -2735,6 +3374,187 @@
         }
       ],
       "description": "The token of an LSP work-done progress (`$/progress`): a string or an integer."
+    },
+    "ProjectDetectParams": {
+      "description": "Params of `project.detect`.",
+      "properties": {
+        "dir": {
+          "description": "Any directory inside the project; the project root is found upwards from it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dir"
+      ],
+      "type": "object"
+    },
+    "ProjectDetectResult": {
+      "description": "Result of `project.detect`.",
+      "properties": {
+        "manifests": {
+          "description": "`russet.toml`, `russet.local.toml` and the stack's manifest files, absolute.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "products": {
+          "description": "Products the project declares (SwiftPM library products, read without running SwiftPM).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "root": {
+          "description": "The absolute project root.",
+          "type": "string"
+        },
+        "stack": {
+          "$ref": "#/$defs/ProjectStack"
+        }
+      },
+      "required": [
+        "stack",
+        "root",
+        "products",
+        "manifests"
+      ],
+      "type": "object"
+    },
+    "ProjectInfoParams": {
+      "description": "Params of `project.info`.",
+      "properties": {
+        "project": {
+          "description": "The absolute project root (or a directory inside it).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "ProjectInfoPlistParams": {
+      "description": "Params of `project.infoPlist`.",
+      "properties": {
+        "configuration": {
+          "description": "`debug` (default), `release`, `profile` or a named profile.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "type": "string"
+        },
+        "target": {
+          "description": "The app product (default) or an extension product.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "ProjectInfoPlistResult": {
+      "description": "Result of `project.infoPlist`: the Info.plist a build would write.",
+      "properties": {
+        "plist": {
+          "description": "The plist's JSON form: dictionaries, arrays, strings, numbers and booleans as JSON; dates as RFC 3339\nstrings; data as base64 strings."
+        },
+        "provenance": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Key → its source: `default`, `russet.toml`, the project's Info.plist path, `enforced` or `sdk`.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "plist",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "ProjectInfoResult": {
+      "description": "Result of `project.info`.",
+      "properties": {
+        "configurations": {
+          "description": "`debug`, `release`, `profile` and every `[build.profiles.<name>]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "defaultTarget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "`[project] name`, else the app product, else the directory name.",
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "stack": {
+          "$ref": "#/$defs/ProjectStack"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/ProjectTarget"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "stack",
+        "root",
+        "name",
+        "targets",
+        "configurations"
+      ],
+      "type": "object"
+    },
+    "ProjectStack": {
+      "description": "A project's stack (`[project] stack`).",
+      "enum": [
+        "swiftpm",
+        "flutter",
+        "xcode",
+        "react-native",
+        "maui"
+      ],
+      "type": "string"
+    },
+    "ProjectTarget": {
+      "description": "One target of a project.",
+      "properties": {
+        "bundleId": {
+          "description": "The canonical bundle ID from `russet.toml`; omitted until `[app] bundle-id` is set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/TargetKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "type": "object"
     },
     "PromptKind": {
       "description": "What `ui.prompt` asks for.",
@@ -3200,6 +4020,55 @@
       ],
       "type": "string"
     },
+    "SignItem": {
+      "description": "One item to sign.",
+      "properties": {
+        "entitlements": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "getTaskAllow": {
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/SignKind"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind",
+        "getTaskAllow"
+      ],
+      "type": "object"
+    },
+    "SignKind": {
+      "description": "What a signing-plan item is.",
+      "enum": [
+        "bundle",
+        "mach-o"
+      ],
+      "type": "string"
+    },
+    "SigningPlan": {
+      "description": "Items to sign, inside-out: deepest first, the app last.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SignItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
     "Stage": {
       "description": "Pipeline stages (`JobEvent` kind `stage`).",
       "enum": [
@@ -3244,6 +4113,14 @@
     },
     "SubscriptionId": {
       "pattern": "^sub_[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "TargetKind": {
+      "description": "What a target builds.",
+      "enum": [
+        "app",
+        "app-extension"
+      ],
       "type": "string"
     },
     "ToolComponent": {
@@ -4256,11 +5133,11 @@
       "longRunning": false,
       "namespace": "build",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/BuildCleanParams"
       },
       "permission": "build",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/BuildCleanResult"
       }
     },
     "build.inspect": {
@@ -4269,11 +5146,11 @@
       "longRunning": false,
       "namespace": "build",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/BuildInspectParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/BuildInspectResult"
       }
     },
     "build.plan": {
@@ -4282,11 +5159,11 @@
       "longRunning": false,
       "namespace": "build",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/BuildStartParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/BuildPlanResult"
       }
     },
     "build.settings": {
@@ -4308,11 +5185,11 @@
       "longRunning": true,
       "namespace": "build",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/BuildStartParams"
       },
       "permission": "build",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/BuildOutput"
       }
     },
     "config.get": {
@@ -5517,11 +6394,11 @@
       "longRunning": false,
       "namespace": "project",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProjectDetectParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProjectDetectResult"
       }
     },
     "project.info": {
@@ -5530,11 +6407,11 @@
       "longRunning": false,
       "namespace": "project",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProjectInfoParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProjectInfoResult"
       }
     },
     "project.infoPlist": {
@@ -5543,11 +6420,11 @@
       "longRunning": false,
       "namespace": "project",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProjectInfoPlistParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProjectInfoPlistResult"
       }
     },
     "project.init": {

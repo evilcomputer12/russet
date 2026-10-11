@@ -334,10 +334,10 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `project.detect` | read |  | plain | `Unspecified` | `Unspecified` |
-| `project.info` | read |  | plain | `Unspecified` | `Unspecified` |
+| `project.detect` | read |  | plain | `ProjectDetectParams` | `ProjectDetectResult` |
+| `project.info` | read |  | plain | `ProjectInfoParams` | `ProjectInfoResult` |
 | `project.init` | project |  | plain | `Unspecified` | `Unspecified` |
-| `project.infoPlist` | read |  | plain | `Unspecified` | `Unspecified` |
+| `project.infoPlist` | read |  | plain | `ProjectInfoPlistParams` | `ProjectInfoPlistResult` |
 
 ## `build` (module `build`)
 
@@ -345,11 +345,11 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `build.start` | build | L | plain | `Unspecified` | `Unspecified` |
-| `build.plan` | read |  | plain | `Unspecified` | `Unspecified` |
+| `build.start` | build | L | plain | `BuildStartParams` | `BuildOutput` |
+| `build.plan` | read |  | plain | `BuildStartParams` | `BuildPlanResult` |
 | `build.settings` | read |  | plain | `Unspecified` | `Unspecified` |
-| `build.clean` | build |  | plain | `Unspecified` | `Unspecified` |
-| `build.inspect` | read |  | plain | `Unspecified` | `Unspecified` |
+| `build.clean` | build |  | plain | `BuildCleanParams` | `BuildCleanResult` |
+| `build.inspect` | read |  | plain | `BuildInspectParams` | `BuildInspectResult` |
 
 ## `assets` (module `assets`)
 

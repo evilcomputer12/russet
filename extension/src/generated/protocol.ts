@@ -179,6 +179,47 @@ export type AuthToken = string;
 export type BackgroundJob = { jobId: JobId, };
 
 /**
+ * The SwiftPM build backend (`[build] backend`).
+ */
+export type BuildBackend = "swiftbuild" | "native" | "xtool" | "pif";
+
+/**
+ * Params of `build.clean`.
+ */
+export type BuildCleanParams = { project: string, scope: CleanScope, };
+
+/**
+ * Result of `build.clean`.
+ */
+export type BuildCleanResult = { freedBytes: number, };
+
+/**
+ * Params of `build.inspect`.
+ */
+export type BuildInspectParams = { 
+/**
+ * An `.app` directory or an `.ipa` file.
+ */
+path: string, };
+
+/**
+ * Result of `build.inspect`.
+ */
+export type BuildInspectResult = { 
+/**
+ * The Info.plist's JSON form (as `project.infoPlist`'s `plist`).
+ */
+infoPlist: JsonValue, machO: Array<MachOSummary>, lints: Array<LintFinding>, 
+/**
+ * The DT* keys.
+ */
+dt: { [key in string]: string }, 
+/**
+ * The asset catalog summary; omitted until the CAR reader exists (W21).
+ */
+car?: JsonValue, };
+
+/**
  * `details` of `ipc.buildMismatch` (1107; development builds).
  */
 export type BuildMismatchDetails = { serverBuildId: string, clientBuildId: string, serverExecutable: string, 
@@ -188,9 +229,107 @@ export type BuildMismatchDetails = { serverBuildId: string, clientBuildId: strin
 restartable: boolean, };
 
 /**
+ * Result of `build.start` (ARCHITECTURE §5.3 `BuildOutput`).
+ */
+export type BuildOutput = { 
+/**
+ * The build's job id (`job_…`).
+ */
+buildId: JobId, app: BundleInfo, extensions: Array<BundleInfo>, 
+/**
+ * Original → effective bundle IDs (the signing area rewrites entitlements with it).
+ */
+bundleIds: { [key in string]: string }, signingPlan: SigningPlan, dsyms: Array<string>, ipa?: string, 
+/**
+ * `build-report.json`.
+ */
+reportPath: string, lints: Array<LintFinding>, durationMs: number, };
+
+/**
+ * Result of `build.plan`: what a build would do (no tool runs, nothing is written into the project).
+ */
+export type BuildPlanResult = { root: string, stack: ProjectStack, 
+/**
+ * The app product; omitted when only the package description can tell.
+ */
+product?: string, extensions: Array<string>, configuration: string, release: boolean, backend: BuildBackend, package: PackageKind, 
+/**
+ * `none`, `minimal`, `sdk` or `xcode-compat` (ARCHITECTURE §16.4).
+ */
+metadata: string, sdk: PlanSdk, 
+/**
+ * `[app] deployment-target`; omitted when the package's `.iOS` platform decides at build time.
+ */
+deploymentTarget?: string, bundleIds: { [key in string]: string }, appPath?: string, reportPath: string, 
+/**
+ * `resolve`, `prepare`, `compile`, `resources`, `assemble`, `lint`, `package`.
+ */
+stages: Array<string>, warnings: Array<string>, };
+
+/**
+ * Params of `build.start` and `build.plan`.
+ */
+export type BuildStartParams = { 
+/**
+ * The absolute project root (or a directory inside it).
+ */
+project: string, 
+/**
+ * The app product; `[build.swiftpm] product` when omitted.
+ */
+target?: string, 
+/**
+ * `debug`, `release`, `profile` or a named profile; `[build] default-profile` when omitted.
+ */
+configuration?: string, package?: PackageKind, backend?: BuildBackend, 
+/**
+ * Build-setting overrides (`KEY = VALUE`), on top of `[build] overrides`.
+ */
+overrides?: { [key in string]: string }, 
+/**
+ * Remove the SwiftPM scratch and the profile's outputs first.
+ */
+clean?: boolean, 
+/**
+ * The signing area's policy; `[signing] bundle-id-policy` when omitted.
+ */
+bundleIdPolicy?: BundleIdPolicy, };
+
+/**
+ * How effective bundle IDs are derived (ARCHITECTURE §16.5) [D 18].
+ */
+export type BundleIdPolicy = { "kind": "exact" } | { "kind": "team-suffix", teamId: string, } | { "kind": "xtool-prefix", prefix: string, } | { "kind": "custom", map: { [key in string]: string }, };
+
+/**
+ * One built bundle.
+ */
+export type BundleInfo = { path: string, executable: string, 
+/**
+ * The effective `CFBundleIdentifier`.
+ */
+bundleId: string, 
+/**
+ * The canonical ID before the bundle-ID policy.
+ */
+originalBundleId: string, kind: TargetKind, product: string, 
+/**
+ * `CFBundleShortVersionString`.
+ */
+version: string, 
+/**
+ * `CFBundleVersion`.
+ */
+buildNumber: string, };
+
+/**
  * Params of the LSP built-in notification `$/cancelRequest` (ARCHITECTURE §7.6).
  */
 export type CancelParams = { id: RequestIdValue, };
+
+/**
+ * What `build.clean` removes.
+ */
+export type CleanScope = "build" | "all";
 
 /**
  * What the client can do when the daemon asks (ARCHITECTURE §7.4, §9.3).
@@ -867,9 +1006,44 @@ export type LeaseReleaseParams = { leaseId: LeaseId, };
 export type LeaseReleaseResult = Record<symbol, never>;
 
 /**
+ * A lint finding (build §4.7).
+ */
+export type LintFinding = { 
+/**
+ * `L001` … `L012`.
+ */
+id: string, severity: LintSeverity, path?: string, message: string, 
+/**
+ * Whether the build fixed it.
+ */
+fixed: boolean, };
+
+/**
+ * Lint severities.
+ */
+export type LintSeverity = "info" | "warning" | "error";
+
+/**
  * The stream a log line came from (`JobEvent` kind `log`).
  */
 export type LogStream = "stdout" | "stderr" | "info" | "warn";
+
+/**
+ * One Mach-O file of an inspected bundle.
+ */
+export type MachOSummary = { 
+/**
+ * Relative to the bundle's parent (`RussetProbe.app/RussetProbe`).
+ */
+path: string, archs: Array<string>, 
+/**
+ * `LC_BUILD_VERSION` platform (2 = iOS).
+ */
+platform?: number, minos?: string, sdk?: string, 
+/**
+ * `lld 21.1.6`, …
+ */
+tools: Array<string>, uuid?: string, rpaths: Array<string>, dylibs: Array<string>, encrypted?: boolean, };
 
 /**
  * A component Russet downloads and installs itself (`toolchain.install`). Wave 1: `python-shared` and
@@ -881,6 +1055,11 @@ export type ManagedComponent = "python-shared" | "darwin-tools" | "swift" | "llv
  * Message levels.
  */
 export type MessageLevel = "info" | "warning" | "error";
+
+/**
+ * What to package after the build.
+ */
+export type PackageKind = "none" | "ipa-dev" | "ipa-store";
 
 /**
  * Permission classes (ARCHITECTURE §7.5). Wire values are kebab-case.
@@ -897,6 +1076,23 @@ export type PinsInfo = { id: string,
 source: string, };
 
 /**
+ * The SDK a plan resolved.
+ */
+export type PlanSdk = { 
+/**
+ * `xcode-27.0-27A266a`.
+ */
+id: string, 
+/**
+ * `iphoneos27.0`.
+ */
+canonicalName: string, version: string, build?: string, xcodeVersion: string, xcodeBuild: string, swiftRequired: string, 
+/**
+ * The bundle the SDK was read from.
+ */
+bundle: string, };
+
+/**
  * `begin`, `report` or `end`.
  */
 export type ProgressKind = "begin" | "report" | "end";
@@ -910,6 +1106,95 @@ export type ProgressParams = { token: ProgressToken, value: WorkDoneProgress, };
  * The token of an LSP work-done progress (`$/progress`): a string or an integer.
  */
 export type ProgressToken = number | string;
+
+/**
+ * Params of `project.detect`.
+ */
+export type ProjectDetectParams = { 
+/**
+ * Any directory inside the project; the project root is found upwards from it.
+ */
+dir: string, };
+
+/**
+ * Result of `project.detect`.
+ */
+export type ProjectDetectResult = { stack: ProjectStack, 
+/**
+ * The absolute project root.
+ */
+root: string, 
+/**
+ * Products the project declares (SwiftPM library products, read without running SwiftPM).
+ */
+products: Array<string>, 
+/**
+ * `russet.toml`, `russet.local.toml` and the stack's manifest files, absolute.
+ */
+manifests: Array<string>, };
+
+/**
+ * Params of `project.info`.
+ */
+export type ProjectInfoParams = { 
+/**
+ * The absolute project root (or a directory inside it).
+ */
+project: string, };
+
+/**
+ * Params of `project.infoPlist`.
+ */
+export type ProjectInfoPlistParams = { project: string, 
+/**
+ * The app product (default) or an extension product.
+ */
+target?: string, 
+/**
+ * `debug` (default), `release`, `profile` or a named profile.
+ */
+configuration?: string, };
+
+/**
+ * Result of `project.infoPlist`: the Info.plist a build would write.
+ */
+export type ProjectInfoPlistResult = { 
+/**
+ * The plist's JSON form: dictionaries, arrays, strings, numbers and booleans as JSON; dates as RFC 3339
+ * strings; data as base64 strings.
+ */
+plist: JsonValue, 
+/**
+ * Key → its source: `default`, `russet.toml`, the project's Info.plist path, `enforced` or `sdk`.
+ */
+provenance: { [key in string]: string }, };
+
+/**
+ * Result of `project.info`.
+ */
+export type ProjectInfoResult = { stack: ProjectStack, root: string, 
+/**
+ * `[project] name`, else the app product, else the directory name.
+ */
+name: string, targets: Array<ProjectTarget>, 
+/**
+ * `debug`, `release`, `profile` and every `[build.profiles.<name>]`.
+ */
+configurations: Array<string>, defaultTarget?: string, };
+
+/**
+ * A project's stack (`[project] stack`).
+ */
+export type ProjectStack = "swiftpm" | "flutter" | "xcode" | "react-native" | "maui";
+
+/**
+ * One target of a project.
+ */
+export type ProjectTarget = { name: string, 
+/**
+ * The canonical bundle ID from `russet.toml`; omitted until `[app] bundle-id` is set.
+ */
+bundleId?: string, kind: TargetKind, };
 
 /**
  * What `ui.prompt` asks for.
@@ -1100,6 +1385,21 @@ export type Severity = "error" | "warning" | "note";
 export type ShutdownReason = "idle" | "request" | "upgrade" | "signal";
 
 /**
+ * One item to sign.
+ */
+export type SignItem = { path: string, kind: SignKind, entitlements?: string, getTaskAllow: boolean, };
+
+/**
+ * What a signing-plan item is.
+ */
+export type SignKind = "bundle" | "mach-o";
+
+/**
+ * Items to sign, inside-out: deepest first, the app last.
+ */
+export type SigningPlan = { items: Array<SignItem>, };
+
+/**
  * Pipeline stages (`JobEvent` kind `stage`).
  */
 export type Stage = "resolve" | "prepare" | "compile" | "resources" | "assemble" | "lint" | "package" | "sign" | "install" | "launch" | "attach";
@@ -1123,6 +1423,11 @@ export type SubscriptionCancelResult = Record<symbol, never>;
  * A subscription (`sub_…`, ARCHITECTURE §6.4).
  */
 export type SubscriptionId = string;
+
+/**
+ * What a target builds.
+ */
+export type TargetKind = "app" | "app-extension";
 
 /**
  * A toolchain component.
@@ -1377,15 +1682,15 @@ export interface Methods {
   "perf.export": { params: Unspecified; result: Unspecified };
   "location.set": { params: Unspecified; result: Unspecified };
   "location.clear": { params: Unspecified; result: Unspecified };
-  "project.detect": { params: Unspecified; result: Unspecified };
-  "project.info": { params: Unspecified; result: Unspecified };
+  "project.detect": { params: ProjectDetectParams; result: ProjectDetectResult };
+  "project.info": { params: ProjectInfoParams; result: ProjectInfoResult };
   "project.init": { params: Unspecified; result: Unspecified };
-  "project.infoPlist": { params: Unspecified; result: Unspecified };
-  "build.start": { params: Unspecified; result: Unspecified };
-  "build.plan": { params: Unspecified; result: Unspecified };
+  "project.infoPlist": { params: ProjectInfoPlistParams; result: ProjectInfoPlistResult };
+  "build.start": { params: BuildStartParams; result: BuildOutput };
+  "build.plan": { params: BuildStartParams; result: BuildPlanResult };
   "build.settings": { params: Unspecified; result: Unspecified };
-  "build.clean": { params: Unspecified; result: Unspecified };
-  "build.inspect": { params: Unspecified; result: Unspecified };
+  "build.clean": { params: BuildCleanParams; result: BuildCleanResult };
+  "build.inspect": { params: BuildInspectParams; result: BuildInspectResult };
   "assets.list": { params: Unspecified; result: Unspecified };
   "assets.compile": { params: Unspecified; result: Unspecified };
   "assets.appIcon": { params: Unspecified; result: Unspecified };
