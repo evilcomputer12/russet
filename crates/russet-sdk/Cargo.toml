@@ -16,11 +16,17 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
-camino.workspace = true
+camino = { workspace = true, features = ["serde1"] }
 plist.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
 russet-plist.workspace = true
 russet-toolchain.workspace = true
 russet-xar.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 tokio-util.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }

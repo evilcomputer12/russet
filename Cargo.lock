@@ -5317,7 +5317,9 @@ dependencies = [
 name = "russet-build"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "camino",
+ "filetime",
  "plist",
  "russet-core",
  "russet-doctor",
@@ -5325,7 +5327,13 @@ dependencies = [
  "russet-macho",
  "russet-plist",
  "russet-sdk",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
  "tokio-util",
+ "toml 1.1.8+spec-1.1.0",
  "uuid",
 ]
 
@@ -5483,6 +5491,8 @@ name = "russet-ipa"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "sha2 0.11.0",
+ "tempfile",
  "thiserror 2.0.21",
  "zip 9.0.1",
 ]
@@ -5553,6 +5563,7 @@ name = "russet-plist"
 version = "0.1.0"
 dependencies = [
  "plist",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -5578,6 +5589,9 @@ dependencies = [
  "russet-plist",
  "russet-toolchain",
  "russet-xar",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "tokio-util",
 ]
 

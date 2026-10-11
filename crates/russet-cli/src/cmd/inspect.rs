@@ -3,14 +3,20 @@
 
 //! `russet inspect`, `russet lint` (ARCHITECTURE §8.7). Owner: W5 (Wave 1), W16 (lint, Wave 2).
 //!
-//! F0 stub (W1): registered so `russet --help` lists it; running it reports `core.notImplemented` until
-//! the owner fills [`command`] and [`run`].
+//! ```text
+//! russet inspect <App.app|App.ipa>     build.inspect: Info.plist, DT keys, Mach-O summaries, structural lints
+//! russet lint <path> [--store]          W16 (B05, B18)
+//! ```
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{ArgMatches, Command};
+use clap::{Arg, ArgMatches, Command, value_parser};
 use russet_core::Result;
+use russet_core::error::{Error, codes};
+use russet_protocol::build as p;
 
+use super::build::absolute;
 use crate::CliCtx;
 
 /// This area's top-level commands, as a [`super::group`].
@@ -18,7 +24,13 @@ pub fn command() -> Command {
     super::group(
         "inspect",
         [
-            super::stub("inspect", "Inspect an .app or .ipa: Info.plist, Mach-O, lints"),
+            Command::new("inspect").about("Inspect an .app or .ipa: Info.plist, DT keys, Mach-O, lints").arg(
+                Arg::new("path")
+                    .required(true)
+                    .value_name("PATH")
+                    .value_parser(value_parser!(PathBuf))
+                    .help("An .app directory or an .ipa file"),
+            ),
             super::stub("lint", "Lint an .app or .ipa [--store]"),
         ],
     )
@@ -26,5 +38,24 @@ pub fn command() -> Command {
 
 /// Runs this area's command; `m` is the root matches, so `m.subcommand()` names the command.
 pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
-    super::not_implemented(m)
+    match m.subcommand() {
+        Some(("inspect", sub)) => {
+            let path = absolute(sub.get_one::<PathBuf>("path").map(PathBuf::as_path))?;
+            let report = cx.peer.call::<p::BuildInspect>(p::BuildInspectParams { path }).await?;
+            let value = serde_json::to_value(&report)
+                .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot render the result: {e}")))?;
+            cx.reporter.result(&value);
+            Ok(ExitCode::SUCCESS)
+        }
+        _ => super::not_implemented(m),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn inspect_needs_a_path() {
+        assert!(crate::root_command().try_get_matches_from(["russet", "inspect"]).is_err());
+        assert!(crate::root_command().try_get_matches_from(["russet", "inspect", "A.ipa"]).is_ok());
+    }
 }

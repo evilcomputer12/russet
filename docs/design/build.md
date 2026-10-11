@@ -1412,6 +1412,52 @@ Milestones: M1/M3 = B01–B09 (B10 phase A suffices); M2 = B13; M4 = B10–B12 a
 
 ---
 
+## 15. Wave-1 implementation notes (W5)
+
+Where the Wave-1 code (W5: B01, B02, B03, the B06 subset, B07, `russet-sdk`'s xtool provider) differs from the
+sections above. ARCHITECTURE.md stays binding; the contract points among these are contract change requests for
+the lead.
+
+- **Metadata** (§4.4): `sdk` writes exactly `DTPlatformName`, `DTPlatformVersion`, `DTSDKName`, `DTSDKBuild` and
+  `DTPlatformBuild` (ARCHITECTURE §16.4), never `DTXcode`, `DTXcodeBuild` or `DTCompiler`. A bundle without
+  `SystemVersion.plist` or the platform `version.plist` fails with `sdk.incomplete` naming the file (`minimal`
+  builds without them). `xcode-compat` needs `[build] metadata-consent = {by, at}` in the committed `russet.toml`;
+  a consent only in `russet.local.toml` is `config.invalid`.
+- **Profiles** (§9.2): `profile` and named profiles build with the Release configuration; `[app] build-number =
+  "auto"` builds as `1` in Wave 1.
+- **Planning** (§4.2): `swift package resolve`, `show-dependencies` and the root package's `describe` share the
+  builder's scratch, `.russet/work/swiftpm` (as xtool does), so remote dependencies need no `Package.resolved` in
+  the builder package (checked with swift-argument-parser 1.8.2). Every dependency is described with its own
+  scratch, `.russet/work/describe/<identity>`, so SwiftPM writes nothing into a local dependency's directory.
+- **Environment** (§4.2): `swift` runs with an allowlist of the caller's variables, `PATH` (the darwin-tools linker
+  directory and Swift's `bin` first) and `XCODE_EXTRA_PLATFORM_FOLDERS`; `SDKROOT` never passes. `env -i` dumps in
+  tool output are redacted in log lines and diagnostics. `swift --version` and the LLVM rewriter probes run
+  through the `CommandRunner` with a 30 s timeout.
+- **Dynamic products** (§4.1): a graph with `.dynamic` products builds with the `native` backend and says so
+  (`build.warn.backend`); the dylib goes to `Frameworks/lib<X>.dylib` with L008 as a warning until B04 wraps it.
+  Its `LC_BUILD_VERSION` has the SDK's version too (`sdk 27.0`; the toolset carries the fix for every link).
+- **Bundles** (§4.6): nested Info.plists keep their encoding when DT-normalized; the release dSYM's DWARF file is
+  named after the product; an extension gets the app's effective `CFBundleShortVersionString` and `CFBundleVersion`
+  (a different value in its own Info.plist is replaced, with `build.warn.infoPlist`); extension IDs follow the
+  effective app ID under `team-suffix` and `xtool-prefix`.
+- **Bundle IDs** (§4.5): `[signing] bundle-id-policy = "xtool-prefix"` needs the identity prefix of the imported
+  xtool account; when a request names no policy, the daemon passes the default account's prefix (once W6's
+  account service is merged). Without one the build fails with `build.bundleIdInvalid` and the import hint.
+- **`build-report.json`** (§9.6): `bundles[].machO[].path` is relative to its bundle and `lints[].path` to the
+  bundle's parent, as in the example; `toolchain.sdk.id` is `xcode-<version>-<build>` (`xcode-27.0-27A266a`), the
+  same id as `SdkInfo.id`.
+- **Events** (§9.2): warnings carry `build.warn.lint`, `build.warn.backend`, `build.warn.metadata`,
+  `build.warn.resources`, `build.warn.infoPlist`, `build.warn.dsym` and `build.warn.strip`; all but the first are
+  a requested ARCHITECTURE §13.3 addition.
+- **Previews**: `build.plan` and `project.infoPlist` read the `.iOS(…)` platform from a scan of `Package.swift`
+  when `[app] deployment-target` is unset (builds read it from `swift package describe`).
+- **Clean**: `build.clean` takes the project lock for both scopes, so it answers `build.inProgress` while a build
+  runs instead of deleting its files.
+- **CLI** (§9.3): `russet build` also takes `--target` and `--dry-run` (`build.plan`); `russet package ipa` runs
+  in-process because no RPC method carries it yet (contract change requested).
+- **Doctor**: `sdk.buildFacts` fails when the chosen bundle lacks the platform `version.plist` or darwin-tools'
+  `ld64.lld`, since default builds then fail.
+
 ## Appendix A: Verification log
 
 All commands ran on this host (CachyOS, Swift 6.4, xtool SDK `epoch=3,darwinTools=1.1.0,oam=1.3.0` from Xcode 27.0 27A266a) inside the session scratchpad on tmpfs, unless marked "Mac". No device commands were run. Scratch outputs (about 220 MB) were deleted afterwards. The Mac temp directories were removed (an EXIT trap, plus one manual cleanup after an aborted run).

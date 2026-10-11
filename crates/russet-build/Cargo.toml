@@ -15,7 +15,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-camino.workspace = true
+async-trait.workspace = true
+camino = { workspace = true, features = ["serde1"] }
+filetime = "0.2.29"
 plist.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
@@ -23,5 +25,14 @@ russet-ipa.workspace = true
 russet-macho.workspace = true
 russet-plist.workspace = true
 russet-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 tokio-util.workspace = true
+toml.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "time"] }

@@ -3,16 +3,55 @@
 
 //! `project.*`: project detection and info (ARCHITECTURE §8.3). Owner: W5 (Wave 1), W16 (project.init).
 //!
-//! F0 stub (W1): every name of ARCHITECTURE §8.3 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
-//! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+//! `project.init` keeps its F0 placeholder DTOs until W16 (Wave 2) defines them.
+
+use std::collections::BTreeMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
 
-/// Params of `project.detect`: `{dir} → {stack, root, products[], manifests[]}`.
-pub type ProjectDetectParams = Unspecified;
+/// A project's stack (`[project] stack`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectStack {
+    Swiftpm,
+    Flutter,
+    Xcode,
+    ReactNative,
+    Maui,
+}
+
+/// What a target builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum TargetKind {
+    App,
+    AppExtension,
+}
+
+/// Params of `project.detect`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDetectParams {
+    /// Any directory inside the project; the project root is found upwards from it.
+    pub dir: String,
+}
+
 /// Result of `project.detect`.
-pub type ProjectDetectResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDetectResult {
+    pub stack: ProjectStack,
+    /// The absolute project root.
+    pub root: String,
+    /// Products the project declares (SwiftPM library products, read without running SwiftPM).
+    pub products: Vec<String>,
+    /// `russet.toml`, `russet.local.toml` and the stack's manifest files, absolute.
+    pub manifests: Vec<String>,
+}
 crate::rpc_method!(
     /// `project.detect` (class `read`). W5 (Wave 1).
     ProjectDetect,
@@ -21,10 +60,41 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `project.info`: `{project} → {stack, root, targets[{name, bundleId, kind}], configurations[], defaultTarget}`.
-pub type ProjectInfoParams = Unspecified;
+/// Params of `project.info`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInfoParams {
+    /// The absolute project root (or a directory inside it).
+    pub project: String,
+}
+
+/// One target of a project.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectTarget {
+    pub name: String,
+    /// The canonical bundle ID from `russet.toml`; omitted until `[app] bundle-id` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bundle_id: Option<String>,
+    pub kind: TargetKind,
+}
+
 /// Result of `project.info`.
-pub type ProjectInfoResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInfoResult {
+    pub stack: ProjectStack,
+    pub root: String,
+    /// `[project] name`, else the app product, else the directory name.
+    pub name: String,
+    pub targets: Vec<ProjectTarget>,
+    /// `debug`, `release`, `profile` and every `[build.profiles.<name>]`.
+    pub configurations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_target: Option<String>,
+}
 crate::rpc_method!(
     /// `project.info` (class `read`). W5 (Wave 1).
     ProjectInfo,
@@ -45,10 +115,31 @@ crate::rpc_method!(
     Permission::Project
 );
 
-/// Params of `project.infoPlist`: `{project, target?, configuration?} → {plist, provenance{key: source}}`.
-pub type ProjectInfoPlistParams = Unspecified;
-/// Result of `project.infoPlist`.
-pub type ProjectInfoPlistResult = Unspecified;
+/// Params of `project.infoPlist`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInfoPlistParams {
+    pub project: String,
+    /// The app product (default) or an extension product.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub target: Option<String>,
+    /// `debug` (default), `release`, `profile` or a named profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub configuration: Option<String>,
+}
+
+/// Result of `project.infoPlist`: the Info.plist a build would write.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInfoPlistResult {
+    /// The plist's JSON form: dictionaries, arrays, strings, numbers and booleans as JSON; dates as RFC 3339
+    /// strings; data as base64 strings.
+    pub plist: serde_json::Value,
+    /// Key → its source: `default`, `russet.toml`, the project's Info.plist path, `enforced` or `sdk`.
+    pub provenance: BTreeMap<String, String>,
+}
 crate::rpc_method!(
     /// `project.infoPlist` (class `read`). W5 (Wave 1).
     ProjectInfoPlist,

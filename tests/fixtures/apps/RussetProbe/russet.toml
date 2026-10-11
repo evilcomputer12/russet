@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# RussetProbe's project file (ARCHITECTURE §14.2). A gitignored russet.local.toml next to it may override
+# `[app] bundle-id` and `[signing] bundle-id-policy` for a personal team (PLAN §4.10).
+schema = 1
+
+[project]
+name = "RussetProbe"
+stack = "swiftpm"
+
+[app]
+bundle-id = "dev.russet.test.probe"
+display-name = "RussetProbe"
+version = "1.0.0"
+build-number = "1"
+deployment-target = "17.0"
+devices = ["iphone", "ipad"]
+
+[build.swiftpm]
+product = "RussetProbe"
