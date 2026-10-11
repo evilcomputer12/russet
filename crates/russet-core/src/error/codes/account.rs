@@ -27,6 +27,10 @@ pub const TWO_FACTOR_REQUIRED: ErrorCode = ErrorCode::new(5106, "account.twoFact
 pub const APPLE_SERVICE_UNAVAILABLE: ErrorCode = ErrorCode::new(5107, "account.appleServiceUnavailable", 5);
 /// 5108 `account.insufficientRole`: The key's role is insufficient for this request.
 pub const INSUFFICIENT_ROLE: ErrorCode = ErrorCode::new(5108, "account.insufficientRole", 5);
+/// 5109 `account.keyInvalid`: The App Store Connect key is not a readable EC P-256 PKCS#8 (`.p8`) key.
+pub const KEY_INVALID: ErrorCode = ErrorCode::new(5109, "account.keyInvalid", 5);
+/// 5110 `account.noAccount`: No account is configured (or the requested one does not exist).
+pub const NO_ACCOUNT: ErrorCode = ErrorCode::new(5110, "account.noAccount", 5);
 
 /// Every code of this family, in number order.
 pub const ALL: &[ErrorCode] = &[
@@ -39,4 +43,6 @@ pub const ALL: &[ErrorCode] = &[
     TWO_FACTOR_REQUIRED,
     APPLE_SERVICE_UNAVAILABLE,
     INSUFFICIENT_ROLE,
+    KEY_INVALID,
+    NO_ACCOUNT,
 ];

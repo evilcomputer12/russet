@@ -5364,7 +5364,10 @@ dependencies = [
 name = "russet-macho"
 version = "0.1.0"
 dependencies = [
- "goblin 0.10.7",
+ "russet-macho",
+ "sha1 0.10.7",
+ "sha2 0.11.0",
+ "tempfile",
  "thiserror 2.0.21",
  "uuid",
 ]
@@ -5458,10 +5461,18 @@ name = "russet-sign"
 version = "0.1.0"
 dependencies = [
  "apple-codesign",
+ "chrono",
+ "cryptographic-message-syntax",
+ "plist",
  "russet-core",
  "russet-doctor",
  "russet-macho",
+ "russet-sign",
+ "serde_json",
+ "tempfile",
  "x509-certificate",
+ "zeroize",
+ "zip 9.0.1",
 ]
 
 [[package]]
