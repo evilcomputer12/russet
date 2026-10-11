@@ -15,9 +15,6 @@
 // Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
 const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
 
-// Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
-const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
-
 #[macro_use]
 mod macros;
 mod registry;
@@ -111,6 +108,8 @@ pub mod subscription;
 pub mod test;
 pub mod toolchain;
 pub mod ui;
+pub mod xcode;
+pub mod xctest;
 
 macro_rules! namespace_table {
     ($($module:ident),* $(,)?) => {
@@ -174,6 +173,9 @@ namespace_table!(
     crash,
     flutter_run,
     test,
+    // W28: Xcode projects and XCUITest (PLAN §9.2; no methods yet)
+    xcode,
+    xctest,
     // W13 / W20: MCP administration (§8.6)
     mcp,
     // W11 / W14: IDE reverse requests (§9.4)

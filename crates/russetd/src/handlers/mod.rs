@@ -54,6 +54,8 @@ pub mod sign;
 pub mod subscription;
 pub mod test;
 pub mod toolchain;
+pub mod xcode;
+pub mod xctest;
 
 macro_rules! register_table {
     ($($module:ident),* $(,)?) => {
@@ -104,6 +106,8 @@ register_table!(
     crash,
     flutter_run,
     test,
+    xcode,
+    xctest,
     mcp,
 );
 
