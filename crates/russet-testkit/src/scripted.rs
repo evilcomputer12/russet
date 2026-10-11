@@ -209,7 +209,8 @@ impl Inner {
         let was = self.attached_in(&st, d);
         st.overrides.insert(udid.to_owned(), attached);
         if was != attached {
-            let ev = if attached { DeviceEvent::Added(summary(d)) } else { DeviceEvent::Removed(Udid(udid.to_owned())) };
+            let ev =
+                if attached { DeviceEvent::Added(summary(d)) } else { DeviceEvent::Removed(Udid(udid.to_owned())) };
             self.broadcast(&mut st, &ev);
         }
         if let Some(p) = st.presence.get(udid) {
@@ -377,9 +378,11 @@ impl ScriptedConnector {
         if !inner.is_attached(&u) {
             return Err(disconnected(&u));
         }
-        let scripted = inner.scenario.services.iter().find(|s| {
-            s.via == via && s.name == name && s.udid.as_deref().is_none_or(|x| x == u)
-        });
+        let scripted = inner
+            .scenario
+            .services
+            .iter()
+            .find(|s| s.via == via && s.name == name && s.udid.as_deref().is_none_or(|x| x == u));
         let (actions, syslog) = match scripted {
             Some(s) => (s.steps.iter().filter_map(|st| st.action().ok()).collect::<Vec<_>>(), false),
             None if via == Via::Lockdown && name == SYSLOG_RELAY => (syslog_actions(device), true),

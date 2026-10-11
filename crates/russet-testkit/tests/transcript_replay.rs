@@ -35,9 +35,7 @@ async fn the_committed_transcript_replays_against_the_fake_daemon() {
 
 #[tokio::test]
 async fn a_wrong_answer_names_the_path() {
-    let t = Transcript::default()
-        .send(init())
-        .expect(json!({"id": 1, "result": {"protocol": {"major": 2}}}));
+    let t = Transcript::default().send(init()).expect(json!({"id": 1, "result": {"protocol": {"major": 2}}}));
     let e = t.replay(fake()).await.expect_err("major 1 is not 2");
     assert_eq!(e.line, 2);
     match &e.kind {
@@ -61,7 +59,8 @@ async fn silence_times_out_and_a_closed_connection_is_reported() {
 
 #[test]
 fn transcripts_round_trip_and_reject_bad_lines() {
-    let t = Transcript::default().ignoring(&["daemon.logBatch"]).send(init()).expect(json!({"id": 1, "result": "$any"}));
+    let t =
+        Transcript::default().ignoring(&["daemon.logBatch"]).send(init()).expect(json!({"id": 1, "result": "$any"}));
     let again = Transcript::parse(&t.to_jsonl()).expect("parse");
     assert_eq!(again.ignore, t.ignore);
     assert_eq!(again.entries.len(), 2);

@@ -230,10 +230,18 @@ impl Transcript {
                 Entry::Expect(pattern) => loop {
                     let next = tokio::time::timeout(timeout, lsp::read_message(&mut reader)).await;
                     let msg = match next {
-                        Err(_) => return Err(TranscriptError { line, kind: ErrorKind::Timeout { expected: pattern.clone() } }),
+                        Err(_) => {
+                            return Err(TranscriptError {
+                                line,
+                                kind: ErrorKind::Timeout { expected: pattern.clone() },
+                            });
+                        }
                         Ok(Err(e)) => return Err(TranscriptError { line, kind: ErrorKind::Io(e.to_string()) }),
                         Ok(Ok(None)) => {
-                            return Err(TranscriptError { line, kind: ErrorKind::Closed { expected: pattern.clone() } });
+                            return Err(TranscriptError {
+                                line,
+                                kind: ErrorKind::Closed { expected: pattern.clone() },
+                            });
                         }
                         Ok(Ok(Some(m))) => m,
                     };
@@ -266,9 +274,10 @@ impl Transcript {
     /// Connects to a Unix socket and replays.
     #[cfg(unix)]
     pub async fn replay_unix(&self, socket: &Path) -> Result<Replay, TranscriptError> {
-        let s = tokio::net::UnixStream::connect(socket)
-            .await
-            .map_err(|e| TranscriptError { line: 0, kind: ErrorKind::Io(format!("connecting to {}: {e}", socket.display())) })?;
+        let s = tokio::net::UnixStream::connect(socket).await.map_err(|e| TranscriptError {
+            line: 0,
+            kind: ErrorKind::Io(format!("connecting to {}: {e}", socket.display())),
+        })?;
         self.replay(s).await
     }
 }

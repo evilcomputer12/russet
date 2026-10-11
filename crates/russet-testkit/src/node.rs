@@ -38,7 +38,11 @@ pub enum NodeError {
     /// `RUSSET_REQUIRE_NODE_HARNESS=1` (CI).
     Unavailable(String),
     /// The harness ran but its output was not a report.
-    BadOutput { status: String, stdout: String, stderr: String },
+    BadOutput {
+        status: String,
+        stdout: String,
+        stderr: String,
+    },
     Io(std::io::Error),
 }
 
@@ -133,7 +137,13 @@ impl InteropPlan {
     /// The plan that exercises every interop case of W2's test list (PLAN W2: initialize, `$/progress`, cancel
     /// → `-32800`, unknown method → `-32601`, a `ui.confirm` answered by the client) against methods named by
     /// the caller.
-    pub fn full(socket: &Path, progress_method: &str, progress_params: Value, confirm_method: &str, confirm_params: Value) -> Self {
+    pub fn full(
+        socket: &Path,
+        progress_method: &str,
+        progress_params: Value,
+        confirm_method: &str,
+        confirm_params: Value,
+    ) -> Self {
         Self::new(socket)
             .step(InteropStep::request("ping", "daemon.ping", json!({})))
             .step(InteropStep::unknown_method("unknown-method", "russet.noSuchMethod"))

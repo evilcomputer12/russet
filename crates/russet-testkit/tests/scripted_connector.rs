@@ -45,9 +45,11 @@ fn the_default_scenario_file_is_the_embedded_one_and_is_valid() {
     assert_eq!((d.udid.as_str(), d.product_type.as_str(), d.os_version.as_str()), (UDID, "iPhone13,2", "27.0"));
     assert!(d.paired && d.developer_mode && !d.locked);
     assert_eq!(d.ddi.as_ref().and_then(|x| x.product_build.as_deref()), Some("27A266a"));
-    assert!(ScriptedConnector::from_backend_spec(&format!("scripted:{}", default_scenario_path().display()))
-        .expect("spec")
-        .is_some());
+    assert!(
+        ScriptedConnector::from_backend_spec(&format!("scripted:{}", default_scenario_path().display()))
+            .expect("spec")
+            .is_some()
+    );
     assert!(ScriptedConnector::from_backend_spec("none").expect("spec").is_none());
     let missing = ScriptedConnector::from_backend_spec("scripted:/nonexistent/scenario.toml").expect_err("missing");
     assert_eq!(missing.code(), codes::core::NOT_FOUND);
@@ -101,7 +103,10 @@ async fn lockdown_values_come_from_the_device() {
     assert_eq!(all["BuildVersion"], json!("24A437"));
     assert_eq!(all["HardwareModel"], json!("D53gAP"), "[device.lockdown] values are served too");
     let dev_mode = c
-        .call(call("lockdown.get_value", json!({ "domain": "com.apple.security.mac.amfi", "key": "DeveloperModeStatus" })))
+        .call(call(
+            "lockdown.get_value",
+            json!({ "domain": "com.apple.security.mac.amfi", "key": "DeveloperModeStatus" }),
+        ))
         .await
         .expect("amfi");
     assert_eq!(dev_mode, json!(true));
@@ -277,7 +282,10 @@ fn invalid_scenarios_are_rejected_with_a_reason() {
             "schema = 1\nname = \"x\"\n[[service]]\nname = \"s\"\nsteps = [{ send = \"a\", expect = \"b\" }]\n",
             "exactly one of send",
         ),
-        ("schema = 1\nname = \"x\"\n[[device]]\nudid = \"a\"\nattach-at-ms = 5\ndetach-at-ms = 5\n", "after attach-at-ms"),
+        (
+            "schema = 1\nname = \"x\"\n[[device]]\nudid = \"a\"\nattach-at-ms = 5\ndetach-at-ms = 5\n",
+            "after attach-at-ms",
+        ),
         ("schema = 1\nname = \"x\"\nunknown-key = 1\n", "unknown field"),
     ];
     for (text, why) in cases {

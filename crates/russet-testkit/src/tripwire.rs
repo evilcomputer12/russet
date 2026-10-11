@@ -41,7 +41,8 @@ impl Tripwire {
             let path = dir.join("usbmuxd-tripwire.sock");
             let listener = std::os::unix::net::UnixListener::bind(&path)?;
             listener.set_nonblocking(true)?;
-            let thread = spawn_accept_loop(move || listener.accept().map(|_| ()), Arc::clone(&hits), Arc::clone(&stop))?;
+            let thread =
+                spawn_accept_loop(move || listener.accept().map(|_| ()), Arc::clone(&hits), Arc::clone(&stop))?;
             Ok(Self { addr: path.clone().into_os_string(), path: Some(path), hits, stop, thread: Some(thread) })
         }
         #[cfg(not(unix))]
@@ -50,7 +51,8 @@ impl Tripwire {
             let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
             listener.set_nonblocking(true)?;
             let addr = listener.local_addr()?.to_string();
-            let thread = spawn_accept_loop(move || listener.accept().map(|_| ()), Arc::clone(&hits), Arc::clone(&stop))?;
+            let thread =
+                spawn_accept_loop(move || listener.accept().map(|_| ()), Arc::clone(&hits), Arc::clone(&stop))?;
             Ok(Self { addr: addr.into(), path: None, hits, stop, thread: Some(thread) })
         }
     }

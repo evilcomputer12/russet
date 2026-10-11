@@ -92,7 +92,10 @@ struct Conn {
     next_server_id: u64,
 }
 
-fn serve_with_log<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, log: Arc<Mutex<Vec<Value>>>) -> JoinHandle<()> {
+fn serve_with_log<S: AsyncRead + AsyncWrite + Send + 'static>(
+    stream: S,
+    log: Arc<Mutex<Vec<Value>>>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let (r, w) = tokio::io::split(stream);
         let writer: Writer<S> = Arc::new(AsyncMutex::new(w));
@@ -209,7 +212,11 @@ async fn slow<S: AsyncRead + AsyncWrite + Send + 'static>(
         c.cancels.insert(id_key(id), Arc::clone(&cancel));
     }
     let token = params.get("progressToken").cloned();
-    let progress = |value: Value| token.clone().map(|t| json!({ "jsonrpc": "2.0", "method": "$/progress", "params": { "token": t, "value": value } }));
+    let progress = |value: Value| {
+        token
+            .clone()
+            .map(|t| json!({ "jsonrpc": "2.0", "method": "$/progress", "params": { "token": t, "value": value } }))
+    };
     if let Some(p) = progress(json!({ "kind": "begin", "title": "test.slow", "cancellable": true })) {
         let _ = send(writer, &p).await;
     }
