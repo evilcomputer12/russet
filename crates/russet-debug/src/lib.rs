@@ -136,6 +136,12 @@ pub trait DeviceServices: Send + Sync {
         let mut launched = Launched::pid_only(process.pid);
         launched.executable = Some(process.executable.clone());
         launched.strategy = spec.strategy;
+        launched.entries = process.output.clone().map(|hub| console_entries(hub, process.exit.clone()));
+        let mut exit = process.exit.clone();
+        launched.exit = Some(Box::pin(async move {
+            let info = exit.wait().await;
+            launch::ProcessExit { code: info.code, signal: info.signal }
+        }));
         // The LaunchedProcess holds the launch channel; it closes when the channel guard drops.
         launched.channel = Some(LaunchChannel::new(process));
         Ok(launched)
@@ -162,6 +168,42 @@ pub trait DeviceServices: Send + Sync {
     async fn describe(&self, _udid: &Udid) -> Result<Option<DeviceFacts>> {
         Ok(None)
     }
+}
+
+/// The console hub of a launch as session entries: the backlog, then live lines until the process exits (the
+/// lines that arrived before the exit notice are still delivered).
+fn console_entries(hub: Arc<russet_device::process::OutputHub>, mut exit: russet_device::ExitWatcher) -> launch::ConsoleEntries {
+    let (tx, rx) = mpsc::channel(1024);
+    tokio::spawn(async move {
+        let (backlog, mut live) = hub.subscribe();
+        for e in backlog {
+            if tx.send(e).await.is_err() {
+                return;
+            }
+        }
+        loop {
+            tokio::select! {
+                r = live.recv() => match r {
+                    Ok(e) => {
+                        if tx.send(e).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                },
+                _ = exit.wait() => {
+                    while let Ok(e) = live.try_recv() {
+                        if tx.send(e).await.is_err() {
+                            return;
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    });
+    rx
 }
 
 fn only_device(m: &DeviceManager) -> Result<Udid> {
