@@ -201,6 +201,8 @@ pub struct ConfigService {
     env: EnvOverrides,
     inner: Mutex<Inner>,
     tx: broadcast::Sender<ConfigChanged>,
+    /// Reports each state of a file once, for the editor and the watcher alike.
+    changes: watch::ChangeSender,
     /// Serializes `set`/`unset`, so two edits never interleave their read-modify-write.
     edits: Mutex<()>,
 }
@@ -219,7 +221,8 @@ impl ConfigService {
                 .with_hint("Set RUSSET_HOME or RUSSET_CONFIG_DIR."));
         }
         let (tx, _) = broadcast::channel(64);
-        let mut watcher = watch::ConfigWatcher::start(tx.clone());
+        let changes = watch::ChangeSender::new(tx.clone());
+        let mut watcher = watch::ConfigWatcher::start(changes.clone());
         watcher.watch_dir(&dirs.config);
         let inner = Inner {
             global: Cached::read(dirs.config.join(load::GLOBAL_FILE), SourceScope::Global),
@@ -228,7 +231,7 @@ impl ConfigService {
             projects: HashMap::new(),
             watcher,
         };
-        Ok(Self { dirs: dirs.clone(), env, inner: Mutex::new(inner), tx, edits: Mutex::new(()) })
+        Ok(Self { dirs: dirs.clone(), env, inner: Mutex::new(inner), tx, changes, edits: Mutex::new(()) })
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -329,7 +332,7 @@ impl ConfigService {
     pub fn editor(&self, scope: ConfigScope, project: Option<&Path>) -> Result<ConfigEditor> {
         let path = self.path_of(scope, project)?;
         let file = if scope == ConfigScope::Global { ConfigFile::Global } else { ConfigFile::Project };
-        Ok(ConfigEditor::open(&path, file, scope)?.with_notifier(self.tx.clone()))
+        Ok(ConfigEditor::open(&path, file, scope)?.with_notifier(self.changes.clone()))
     }
 
     /// Receives `config.changed` for edits through Russet and, while the watcher runs, for edits on disk.

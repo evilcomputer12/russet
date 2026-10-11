@@ -3,20 +3,50 @@
 
 //! The file watcher behind `config.changed`: it watches the config directory and every project root the service
 //! has loaded (non-recursively) and maps events on Russet's files to [`ConfigChanged`].
+//!
+//! Russet's own edits are reported twice (by the editor after it saves, and by the watcher that sees the write),
+//! and editors write in bursts, so both go through one [`ChangeSender`], which reports each state of a file once:
+//! a change whose file stamp (modification time and length) was already reported is dropped.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 use tokio::sync::broadcast;
 
-use crate::load::{ACCOUNTS_FILE, GLOBAL_FILE, LOCAL_FILE, MCP_POLICY_FILE, PROJECT_FILE, PROVISION_POLICY_FILE};
+use crate::load::{
+    ACCOUNTS_FILE, GLOBAL_FILE, LOCAL_FILE, MCP_POLICY_FILE, PROJECT_FILE, PROVISION_POLICY_FILE, Stamp,
+};
 use crate::{ConfigChanged, ConfigScope};
 
-/// Events for the same file closer together than this are one change.
-const BURST: Duration = Duration::from_millis(200);
+/// Sends `config.changed` once per state of a file (see the module docs).
+#[derive(Debug, Clone)]
+pub struct ChangeSender {
+    tx: broadcast::Sender<ConfigChanged>,
+    reported: Arc<Mutex<HashMap<PathBuf, Option<Stamp>>>>,
+}
+
+impl ChangeSender {
+    /// A sender over `tx`.
+    pub fn new(tx: broadcast::Sender<ConfigChanged>) -> Self {
+        Self { tx, reported: Arc::default() }
+    }
+
+    /// Reports `change`, unless the file is in a state that was already reported.
+    pub fn send(&self, change: ConfigChanged) {
+        let stamp = Stamp::of(&change.path);
+        {
+            let mut reported = self.reported.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if reported.get(&change.path) == Some(&stamp) {
+                return;
+            }
+            reported.insert(change.path.clone(), stamp);
+        }
+        // No receiver is fine: nobody listens yet.
+        let _ = self.tx.send(change);
+    }
+}
 
 /// The scope of a changed file, or `None` when it is not a configuration file.
 pub fn scope_of(path: &Path) -> Option<ConfigScope> {
@@ -45,9 +75,8 @@ impl std::fmt::Debug for ConfigWatcher {
 }
 
 impl ConfigWatcher {
-    /// Starts a watcher that sends to `tx`.
-    pub fn start(tx: broadcast::Sender<ConfigChanged>) -> Self {
-        let last = Mutex::new(None::<(ConfigChanged, Instant)>);
+    /// Starts a watcher that reports through `changes`.
+    pub fn start(changes: ChangeSender) -> Self {
         let handler = move |res: notify::Result<notify::Event>| {
             let Ok(event) = res else { return };
             if matches!(event.kind, EventKind::Access(_)) {
@@ -55,20 +84,8 @@ impl ConfigWatcher {
             }
             for path in event.paths {
                 let Some(scope) = scope_of(&path) else { continue };
-                let change = ConfigChanged { scope, path };
-                // Editors emit bursts (write, close, rename); report each file once per burst.
-                let mut guard = match last.lock() {
-                    Ok(g) => g,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                if let Some((prev, at)) = guard.as_ref()
-                    && *prev == change
-                    && at.elapsed() < BURST
-                {
-                    continue;
-                }
-                *guard = Some((change.clone(), Instant::now()));
-                let _ = tx.send(change);
+                // A burst (write, close, rename) reports each state of the file once.
+                changes.send(ConfigChanged { scope, path });
             }
         };
         Self { watcher: notify::recommended_watcher(handler).ok(), watched: BTreeSet::new() }

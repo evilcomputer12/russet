@@ -156,3 +156,20 @@ async fn on_disk_edits_send_config_changed_while_watching() {
     let change = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.expect("in time").expect("change");
     assert_eq!(change.scope, ConfigScope::Global);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn one_edit_is_one_config_changed_even_while_watching() {
+    let home = tempfile::tempdir().expect("home");
+    let svc = service(home.path());
+    let mut rx = svc.subscribe();
+    svc.set(ConfigScope::Global, None, "daemon.max-build-jobs", json!(2)).expect("set");
+    let change = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("in time").expect("change");
+    assert!(change.path.ends_with("config.toml"));
+    // The watcher sees the same write; it must not report it again.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(rx.try_recv().is_err(), "a second config.changed for the same write");
+    // The next edit is a new state of the file, and is reported.
+    svc.set(ConfigScope::Global, None, "daemon.max-build-jobs", json!(3)).expect("set");
+    let change = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("in time").expect("change");
+    assert!(change.path.ends_with("config.toml"));
+}

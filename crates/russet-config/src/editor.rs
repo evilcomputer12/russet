@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use russet_core::error::{Error, Result, codes};
 use serde_json::Value;
-use tokio::sync::broadcast;
 use toml_edit::{DocumentMut, Item, Table, TableLike};
 
 use crate::accounts::AccountsFile;
@@ -17,6 +16,7 @@ use crate::global::GlobalConfig;
 use crate::load::{self, ConfigFile};
 use crate::policy::{McpPolicy, ProvisionPolicy};
 use crate::project::ProjectConfig;
+use crate::watch::ChangeSender;
 use crate::{ConfigChanged, ConfigScope, keys, schema};
 
 /// A comment- and order-preserving editor over one configuration file.
@@ -28,7 +28,7 @@ pub struct ConfigEditor {
     doc: DocumentMut,
     original: String,
     existed: bool,
-    notify: Option<broadcast::Sender<ConfigChanged>>,
+    notify: Option<ChangeSender>,
 }
 
 fn io_error(what: &str, path: &Path, e: std::io::Error) -> Error {
@@ -51,9 +51,9 @@ impl ConfigEditor {
         Ok(Self { path: path.to_path_buf(), file, scope, doc, original: text, existed, notify: None })
     }
 
-    /// Sends `config.changed` on `tx` after a successful save.
-    pub fn with_notifier(mut self, tx: broadcast::Sender<ConfigChanged>) -> Self {
-        self.notify = Some(tx);
+    /// Reports `config.changed` through `changes` after a successful save.
+    pub fn with_notifier(mut self, changes: ChangeSender) -> Self {
+        self.notify = Some(changes);
         self
     }
 
@@ -168,9 +168,8 @@ impl ConfigEditor {
         atomic_write(&self.path, text.as_bytes(), private)?;
         self.original = text;
         self.existed = true;
-        if let Some(tx) = &self.notify {
-            // No receiver is fine: nobody listens yet.
-            let _ = tx.send(ConfigChanged { scope: self.scope, path: self.path.clone() });
+        if let Some(changes) = &self.notify {
+            changes.send(ConfigChanged { scope: self.scope, path: self.path.clone() });
         }
         Ok(true)
     }
