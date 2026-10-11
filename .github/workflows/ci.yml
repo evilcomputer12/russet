@@ -66,6 +66,15 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # commit checks, gitleaks and check-paths read the history
+      # The hosted image leaves ~14 GB free, which the workspace build plus nextest
+      # outgrows; drop preinstalled SDKs Russet never uses (~30 GB).
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
       - name: Install the Rust toolchain
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt,clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
