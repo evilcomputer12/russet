@@ -2302,3 +2302,90 @@ SA-01 → SA-02 → SA-03 → SA-04 → SA-05 → SA-06 → SA-07.
 - Entitlements lost on unsigned-archive export: github.com/parob/homecast/issues/33, github.com/MyAvenCEO/avenOS/issues/97; tauri `crates/tauri-cli/src/mobile/ios/build.rs` and [tauri#15663](https://github.com/tauri-apps/tauri/issues/15663)
 - xtool 1.21.0 release asset `xtool.app.zip` (sha256 33bb2ef1…b64e8); Homebrew cask `xtool-org/homebrew-tap` (`version :latest`, `sha256 :no_check`)
 - [apple-codesign-quick 0.1.0](https://crates.io/crates/apple-codesign-quick) (LGPL-2.1-or-later): fallback signer
+
+---
+
+## 23. Wave-1 implementation notes (W6)
+
+Where the Wave-1 code (W6: SA-02…SA-07 subsets) differs from the sections above. ARCHITECTURE.md stays binding;
+the contract points among these are listed as contract change requests for the lead.
+
+- **russet-macho** (§3.1, §8.5) is MIT (ARCHITECTURE §5.1) and has its own bounds-checked parser instead of
+  goblin/object: the edits need raw load-command offsets. The string-pool fix moves the table to the next 8-byte
+  boundary and shifts everything after it by 16 bytes, so the trailing code signature keeps its alignment. `Arch`
+  keeps ARCHITECTURE §5.3's three variants (arm64, arm64e, x86_64); a slice of any other CPU (an old armv7 slice
+  in a vendored framework) is described by `Cpu` and listed by `MachO::cpu_slices`, while `slices()` lists the
+  `Arch` slices only.
+- **Profiles** (§8.3) are parsed with `cryptographic-message-syntax` (apple-codesign's CMS crate), not `cms`.
+- **App Store Connect** (§5.1–§5.3): the typed models are written by hand (`xtask asc-gen`/`asc-drift` are not
+  in Wave 1). Every Wave-1 read carries a token scoped to exactly that request (`TokenMode::PerRequest`), not only
+  agent reads, so App Store Connect refuses anything else; scoped tokens are GET-only. The rate limiter is a token
+  bucket per key (3,600 requests an hour, bursts of 100) that also caps itself at the `X-Rate-Limit` quota left;
+  russet-account keeps one per key, so the quota spans calls. `raw_get` (the future `asc.get`) checks its
+  allowlist on the URL as it will be sent, after the parser normalized it, and refuses encoded dots, slashes and
+  backslashes outright. With `RUSSET_OFFLINE=1` the client reaches loopback hosts only, and `asc.reachable` reads
+  the root from `RUSSET_ENDPOINTS_FILE`.
+- **Keys** (§6.1): an individual key is checked with `GET /v1/apps` (it cannot use the provisioning endpoints) and
+  stored without a team; a team key whose role cannot read certificates (403) is kept without a team instead of
+  being refused; a 401 refuses either. `account.verify` is read-only: it reports the team it discovers but writes
+  nothing (re-adding the key records one), and its `ok` means "reads certificates" for a team key and "reads
+  builds" for an individual key.
+- **xtool import** (§4.4): `XTLAuthToken` is the JSON of xtool's Swift `AuthToken` enum
+  (`{"appStoreConnect": {"_0": {"id", "issuerID", "pem"}}}`); the identity is the property list named after the
+  identity ID (the issuer ID for App Store Connect logins) with `privateKey.data` (PKCS#1 PEM) and `certificate`
+  (DER). The team comes from the certificate's OU, so the import needs no network. The `XTL-<prefix>` bundle-ID
+  prefix is the issuer ID's first segment, uppercased. An Apple ID session in xtool is not imported (W22). The
+  `chmod 600` advice, the import's errors and the `account.xtool-files` doctor check name xtool's directory, never
+  its files (the identity file is named after the issuer ID).
+- **Identities** (§6.3): `IdentityStore::load` and `import_p12` keep ARCHITECTURE §5.3's synchronous signatures
+  (they read the async secret store on a short-lived thread with its own runtime, so they work from a runtime
+  worker or a blocking thread); `load_async` and `import_p12_async` are the async forms. The key is stored as PKCS#8
+  DER whatever its source format. `.p12` files are read with `p12-keystore` (PBES2/AES as OpenSSL 3 writes them, and
+  the legacy 3DES/RC2 forms); apple-codesign's reader is not used (legacy forms only, and it asserts on a SHA-256 MAC
+  in debug builds). On the wire an identity is named by its certificate serial (`IdentityId::wire`); the daemon
+  also accepts the SHA-1 fingerprint, and keeps `<team>/<serial>` internal. The private key is sealed as
+  `signing-key/<certificate SHA-1>`, not `signing-key/<team>/<cert-serial>` (§5): `secrets.list` shows secret
+  names, and they must not name the team.
+- **Planning** (§6.4): step 5 also accepts profiles that are not Russet-named (Russet-named ones are tried first),
+  checked for kind, validity, certificate, devices, App ID and entitlements — this is how the Wave-1 slice reuses
+  xtool's `XTL-…` profile with 0 mutations. `DeleteProfile` is only planned for Russet-named profiles. The plan
+  digest is a SHA-256 over account, team, distribution, identity, mutations and reused profiles. Plans can be
+  applied for 10 minutes; `apply` re-plans and answers `provision.planStale` (5206) on drift or once the plan has
+  expired (`details.reason`: `drifted` or `expired`); an id the daemon never planned (or planned over an hour ago)
+  is `core.notFound`. Without an approval a plan with mutations answers `perm.approvalRequired`; with one,
+  `core.notImplemented` until W12.
+- **Signing** (§8.1, §8.7): `sign` takes `.app` directories (an `.ipa` is read by `verify`, `lint` and `inspect`).
+  It signs **in place by default** (§8.1 prefers a copy): `russet sign App.app` then `russet sign verify App.app`
+  is the flow, and `--out` (`SignOutput::CopyTo`) signs a copy, as the run pipeline does into
+  `.russet/build/<profile>-iphoneos/signed/`. `--out` names the signed `.app` itself; an existing path there is
+  replaced only when it is an earlier signed copy of the same app (an `.app` with `_CodeSignature/CodeResources`
+  and the same `CFBundleIdentifier`), a path inside the input or containing it is refused before anything is
+  written, and a run that fails before signing removes the copy it made. `BundleSigningInput` keeps its two F0
+  fields; `get-task-allow` and the `CFBundleIdentifier` rewrite are `SignOptions` fields. Post-sign verification
+  always runs and fails with `sign.verifyFailed` (5009); lint errors fail with `sign.lintFailed`. A build product
+  that is unsigned or only linker-signed skips the L-SIG lint rules with an info finding. The pipeline's step is
+  `SignAppRequest::from_outcome(app, distribution, &outcome)` after a zero-mutation `provision.apply`: it takes
+  the plan's identity, cached profiles and effective bundle IDs (§16.5), so a product whose `Info.plist` carries
+  the canonical ID is rewritten to the provisioned one in the signed copy (the unsigned product keeps its ID).
+- **Lints** (§8.6): L-MACHO-002's platform check (not iOS) is an error under `device-install` too, because dyld on
+  the device refuses such an image; its SDK floor stays `app-store` only. L-MACHO-003 (minos above
+  `MinimumOSVersion`) is a warning under `device-install` (the device installs it) and an error under `app-store`.
+  L-BND-003's ITMS-90502 rule is an error when `UIRequiredDeviceCapabilities` lacks `arm64` and a warning when the
+  extension has no such key (Xcode's extension templates omit it and upload). L-BND-008 (multi-size icon
+  catalogs) is not checked (it needs the CAR reader, W21).
+- **Wire** (§10): `sign.lint` answers `{findings}` and `sign.inspect` `{signatures}` (results are objects,
+  ARCHITECTURE §7.3). No team ID leaves the daemon unmasked (AGENTS.md §8): team IDs are `*******XYZ` in every DTO
+  and in `inspect`; identities are named by certificate serial; entitlement and profile errors render App ID
+  prefixes masked (`*******XYZ.com.example.*`); paths through a team's identity directory are masked; and each W6
+  handler masks every team ID the account service knows in its errors' message, hint, details and cause chain. No
+  certificate subject is reported (it names a person); portal UDIDs, device names and certificate display names are
+  masked or omitted unless an `ide` connection asks to reveal them. Bundle IDs are shown as they are: the
+  `team-suffix` bundle-ID policy puts the team ID into the bundle ID by design, and an `XTL-…` bundle ID carries
+  the first segment of the App Store Connect issuer ID.
+- **CLI** (§12): `russet account list` also lists the signing identities (`identity.list`); `account
+  certs|devices|bundle-ids|profiles list` are the read-only portal rows; `sign --lint none` skips the post-sign
+  lints (`noLint`).
+- **Errors** (§16): new codes `sign.profileInvalid` (5007), `sign.bundleInvalid` (5008), `sign.verifyFailed` (5009),
+  `account.keyInvalid` (5109) and `account.noAccount` (5110), each with a hint.
+- **Doctor**: `account.configured`, `account.identity`, `account.xtool-files` (files only) and `asc.reachable`
+  (`--online`; the root from `RUSSET_ENDPOINTS_FILE`, skipped under `RUSSET_OFFLINE=1` for a non-loopback root).

@@ -14,9 +14,29 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Synthetic identities and CMS-signed profiles for tests (SIGN §18).
+test-pki = ["dep:chrono"]
+
 [dependencies]
 apple-codesign.workspace = true
+# The CMS parser apple-codesign itself uses (MPL-2.0, same version), for provisioning profiles and signer
+# certificates.
+cryptographic-message-syntax = "0.27.0"
+# PKCS#12 reading (PBES2/AES as OpenSSL 3 writes it, and the legacy 3DES/RC2 forms); apple-codesign's own reader
+# handles only the legacy forms and stays the fallback.
+p12-keystore.workspace = true
+plist.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
 russet-macho.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
 x509-certificate.workspace = true
+zeroize.workspace = true
+zip.workspace = true
+chrono = { version = "0.4.45", default-features = false, features = ["clock"], optional = true }
+
+[dev-dependencies]
+russet-macho = { workspace = true, features = ["fixture"] }
+russet-sign = { path = ".", features = ["test-pki"] }

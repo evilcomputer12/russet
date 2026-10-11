@@ -423,6 +423,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert-json-diff"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e4f2b81832e72834d7518d8487a0396a28cc408186a2e8854c0f98011faf12"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1779,6 +1789,24 @@ checksum = "bd2735a791158376708f9347fe8faba9667589d82427ef3aed6794a8981de3d9"
 dependencies = [
  "generic-array",
 ]
+
+[[package]]
+name = "deadpool"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0be2b1d1d6ec8d846f05e137292d0b89133caf95ef33695424c09568bdd39b1b"
+dependencies = [
+ "deadpool-runtime",
+ "lazy_static",
+ "num_cpus",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool-runtime"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
 
 [[package]]
 name = "debugid"
@@ -3872,6 +3900,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_cpus"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
+dependencies = [
+ "hermit-abi",
+ "libc",
+]
+
+[[package]]
 name = "num_enum"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5257,15 +5295,28 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "p12-keystore",
+ "p256 0.14.0",
+ "plist",
+ "ring",
  "rsa",
  "russet-asc",
  "russet-core",
  "russet-doctor",
+ "russet-macho",
  "russet-secrets",
  "russet-sign",
  "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "time",
  "tokio",
+ "toml 1.1.8+spec-1.1.0",
+ "url",
+ "wiremock",
  "x509-cert 0.2.5",
+ "zeroize",
 ]
 
 [[package]]
@@ -5297,11 +5348,20 @@ dependencies = [
 name = "russet-asc"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "p256 0.14.0",
  "reqwest 0.13.5",
  "russet-core",
  "russet-doctor",
+ "rustls",
  "secrecy",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "url",
+ "wiremock",
+ "zeroize",
 ]
 
 [[package]]
@@ -5530,7 +5590,10 @@ dependencies = [
 name = "russet-macho"
 version = "0.1.0"
 dependencies = [
- "goblin 0.10.7",
+ "russet-macho",
+ "sha1 0.10.7",
+ "sha2 0.11.0",
+ "tempfile",
  "thiserror 2.0.21",
  "uuid",
 ]
@@ -5636,10 +5699,19 @@ name = "russet-sign"
 version = "0.1.0"
 dependencies = [
  "apple-codesign",
+ "chrono",
+ "cryptographic-message-syntax",
+ "p12-keystore",
+ "plist",
  "russet-core",
  "russet-doctor",
  "russet-macho",
+ "russet-sign",
+ "serde_json",
+ "tempfile",
  "x509-certificate",
+ "zeroize",
+ "zip 9.0.1",
 ]
 
 [[package]]
@@ -8128,6 +8200,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "wiremock"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08db1edfb05d9b3c1542e521aea074442088292f00b5f28e435c714a98f85031"
+dependencies = [
+ "assert-json-diff",
+ "base64 0.22.1",
+ "deadpool",
+ "futures",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "log",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

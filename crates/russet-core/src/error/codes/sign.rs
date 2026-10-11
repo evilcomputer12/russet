@@ -23,6 +23,12 @@ pub const ENTITLEMENT_UNRESOLVED_VARIABLE: ErrorCode = ErrorCode::new(5004, "sig
 pub const LINT_FAILED: ErrorCode = ErrorCode::new(5005, "sign.lintFailed", 8);
 /// 5006 `sign.codesignFailed`: Code signing failed.
 pub const CODESIGN_FAILED: ErrorCode = ErrorCode::new(5006, "sign.codesignFailed", 8);
+/// 5007 `sign.profileInvalid`: A provisioning profile cannot be parsed (not CMS, or not a profile plist).
+pub const PROFILE_INVALID: ErrorCode = ErrorCode::new(5007, "sign.profileInvalid", 8);
+/// 5008 `sign.bundleInvalid`: The path is not a signable bundle (no Info.plist, identifier or executable).
+pub const BUNDLE_INVALID: ErrorCode = ErrorCode::new(5008, "sign.bundleInvalid", 8);
+/// 5009 `sign.verifyFailed`: A signature does not verify (code pages, sealed resources, CMS or profile rules).
+pub const VERIFY_FAILED: ErrorCode = ErrorCode::new(5009, "sign.verifyFailed", 8);
 
 /// Every code of this family, in number order.
 pub const ALL: &[ErrorCode] = &[
@@ -33,4 +39,7 @@ pub const ALL: &[ErrorCode] = &[
     ENTITLEMENT_UNRESOLVED_VARIABLE,
     LINT_FAILED,
     CODESIGN_FAILED,
+    PROFILE_INVALID,
+    BUNDLE_INVALID,
+    VERIFY_FAILED,
 ];

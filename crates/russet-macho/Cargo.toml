@@ -14,7 +14,18 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Synthetic Mach-O images for tests (ARCHITECTURE §19: built at test time, never committed).
+fixture = []
+
 [dependencies]
-goblin.workspace = true
+# A bounds-checked parser of our own replaces goblin (ARCHITECTURE §5.1 allows goblin or object): the edits need
+# raw load-command offsets anyway, and the code-signature blobs are not covered by either crate.
+sha1.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+russet-macho = { path = ".", features = ["fixture"] }
+tempfile.workspace = true

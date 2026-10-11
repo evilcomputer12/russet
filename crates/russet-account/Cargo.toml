@@ -16,13 +16,32 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
-p12-keystore.workspace = true
-rsa.workspace = true
+plist.workspace = true
+ring.workspace = true
 russet-asc.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
 russet-secrets.workspace = true
 russet-sign.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+time = { workspace = true, features = ["formatting", "parsing"] }
+tokio = { workspace = true, features = ["sync", "rt"] }
+toml.workspace = true
+url.workspace = true
+zeroize.workspace = true
+# Key dependencies of ARCHITECTURE §5.1 for W12's CSR and .p12 work (declared since F0).
+p12-keystore.workspace = true
+rsa.workspace = true
 secrecy.workspace = true
-tokio = { workspace = true, features = ["sync"] }
 x509-cert.workspace = true
+
+[dev-dependencies]
+p256.workspace = true
+rsa = { workspace = true, features = ["getrandom"] }
+russet-macho = { workspace = true, features = ["fixture"] }
+russet-sign = { workspace = true, features = ["test-pki"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+wiremock = "0.6.5"
