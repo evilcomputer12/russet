@@ -64,16 +64,22 @@ pub struct RecordingSink {
     pub lines: Mutex<Vec<(LogStream, String)>>,
     pub events: Mutex<Vec<JobEventKind>>,
     pub reports: Mutex<Vec<String>>,
+    /// `begin` and `end` calls.
+    pub begins: Mutex<usize>,
 }
 
 impl ProgressSink for RecordingSink {
-    fn begin(&self, _title: &str, _cancellable: bool) {}
+    fn begin(&self, _title: &str, _cancellable: bool) {
+        *self.begins.lock().unwrap() += 1;
+    }
     fn report(&self, msg: Option<&str>, _pct: Option<u8>) {
         if let Some(m) = msg {
             self.reports.lock().unwrap().push(m.to_owned());
         }
     }
-    fn end(&self, _msg: Option<&str>) {}
+    fn end(&self, _msg: Option<&str>) {
+        *self.begins.lock().unwrap() += 1;
+    }
     fn log(&self, stream: LogStream, line: &str) {
         self.lines.lock().unwrap().push((stream, line.to_owned()));
     }

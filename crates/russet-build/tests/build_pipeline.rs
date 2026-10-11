@@ -180,6 +180,11 @@ async fn a_build_assembles_the_app_with_scene_manifest_dt_keys_and_hygiene() {
     assert!(events.windows(2).all(|w| w[0]["seq"].as_u64() < w[1]["seq"].as_u64()));
     assert!(!sink.events.lock().unwrap().is_empty());
     assert!(sink.lines.lock().unwrap().iter().any(|(_, l)| l.contains("Build complete")));
+    // Stages and the outcome are reports; the caller (the daemon's job layer) owns begin and end.
+    let reports = sink.reports.lock().unwrap().clone();
+    assert!(reports.iter().any(|r| r == "compile started"), "{reports:?}");
+    assert_eq!(reports.last().map(String::as_str), Some(format!("built {app}").as_str()));
+    assert_eq!(*sink.begins.lock().unwrap(), 0, "the build sends no work-done begin or end");
 
     // swift build ran with the SDK's toolset, the platform view, and no SDKROOT.
     let calls = w.swift.calls.lock().unwrap().clone();

@@ -722,6 +722,10 @@ impl Builder {
     }
 
     /// Builds the app.
+    ///
+    /// Events go to `sink` (and to `<project>/.russet/logs/<jobId>.jsonl`); stages and the outcome arrive as
+    /// `report`s. The work-done `begin` and `end` belong to the caller: the daemon's job layer sends them around
+    /// every long-running request (ARCHITECTURE §7.6), so the build sends neither.
     pub async fn build(&self, r: BuildRequest, sink: &dyn EventSink, cancel: CancellationToken) -> Result<BuildOutput> {
         let started = Instant::now();
         let started_at = SystemTime::now();
@@ -729,11 +733,10 @@ impl Builder {
         let root = detect::find_root(&r.project)?;
         let log_path = root.join(".russet/logs").join(format!("{job_id}.jsonl"));
         let emitter = Emitter::new(sink, Some(&log_path));
-        sink.begin("build", true);
         let result = self.build_inner(&r, &job_id, started, started_at, &emitter, &cancel).await;
         match &result {
-            Ok(out) => sink.end(Some(&format!("built {}", out.app.path))),
-            Err(e) => sink.end(Some(&format!("build failed: {} ({})", e.message(), e.code()))),
+            Ok(out) => sink.report(Some(&format!("built {}", out.app.path)), Some(100)),
+            Err(e) => sink.report(Some(&format!("build failed: {} ({})", e.message(), e.code())), None),
         }
         emitter.flush();
         result
