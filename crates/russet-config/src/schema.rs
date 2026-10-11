@@ -188,7 +188,7 @@ mod tests {
         assert!(schema_at(&g, &segs("daemon.idle-timeout")).is_some());
         assert!(schema_at(&g, &segs("device.ddi.dir")).is_some());
         assert!(schema_at(&g, &segs("devices.aliases.iphone12")).is_some(), "map keys resolve");
-        assert!(schema_at(&g, &segs("daemon.idle-timout")).is_none());
+        assert!(schema_at(&g, &segs("daemon.idle-timeouts")).is_none());
         let p = schema(ConfigFile::Project);
         assert!(schema_at(&p, &segs("signing.targets.\"PlugIns/W.appex\".profile")).is_some());
         assert!(schema_at(&p, &segs("agents.tier-max")).is_some());

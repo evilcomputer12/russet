@@ -363,7 +363,7 @@ mod tests {
     fn unknown_keys_and_bad_values_are_refused_before_saving() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut e = editor(dir.path(), "config.toml", "[daemon]\nmax-build-jobs = 1\n", ConfigFile::Global);
-        let err = e.set("daemon.idle-timout", Value::from("5m")).expect_err("typo");
+        let err = e.set("daemon.idle-timeouts", Value::from("5m")).expect_err("typo");
         assert_eq!(err.code(), codes::config::UNKNOWN_KEY);
         assert!(err.hint().is_some_and(|h| h.contains("idle-timeout")), "{:?}", err.hint());
         let err = e.set("daemon.idle-timeout", Value::from("soon")).expect_err("bad duration");

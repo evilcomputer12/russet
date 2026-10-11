@@ -215,6 +215,8 @@ pub struct ConfigService {
     env: EnvOverrides,
     inner: Mutex<Inner>,
     tx: broadcast::Sender<ConfigChanged>,
+    /// Serializes `set`/`unset`, so two edits never interleave their read-modify-write.
+    edits: Mutex<()>,
 }
 
 impl ConfigService {
@@ -240,7 +242,7 @@ impl ConfigService {
             projects: HashMap::new(),
             watcher,
         };
-        Ok(Self { dirs: dirs.clone(), env, inner: Mutex::new(inner), tx })
+        Ok(Self { dirs: dirs.clone(), env, inner: Mutex::new(inner), tx, edits: Mutex::new(()) })
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -424,6 +426,7 @@ impl ConfigService {
 
     /// `config.set`: writes one key of `scope`'s file, validated against its schema.
     pub fn set(&self, scope: ConfigScope, project: Option<&Path>, key: &str, value: Value) -> Result<WriteOutcome> {
+        let _edit = self.edits.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut editor = self.editor(scope, project)?;
         let edited = editor.set(key, value)?;
         let changed = edited && editor.save()?;
@@ -432,6 +435,7 @@ impl ConfigService {
 
     /// `config.unset`: removes one key of `scope`'s file.
     pub fn unset(&self, scope: ConfigScope, project: Option<&Path>, key: &str) -> Result<WriteOutcome> {
+        let _edit = self.edits.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut editor = self.editor(scope, project)?;
         let removed = editor.unset(key)?;
         let changed = removed && editor.save()?;

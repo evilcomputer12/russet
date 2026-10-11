@@ -253,10 +253,10 @@ mod tests {
 
     #[test]
     fn unknown_keys_are_located() {
-        let text = "schema = 1\n[daemon]\nidle-timeout = \"5m\"\nidle-timout = \"5m\"\n";
+        let text = "schema = 1\n[daemon]\nidle-timeout = \"5m\"\nidle-timeouts = \"5m\"\n";
         let err = parse::<GlobalConfig>(Path::new("/c/config.toml"), text).expect_err("typo");
         assert_eq!(err.code(), codes::config::UNKNOWN_KEY);
-        assert!(err.message().starts_with("/c/config.toml:4:1: unknown field `idle-timout`"), "{}", err.message());
+        assert!(err.message().starts_with("/c/config.toml:4:1: unknown field `idle-timeouts`"), "{}", err.message());
         let d = err.to_data().details.expect("details");
         assert_eq!((d["line"].as_u64(), d["column"].as_u64()), (Some(4), Some(1)));
     }

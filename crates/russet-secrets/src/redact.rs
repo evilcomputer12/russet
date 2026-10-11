@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn values_are_masked() {
-        let jwt = "eyJhbGciOiJFUzI1NiIsImtpZCI6IjJYOVIifQ.eyJpc3MiOiJ4In0.c2lnbmF0dXJlLXZhbHVl";
+        let jwt = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJydXNzZXQtdGVzdCJ9.c2lnbmF0dXJlLXZhbHVl";
         let line = format!("calling ASC with {jwt} now");
         assert_eq!(mask(&line), "calling ASC with *** now");
         assert_eq!(mask("Authorization: Bearer abc.def-123, next"), "Authorization: Bearer ***, next");

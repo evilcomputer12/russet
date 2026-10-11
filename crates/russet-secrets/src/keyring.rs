@@ -195,7 +195,7 @@ mod tests {
         let a = entry_name(Some(Path::new("/home/u/russet-w3/.russet-dev")));
         let b = entry_name(Some(Path::new("/home/u/russet-w4/.russet-dev")));
         assert!(a.starts_with("master-key-") && a.len() == "master-key-".len() + 8, "{a}");
-        assert_ne!(a, b, "two RUSSET_HOMEs get two entries");
+        assert_ne!(a, b, "two homes get two entries");
         assert_eq!(a, entry_name(Some(Path::new("/home/u/russet-w3/.russet-dev"))), "stable");
         // printf %s "$RUSSET_HOME" | sha256sum | cut -c1-8
         let expected = &crypto::sha256_hex(b"/home/u/russet-w3/.russet-dev")[..8];
