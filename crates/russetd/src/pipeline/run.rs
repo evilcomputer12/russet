@@ -67,6 +67,11 @@ pub struct BuiltProduct {
     pub profile: String,
     /// The SDK, for LLDB's `target.sdk-path`.
     pub sdk_path: Option<PathBuf>,
+    /// The absolute project root (provisioning reads its `[signing]` table).
+    pub project: PathBuf,
+    /// The build's `get-task-allow` request for the app (`Some(true)` for a debug build); `None` takes the
+    /// profile's value.
+    pub get_task_allow: Option<bool>,
 }
 
 /// The build step.

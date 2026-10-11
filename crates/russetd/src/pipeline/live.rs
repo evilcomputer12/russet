@@ -8,9 +8,8 @@
 //!   (W6); the pipeline then reads the signed executable's CDHash for the install ledger itself.
 //! - The device steps (install, launch, debugserver) go through `DaemonCtx.debug`'s `DeviceServices`, which
 //!   russetd's `DeviceSlot` provides (W2, W4).
-//! - Building and provisioning need contracts that are not on `main` yet: W5's build service (a `Builder` needs
-//!   an `SdkProvider`, which F0 cannot construct) and W6's `ProvisionRequest` fields (freeze F2). Until they
-//!   land, those two steps answer `core.notImplemented` with the card to wait for.
+//! - Building goes through `build.start`'s entry point (W5, with W6's account prefix); provisioning plans
+//!   GET-only for the project and the device and applies only a zero-mutation plan (W6).
 //! - The other adapters call functions that are still F0 stubs on `main` (`todo!()` until W3 and W6 merge).
 //!   [`f0_guard`] turns such a stub's panic into `core.notImplemented`, so a daemon built before those merges
 //!   answers an error instead of losing the request to a panic.
@@ -37,8 +36,8 @@ use crate::ctx::Service;
 /// service is needed by every pipeline call, so its construction error is this function's.
 pub fn pipeline_for(cx: &DaemonCtx) -> Result<Pipeline> {
     Ok(Pipeline {
-        builder: Arc::new(LiveBuilder),
-        provisioning: Arc::new(LiveProvisioning),
+        builder: Arc::new(LiveBuilder { cx: cx.clone() }),
+        provisioning: Arc::new(LiveProvisioning { accounts: cx.accounts.clone() }),
         signer: Arc::new(LiveSigner { accounts: cx.accounts.clone() }),
         lldb: Arc::new(LiveLldb { toolchains: cx.toolchains.clone() }),
         debug: cx.debug.get()?,
@@ -46,37 +45,63 @@ pub fn pipeline_for(cx: &DaemonCtx) -> Result<Pipeline> {
     })
 }
 
-/// The build step over W5's build plane.
-#[derive(Debug, Default)]
-pub struct LiveBuilder;
+/// The build step over W5's build plane: [`crate::handlers::build::build_project`], the same entry point as
+/// `build.start` (the account's bundle-ID prefix included).
+pub struct LiveBuilder {
+    pub cx: DaemonCtx,
+}
 
 #[async_trait]
 impl ProjectBuilder for LiveBuilder {
-    async fn build(
-        &self,
-        _spec: &BuildSpec,
-        _sink: &dyn EventSink,
-        _cancel: &CancellationToken,
-    ) -> Result<BuiltProduct> {
-        Err(Error::new(codes::core::NOT_IMPLEMENTED, "the run pipeline's build step waits for W5's build service")
-            .with_hint(
-                "Build with `russet build` once W5 lands; the pipeline calls the same Builder after W5's F2 merge.",
-            ))
+    async fn build(&self, spec: &BuildSpec, sink: &dyn EventSink, cancel: &CancellationToken) -> Result<BuiltProduct> {
+        let project = crate::handlers::build::wire_path(&spec.project.to_string_lossy(), "project")?;
+        let mut request = russet_build::BuildRequest::new(project);
+        request.target = spec.target.clone();
+        request.configuration = Some(spec.configuration.clone());
+        // `build: false` (`--no-build`) still runs the builder: an up-to-date build is a no-op that returns the
+        // last product's facts, which the later steps need.
+        super::run::stage(sink, "build", "started");
+        let out = crate::handlers::build::build_project(&self.cx, request, sink, cancel.clone()).await?;
+        super::run::stage(sink, "build", "finished");
+        let app_item = out.signing_plan.items.iter().find(|i| i.path == out.app.path);
+        Ok(BuiltProduct {
+            app: out.app.path.clone().into_std_path_buf(),
+            executable: out.built.executable.clone().into_std_path_buf(),
+            bundle_id: out.app.bundle_id.clone(),
+            profile: spec.configuration.clone(),
+            sdk_path: Some(out.built.sdk_path.clone().into_std_path_buf()),
+            project: spec.project.clone(),
+            get_task_allow: app_item.map(|i| i.get_task_allow),
+        })
     }
 }
 
-/// The provisioning step over W6's provisioner (GET-only plan, zero-mutation apply).
-#[derive(Debug, Default)]
-pub struct LiveProvisioning;
+/// The provisioning step over W6's provisioner: a GET-only plan for the project and the device, applied only
+/// when it needs no Apple-side change (Wave 1); otherwise the pipeline reports the mutations it would need.
+pub struct LiveProvisioning {
+    pub accounts: Service<russet_account::AccountService>,
+}
 
 #[async_trait]
 impl Provisioning for LiveProvisioning {
-    async fn provision(&self, _product: &BuiltProduct, _udid: &str) -> Result<Provisioned> {
-        Err(Error::new(
-            codes::core::NOT_IMPLEMENTED,
-            "the run pipeline's provisioning step waits for W6's ProvisionRequest",
-        )
-        .with_hint("`russet provision --dry-run` lands with W6; the pipeline plans the same way after W6's F2 merge."))
+    async fn provision(&self, product: &BuiltProduct, udid: &str) -> Result<Provisioned> {
+        let svc = self.accounts.get()?;
+        let plan = svc
+            .plan_project(&product.project, russet_sign::Distribution::Development, vec![udid.to_owned()], None)
+            .await?;
+        if !plan.mutations.is_empty() {
+            return Ok(Provisioned {
+                profiles: Default::default(),
+                team_id: Some(plan.team_id.clone()),
+                mutations: plan.mutations.len(),
+            });
+        }
+        let outcome = svc.apply_plan(&plan.plan_id.0, &russet_account::ApprovalRef { approval_id: None }).await?;
+        Ok(Provisioned {
+            profiles: outcome.bundles.iter().map(|b| (b.rel_path.clone(), b.profile_path.clone())).collect(),
+            team_id: Some(plan.team_id),
+            mutations: 0,
+        })
     }
 }
 
@@ -101,6 +126,7 @@ impl AppSigner for LiveSigner {
         let loaded = f0_guard("the identity store (W6)", async move { accounts.identities().load(&id) }).await?;
         let src = product.app.clone();
         let dest_buf = dest.to_path_buf();
+        let get_task_allow = product.get_task_allow;
         let per_bundle = provisioned
             .profiles
             .iter()
@@ -114,7 +140,7 @@ impl AppSigner for LiveSigner {
                 bundle: &dest_buf,
                 identity: &loaded,
                 per_bundle,
-                options: russet_sign::SignOptions::default(),
+                options: russet_sign::SignOptions { get_task_allow, ..russet_sign::SignOptions::default() },
             })
             .map(|_| ())
         })
