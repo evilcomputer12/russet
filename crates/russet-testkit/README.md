@@ -85,6 +85,7 @@ code = "device.tunnelFailed"    # a russetCode of ARCHITECTURE §13.3
 times = 1
 ```
 
-Synthetic UDIDs use chip id `0000` (no Apple chip has it), so the secrets guard never mistakes them for real ones.
+Synthetic UDIDs use chip id `00000000` (no Apple chip has it), so the secrets guard never mistakes them for real
+ones; any other synthetic UDID needs a reviewed entry in `.github/synthetic-secrets.toml`.
 Facade API names belong to the device plane (W4); the connector answers `lockdown.get_value {key?, domain?}` by
 itself and everything else from `[[call]]` entries.
