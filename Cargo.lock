@@ -257,7 +257,7 @@ dependencies = [
  "widestring",
  "windows-sys 0.59.0",
  "x509",
- "x509-certificate",
+ "x509-certificate 0.24.0",
  "xml-rs",
  "yasna",
  "zeroize",
@@ -305,7 +305,7 @@ dependencies = [
  "signature 2.2.0",
  "thiserror 2.0.21",
  "url",
- "x509-certificate",
+ "x509-certificate 0.24.0",
  "xml-rs",
  "xz2",
 ]
@@ -1618,7 +1618,7 @@ dependencies = [
  "reqwest 0.12.28",
  "ring",
  "signature 2.2.0",
- "x509-certificate",
+ "x509-certificate 0.24.0",
 ]
 
 [[package]]
@@ -5735,7 +5735,7 @@ dependencies = [
  "russet-sign",
  "serde_json",
  "tempfile",
- "x509-certificate",
+ "x509-certificate 0.25.0",
  "zeroize",
  "zip 9.0.1",
 ]
@@ -8357,6 +8357,25 @@ dependencies = [
  "signature 2.2.0",
  "spki 0.7.3",
  "thiserror 1.0.69",
+ "zeroize",
+]
+
+[[package]]
+name = "x509-certificate"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca9eb9a0c822c67129d5b8fcc2806c6bc4f50496b420825069a440669bcfbf7f"
+dependencies = [
+ "bcder",
+ "bytes",
+ "chrono",
+ "der 0.7.10",
+ "hex",
+ "pem",
+ "ring",
+ "signature 2.2.0",
+ "spki 0.7.3",
+ "thiserror 2.0.21",
  "zeroize",
 ]
 

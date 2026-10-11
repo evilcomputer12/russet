@@ -145,7 +145,7 @@ idevice = { version = "=0.1.68", default-features = false, features = [
 jktcp = "=0.1.7"
 # Signing and accounts
 apple-codesign = { version = "0.29.0", default-features = false }
-x509-certificate = "0.24.0" # apple-codesign 0.29.0's KeyInfoSigner trait lives here (not re-exported)
+x509-certificate = "0.25.0" # apple-codesign 0.29.0's KeyInfoSigner trait lives here (not re-exported)
 p256 = "0.14.0"
 rsa = "0.9.10"
 x509-cert = "0.2.5"
