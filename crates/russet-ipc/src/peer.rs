@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
@@ -133,6 +133,8 @@ struct PeerInner {
     closed: CancellationToken,
     /// Close once the reply being handled is queued (a failed `initialize`).
     close_after_reply: AtomicBool,
+    /// Frames queued for the writer and not yet written (subscriptions use it to bound slow consumers).
+    backlog: Arc<AtomicUsize>,
     client: Option<Arc<ClientHandler>>,
 }
 
@@ -177,6 +179,7 @@ impl Peer {
         let (read, write) = tokio::io::split(io);
         let (tx, rx) = mpsc::unbounded_channel();
         let client = (role == Role::Client).then(|| Arc::new(ClientHandler::default()));
+        let backlog = Arc::new(AtomicUsize::new(0));
         let peer = Peer {
             inner: Arc::new(PeerInner {
                 role,
@@ -193,13 +196,14 @@ impl Peer {
                 session: OnceLock::new(),
                 closed: CancellationToken::new(),
                 close_after_reply: AtomicBool::new(false),
+                backlog: Arc::clone(&backlog),
                 client: client.clone(),
             }),
         };
         if let Some(client) = client {
             peer.set_handler(client);
         }
-        tokio::spawn(write_loop(FramedWrite::new(write, LspCodec::default()), rx, peer.inner.closed.clone()));
+        tokio::spawn(write_loop(FramedWrite::new(write, LspCodec::default()), rx, peer.inner.closed.clone(), backlog));
         tokio::spawn(read_loop(peer.clone(), FramedRead::new(read, LspCodec::default())));
         peer
     }
@@ -278,10 +282,17 @@ impl Peer {
                 format!("a {} byte message is larger than the 16 MiB frame limit", body.len()),
             ));
         }
-        self.inner
-            .out
-            .send(Outgoing::Frame(Bytes::from(body)))
-            .map_err(|_| Error::new(codes::ipc::CONNECTION_CLOSED, "the connection is closed"))
+        self.inner.backlog.fetch_add(1, Ordering::Relaxed);
+        self.inner.out.send(Outgoing::Frame(Bytes::from(body))).map_err(|_| {
+            self.inner.backlog.fetch_sub(1, Ordering::Relaxed);
+            Error::new(codes::ipc::CONNECTION_CLOSED, "the connection is closed")
+        })
+    }
+
+    /// Frames queued for this connection and not yet written: a slow reader makes it grow, and subscriptions
+    /// hold back (dropping their oldest items) while it is high (ARCHITECTURE §6.4).
+    pub fn backlog(&self) -> usize {
+        self.inner.backlog.load(Ordering::Relaxed)
     }
 
     /// Sends a response (used by the read loop; responses that are too large become `ipc.frameTooLarge`).
@@ -539,11 +550,14 @@ async fn write_loop<W: AsyncWrite + Unpin + Send + 'static>(
     mut sink: FramedWrite<W, LspCodec>,
     mut rx: mpsc::UnboundedReceiver<Outgoing>,
     closed: CancellationToken,
+    backlog: Arc<AtomicUsize>,
 ) {
     while let Some(item) = rx.recv().await {
         match item {
             Outgoing::Frame(body) => {
-                if let Err(e) = sink.send(body).await {
+                let sent = sink.send(body).await;
+                backlog.fetch_sub(1, Ordering::Relaxed);
+                if let Err(e) = sent {
                     tracing::debug!("connection write failed: {e}");
                     break;
                 }
@@ -556,16 +570,26 @@ async fn write_loop<W: AsyncWrite + Unpin + Send + 'static>(
 }
 
 async fn read_loop<R: AsyncRead + Unpin + Send + 'static>(peer: Peer, mut stream: FramedRead<R, LspCodec>) {
-    let Some(handler) = peer.wait_for_handler().await else {
-        peer.shut_down();
-        return;
-    };
+    // A server-side peer may get its handler after it started; frames wait for it, an end of stream does not.
+    let mut handler: Option<Arc<dyn Handler>> = None;
     loop {
         tokio::select! {
             () = peer.inner.closed.cancelled() => break,
             frame = stream.next() => match frame {
                 None => break,
-                Some(Ok(body)) => peer.on_frame(&handler, &body),
+                Some(Ok(body)) => {
+                    let h = match &handler {
+                        Some(h) => Arc::clone(h),
+                        None => match peer.wait_for_handler().await {
+                            Some(h) => {
+                                handler = Some(Arc::clone(&h));
+                                h
+                            }
+                            None => break,
+                        },
+                    };
+                    peer.on_frame(&h, &body);
+                }
                 Some(Err(CodecError::FrameTooLarge(n))) => {
                     let e = Error::new(
                         codes::ipc::FRAME_TOO_LARGE,
@@ -623,6 +647,8 @@ pub struct ProgressReporter {
     token: Option<ProgressToken>,
     job_id: Option<JobId>,
     tap: Option<Arc<dyn EventSink>>,
+    /// The `begin` was already sent (by the daemon's job layer): later `begin`s become `report`s.
+    begun: bool,
 }
 
 impl fmt::Debug for ProgressReporter {
@@ -631,6 +657,7 @@ impl fmt::Debug for ProgressReporter {
             .field("token", &self.token)
             .field("job_id", &self.job_id)
             .field("tap", &self.tap.is_some())
+            .field("begun", &self.begun)
             .finish()
     }
 }
@@ -639,7 +666,7 @@ impl ProgressReporter {
     /// A reporter for a request whose params may carry `progressToken`.
     pub fn for_request(peer: &Peer, params: &Value) -> Self {
         let token = params.get("progressToken").and_then(|t| serde_json::from_value::<ProgressToken>(t.clone()).ok());
-        Self { peer: Some(peer.clone()), token, job_id: None, tap: None }
+        Self { peer: Some(peer.clone()), token, job_id: None, tap: None, begun: false }
     }
 
     /// A reporter that drops everything.
@@ -656,6 +683,13 @@ impl ProgressReporter {
     /// This reporter, naming `job` in its `begin` value.
     pub fn with_job(mut self, job: JobId) -> Self {
         self.job_id = Some(job);
+        self
+    }
+
+    /// This reporter after its `begin` was sent: a handler's own `begin` becomes a `report` with the title as
+    /// the message, so the requester sees one `begin` per token (LSP work-done progress).
+    pub fn begun(mut self) -> Self {
+        self.begun = true;
         self
     }
 
@@ -679,7 +713,11 @@ impl ProgressReporter {
 
 impl ProgressSink for ProgressReporter {
     fn begin(&self, title: &str, cancellable: bool) {
-        self.send(WorkDoneProgress::begin(title, cancellable));
+        if self.begun {
+            self.send(WorkDoneProgress::report(Some(title.to_owned()), None));
+        } else {
+            self.send(WorkDoneProgress::begin(title, cancellable));
+        }
         if let Some(tap) = &self.tap {
             tap.begin(title, cancellable);
         }

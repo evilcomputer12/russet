@@ -166,6 +166,36 @@ fn check_owned_dir(p: &Path, meta: &std::fs::Metadata) -> crate::Result<()> {
     Ok(())
 }
 
+/// A private temporary directory, removed with its contents when dropped: tests (each one gets its own
+/// `RUSSET_HOME`, ARCHITECTURE §3.3 item 7) and scratch work.
+#[derive(Debug)]
+pub struct TempDir {
+    path: PathBuf,
+}
+
+impl TempDir {
+    /// Creates `<temp>/russet-<prefix>-<random>` with mode 0700.
+    pub fn new(prefix: &str) -> crate::Result<Self> {
+        let mut suffix = [0u8; 8];
+        crate::time::os_fill(&mut suffix);
+        let name = format!("russet-{prefix}-{}", suffix.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        let path = std::env::temp_dir().join(name);
+        ensure_private_dir(&path)?;
+        Ok(Self { path })
+    }
+
+    /// The directory.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 /// A byte count for messages: `5.0 GiB`, `46.2 MiB`, `512 B`.
 pub fn human_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["KiB", "MiB", "GiB", "TiB", "PiB"];
