@@ -54,6 +54,8 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
     entries (first 62–81 ms after SIGCONT) and, with `DYLD_PRINT_LIBRARIES=1`, 3154 console lines.
     `OS_ACTIVITY_DT_MODE=YES` (or `1`, `enable`) does **not** mirror os_log to the console on iOS 27.0.
   - Exit after SIGKILL: seen through the console's end in 18–42 ms.
+  - Idle close (`DEVLAB_KEEP_WARM_MS=1000 $L idle-close`): a tunnel with a live stream stays up past
+    `device.keep-warm`; once the stream closed it went down.
   - Tunnel rebuild: after `tunnel.kill` (the TCP stack stops while the tunnel stays in its slot, as when the CDTunnel
     stream dies) the next RSD connect rebuilt the tunnel, generation 1 → 2, in 281 ms.
   - DDI status: mounted, `cryptex1`, version `27.1.5228.8`, `productBuild 27A5228h`, `source: unknown` (the spike's

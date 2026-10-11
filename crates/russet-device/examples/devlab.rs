@@ -112,7 +112,10 @@ async fn run() -> russet_core::Result<()> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("russet-devlab"));
     let dirs = RussetDirs::under(&home);
-    let cfg = DeviceConfig::load(&dirs)?;
+    let mut cfg = DeviceConfig::load(&dirs)?;
+    if let Some(d) = std::env::var("DEVLAB_KEEP_WARM_MS").ok().and_then(|v| v.parse().ok()) {
+        cfg.keep_warm = Duration::from_millis(d);
+    }
     let t0 = Instant::now();
     let conn = Arc::new(LiveConnector::new(&cfg)?);
     let mgr = DeviceManager::start(cfg, conn.clone()).await?;
@@ -191,6 +194,20 @@ async fn run() -> russet_core::Result<()> {
                 .call(FacadeCall::new(facade::TUNNEL_STATUS, serde_json::json!({"udid": h.udid().as_str()})))
                 .await?;
             show("tunnel", status);
+        }
+        "idle-close" => {
+            // device.keep-warm: an unused tunnel without live streams closes (run with DEVLAB_KEEP_WARM_MS=1000).
+            let h = mgr.get(&sel)?;
+            let udid = serde_json::json!({"udid": h.udid().as_str()});
+            conn.call(FacadeCall::new(facade::RSD_SERVICES, udid.clone())).await?;
+            let held = h.connect_rsd("com.apple.coredevice.appservice").await?;
+            let wait = Duration::from_millis(num(&args, "--wait-ms", 3000u64));
+            tokio::time::sleep(wait).await;
+            let with_stream = conn.call(FacadeCall::new(facade::TUNNEL_STATUS, udid.clone())).await?;
+            drop(held);
+            tokio::time::sleep(wait).await;
+            let without = conn.call(FacadeCall::new(facade::TUNNEL_STATUS, udid)).await?;
+            println!("with a live stream: {}; after it closed: {}", with_stream["state"], without["state"]);
         }
         "apps" => {
             let h = mgr.get(&sel)?;

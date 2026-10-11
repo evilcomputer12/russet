@@ -137,7 +137,11 @@ impl LiveConnector {
         if let Ok(mut map) = self.devices.lock() {
             map.clear();
             for d in &list {
-                map.insert(d.udid.clone(), d.clone());
+                // USB wins over Wi-Fi for the same UDID (device.md §6.1).
+                let keep_old = map.get(&d.udid).is_some_and(|old| old.transport == Transport::Usb);
+                if !keep_old {
+                    map.insert(d.udid.clone(), d.clone());
+                }
             }
         }
         Ok(list)
@@ -223,8 +227,9 @@ impl LiveConnector {
                             error: None,
                             mss: Some(t.mss as u64),
                         });
+                        let generation = t.generation;
                         *guard = Some(t);
-                        self.spawn_reaper(udid.clone(), Arc::clone(&slot));
+                        self.spawn_reaper(udid.clone(), Arc::clone(&slot), generation);
                     }
                     Err(e) => {
                         slot.set_status(TunnelStatusRecord {
@@ -255,8 +260,9 @@ impl LiveConnector {
         Err(device_error(codes::device::TUNNEL_FAILED, format!("{what}: the tunnel could not be rebuilt")))
     }
 
-    /// Closes the tunnel after `keep_warm` without use and without live streams (device.md §5.3 idle close).
-    fn spawn_reaper(&self, udid: Udid, slot: Arc<TunnelSlot>) {
+    /// Closes the tunnel after `keep_warm` without use and without live streams (device.md §5.3 idle close). One
+    /// reaper per generation: it ends when its tunnel is gone or replaced.
+    fn spawn_reaper(&self, udid: Udid, slot: Arc<TunnelSlot>, generation: u64) {
         let keep_warm = self.keep_warm;
         let tick = (keep_warm / 4).clamp(Duration::from_millis(250), Duration::from_secs(30));
         tokio::spawn(async move {
@@ -265,7 +271,7 @@ impl LiveConnector {
                 let idle =
                     slot.last_used.lock().ok().and_then(|l| *l).map(|t| t.elapsed() >= keep_warm).unwrap_or(true);
                 let mut guard = slot.tunnel.lock().await;
-                let Some(t) = guard.as_ref() else { return };
+                let Some(t) = guard.as_ref().filter(|t| t.generation == generation) else { return };
                 if idle && t.active_streams() == 0 {
                     tracing::debug!(device = %udid.redacted(), generation = t.generation, "closing the idle device tunnel");
                     if let Some(t) = guard.take() {
