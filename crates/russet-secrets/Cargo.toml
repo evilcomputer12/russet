@@ -17,10 +17,16 @@ workspace = true
 [dependencies]
 argon2.workspace = true
 async-trait.workspace = true
+base64 = "0.23.1"
 chacha20poly1305.workspace = true
+getrandom = "0.4.3"
 keyring-core.workspace = true
 russet-core.workspace = true
-time.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+time = { workspace = true, features = ["formatting", "parsing"] }
+tokio = { workspace = true, features = ["rt"] }
 zeroize.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -28,3 +34,7 @@ zbus-secret-service-keyring-store.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
