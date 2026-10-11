@@ -174,6 +174,8 @@ async fn terminate_while_a_debugger_runs_the_app() {
     let handle = b.serve(EndpointSpec::Tcp { bind: "127.0.0.1:0".parse().unwrap() }).await.unwrap();
     let mut lldb = debugger(handle.endpoint()).await;
     lldb.resume(russet_gdbremote::ResumeAction::ContinueAll).await.unwrap();
+    // Once the resume reached debugserver, the app runs and a detach must interrupt it first.
+    assert!(fake.wait_for(Duration::from_secs(5), |r| r.saw("vCont;c")));
     handle.terminate(TerminateMode::Detach).await.unwrap();
     assert_eq!(handle.state(), BrokerState::Detached);
     let report = fake.report();
