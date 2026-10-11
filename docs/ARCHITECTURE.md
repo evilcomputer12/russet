@@ -1,6 +1,6 @@
 # Russet architecture
 
-- **Status:** v1.3, 2026-10-11. Written by the lead architect from the seven area designs. Review round 1 is applied: the [critique](review/critique-2026-10-11.json) plus four fact-finding passes (the Mac oracle, read-only; Apple's CDN and catalogs; the rig iPhone's firmware, without device commands; GitHub's runner images and billing). Its results are decisions D 62–D 81 in §20, superseded area-doc fields in §20.1, and owner questions Q25–Q33 in §21. Review round 2 (same day) is applied as decisions D 82–D 91, new §20.1 rows for build and core, and owner question Q34. Its critique is not committed, because it quotes details of the private track (Q34).
+- **Status:** v1.4, 2026-10-11. Written by the lead architect from the seven area designs. Review round 1 is applied: the [critique](review/critique-2026-10-11.json) plus four fact-finding passes (the Mac oracle, read-only; Apple's CDN and catalogs; the rig iPhone's firmware, without device commands; GitHub's runner images and billing). Its results are decisions D 62–D 81 in §20, superseded area-doc fields in §20.1, and owner questions Q25–Q33 in §21. Review round 2 (same day) is applied as decisions D 82–D 91, new §20.1 rows for build and core, and owner question Q34. Its critique is not committed, because it quotes details of the private track (Q34). The contract notes of W1 (the F0 bootstrap, merged on `main`) are absorbed as decisions D 92–D 101, checked against the merged code, with two new §20.1 rows.
 - **What this file is:** the single source of truth for everything that crosses an area boundary:
   - process model, crate boundaries and public APIs;
   - the `russetd` JSON-RPC catalog and notification catalog;
@@ -235,7 +235,7 @@ Layers: **F** = format/protocol libraries (permissive, no `russet-*` dependency 
 | `russet-car`, `russet-assets` | F | MIT | W21 | BOM/CoreUI CAR writer/reader; `.xcassets` model, icon expansion, partial Info.plist, asset symbols | image, resvg, lzfse |
 | `russet-xcstrings`, `russet-ib` | F | MIT | W21 (B10, B12); `russet-ib` then W21b (B21a), W28b (B21b) and W28c (B21c) [D 90] | `.xcstrings` compile and symbols. `russet-ib`: storyboard/XIB reader, launch-screen converter (B12), NIBArchive codec (coder version 10, the iOS `LNE\0` trailer with `IBUINibLNEVersionKey`, class fallback entries) and the storyboard/XIB → `.storyboardc`/`.nib` compiler (B21a–c) [D 75] | — |
 | `russet-xcodeproj`, `russet-pif` | F | MIT | W28 | pbxproj / JSON `.xcproj` / workspace / scheme / xcconfig parsing and settings resolver; PIF emitter | — |
-| `russet-xar` | F | MIT | W16b | Read-only Apple container formats for SDK and DDI import [D 62, D 69]: xar (zlib TOC, heap, SHA-1 TOC checksum; `.xip` and flat `.pkg`); the xar RSA signature, which is **prehashed** (a PKCS#1 v1.5 SHA-1 DigestInfo over the raw TOC checksum) and is chained to the runtime-pinned Apple Root CA (§16.6), never to the embedded root, ignoring leaf expiry; pbzx (16 MiB chunks, each XZ or stored) and gzip payload streams; `cpio` (odc/newc; hardlinks by (dev, ino)); UDIF (`koly` trailer, `blkx` tables; raw, zero-fill and zlib chunks, with bzip2 and lzfse optional because neither Apple DDI image uses them); a read-only HFS+/HFSX reader (DDIs need no decmpfs). Contract: streaming, with bounded in-order parallel pbzx decoding (at most threads × 2 × 16 MiB in flight); rejects absolute and `..` names; never writes through a link; output and size caps; cargo-fuzz targets | flate2, liblzma 0.4 (static; or lzma-rust2 0.21 if W16b's benchmark allows), quick-xml, sha1, sha2, rsa 0.9 (verify only: RUSTSEC-2023-0071 concerns private-key operations and is ignored in `deny.toml` for this crate with that reason), x509-cert; `cms` optional; `udif` 0.4.2 and `hfsplus` 0.4.0 (MIT) optional, pinned exactly; `apple-xar` and `cpio-archive` (MPL-2.0) only as dev-dependency oracles |
+| `russet-xar` | F | MIT | W16b | Read-only Apple container formats for SDK and DDI import [D 62, D 69]: xar (zlib TOC, heap, SHA-1 TOC checksum; `.xip` and flat `.pkg`); the xar RSA signature, which is **prehashed** (a PKCS#1 v1.5 SHA-1 DigestInfo over the raw TOC checksum) and is chained to the runtime-pinned Apple Root CA (§16.6), never to the embedded root, ignoring leaf expiry; pbzx (16 MiB chunks, each XZ or stored) and gzip payload streams; `cpio` (odc/newc; hardlinks by (dev, ino)); UDIF (`koly` trailer, `blkx` tables; raw, zero-fill and zlib chunks, with bzip2 and lzfse optional because neither Apple DDI image uses them); a read-only HFS+/HFSX reader (DDIs need no decmpfs). Contract: streaming, with bounded in-order parallel pbzx decoding (at most threads × 2 × 16 MiB in flight); rejects absolute and `..` names; never writes through a link; output and size caps; cargo-fuzz targets | flate2, lzma-rust2 0.21.0 (pure Rust XZ; `liblzma` cannot join the workspace next to apple-codesign [D 95]), quick-xml, sha1, sha2, rsa 0.9 (verify only: RUSTSEC-2023-0071 concerns private-key operations and is ignored in `deny.toml` for this crate with that reason), x509-cert; `cms` optional; `udif` 0.4.2 and `hfsplus` 0.4.0 (MIT) optional, pinned exactly; `apple-xar` and `cpio-archive` (MPL-2.0) only as dev-dependency oracles |
 | `russet-tool` (binary) | F | MIT | W16 (`ibtool` compile and link modes: W21b) | The multi-call shim binary of §3.1 | F crates only |
 | `russet-core` | L0 | GPL-3.0-or-later | W1/W2 | Errors and codes, ids, `RussetDirs`, fs helpers, processes (`CommandRunner`), progress and event sinks, clock and entropy, endpoints, secret wrappers, platform, build info, supervised tasks, `rpc` traits | thiserror, serde, schemars, secrecy, tokio, process-wrap, fs4 |
 | `russet-protocol` | L1 | GPL-3.0-or-later | W1 (+ each area owns its namespace module; `Cargo.toml` is lead-owned after W1) | Every wire DTO; `rpc_method!`/`rpc_notification!`; `PROTOCOL`; `registry()`; schema and TS export [D 31] | serde, schemars, ts-rs |
@@ -248,7 +248,7 @@ Layers: **F** = format/protocol libraries (permissive, no `russet-*` dependency 
 | `russet-device` | L3 | GPL-3.0-or-later | W4 | idevice integration: mux, pairing, tunnel, RSD, DDI status and mount (from a directory in W4; imported DDIs in W10), apps, launch, forwards, logs, screen/mirror/HID, files, crash pull, perf, symbols service client, pymobiledevice3 fallback, `io::ServiceConnector` seam | idevice =0.1.68 (ring; patched, [D 22]), jktcp =0.1.7, russet-ipa |
 | `russet-sdk` | L3 | GPL-3.0-or-later | W5 | SDK facts (`SdkFacts`), platform view, toolsets, SDK and DDI import (`import`, W16b) [D 58, D 62, D 69] | russet-toolchain, russet-plist, russet-xar |
 | `russet-build` | L3 | GPL-3.0-or-later | W5 | Build orchestrator: project model and detection (was `russet-project`), stack adapters (SwiftPM now; Flutter, Xcode, RN, MAUI later), Info.plist synthesis, bundle assembly, lints, metadata policy | russet-sdk, russet-macho, russet-ipa, russet-plist |
-| `russet-sign` | L3 | GPL-3.0-or-later | W6 | Bundle walk, provisioning profiles, entitlements merge, signing through apple-codesign, verify, lints | apple-codesign 0.29.0 (`default-features = false`), russet-macho |
+| `russet-sign` | L3 | GPL-3.0-or-later | W6 | Bundle walk, provisioning profiles, entitlements merge, signing through apple-codesign, verify, lints | apple-codesign 0.29.0 (`default-features = false`), x509-certificate 0.24.0 (`KeyInfoSigner`, [D 92]), russet-macho |
 | `russet-asc` | L3 | GPL-3.0-or-later (licence open, §21) | W6 | Async typed App Store Connect client: ES256 JWT, scoped GET tokens, rate limiter, open enums, pluggable `Auth` (JWT, DS2) | reqwest, p256 |
 | `russet-account` | L3 | GPL-3.0-or-later | W6 | Accounts, identities (CSR, p12, xtool import), `DevPortal`, provisioning planner/applier, free-team policy | russet-sign, russet-asc, russet-secrets, rsa, x509-cert, p12-keystore |
 | `russet-gsa`, `russet-anisette` | L3 | GPL-3.0-or-later | W22 | GrandSlam auth, 2FA, DS2; anisette providers and library acquisition | num-bigint, aes-gcm, tokio-tungstenite (RemoteV3) |
@@ -288,10 +288,11 @@ dev russet-testkit, russet-golden, russet-oracle, russet-lab, xtask → anything
 
 - Domain crates take `&dyn ProgressSink` / `EventSink` and a `CancellationToken`, and return `russet_core::Result`.
 - Domain crates never open sockets to clients; transport lives in `russet-ipc` and `russetd`.
+- L2 crates never depend on `russet-doctor`: that would be an L2 → L2 edge, and the only one allowed is toolchain → config. Their doctor checks live in `russetd` (§5.3, doctor seam) [D 100].
 - MIT/Apache crates (layer F) may depend only on permissively licensed crates; xtask verifies this from `cargo metadata` [core §18]. `check-layers` reads the layer of every package, binaries included, from `.config/workstreams.toml`, so `russet-tool` and `russet-adi-host` are checked like libraries.
 - **Wire enums** (every DTO in `russet-protocol`) [D 72]:
   - unit-only enums: `#[serde(rename_all = "kebab-case")]`;
-  - enums that carry data: internally tagged, `#[serde(tag = "kind", rename_all = "kebab-case")]`, with struct variants only (serde cannot internally tag tuple variants), and camelCase fields inside;
+  - enums that carry data: internally tagged, `#[serde(tag = "kind", rename_all = "kebab-case")]`, with struct variants only (serde cannot internally tag tuple variants), and camelCase fields inside. No variant has a field named `kind`: serde_derive rejects a field that has the tag's name, so such a field gets a qualified name (`JobEvent`'s `artifact` carries `artifactKind`, §9.2) [D 96];
   - externally tagged enums (serde's default) are not allowed on the wire. A unit test over `registry()` walks the generated schema and rejects them.
   - Domain crates may keep richer Rust enums; the protocol module converts. Example: `russet-device`'s `DeviceState` becomes the flat `DeviceSummary.state` of §9.5.
 
@@ -355,7 +356,7 @@ pub mod secret { pub use secrecy::{ExposeSecret, SecretBox, SecretString}; pub s
 pub mod rpc {
     pub trait Method {
         const NAME: &'static str;
-        const PERMISSION: Permission;            // the documented ceiling (§8 "Class"); MCP listing and docs use it
+        const PERMISSION: Permission;            // the documented ceiling (§8 "Class"); docs use it; MCP tool tiers follow §11.3 [D 98]
         const CONFIRM: Confirm;                  // Plain, or Typed (ui.prompt typed-confirmation; `--yes` cannot pre-confirm)
         const LONG_RUNNING: bool;
         type Params; type Result;
@@ -376,18 +377,33 @@ pub mod rpc {
 }
 ```
 
-`rpc_method!(Marker, "ns.verb", Params => Result, Permission::X [, long_running] [, confirm = Typed] [, permission_fn = path])` generates the impl; `permission_fn` overrides `Method::permission`. W1 lands the trait, the macro and the dynamic rows above as stubs.
+`rpc_method!(Marker, "ns.verb", Params => Result, Permission::X [, long_running] [, confirm = Typed] [, permission_fn = path])` generates a zero-sized marker type that implements `Method` and `russet_protocol::RpcMethod` (below); `permission_fn` overrides `Method::permission` and sets `MethodInfo.dynamic_permission`. W1 landed the trait, the macro and the dynamic rows above as stubs that fail closed at the ceiling (`app.uninstall` from `mcp`: `perm.denied`) [D 93].
 
 **`russet-protocol`** [core §5.3]
-- One module per namespace (`src/<namespace>.rs`).
-- Each method is declared with `rpc_method!` (full form above, under `rpc`).
-- `registry() -> &'static [MethodInfo]` concatenates per-module `METHODS` arrays. The list of modules is fixed by W1, so area workstreams edit only their own module files.
+- One module per namespace (`src/<namespace>.rs`) [D 101]:
+  - the `flutter` namespace is split by owner into `flutter_build.rs` (W17; the `genSnapshot` row W24) and `flutter_run.rs` (W18), like russetd's handlers (§6.1) and the error-code families (§13.2); `namespace_of_module()` maps both modules to `flutter`;
+  - five modules serve no daemon method: `common` (W2: the shared wire types of §9.5), `ui` (W2: the §9.3 server-to-client requests and the `ui.showMessage` notification), `ide` (W11: the §9.4 reverse requests), and `xcode` and `xctest` (W28: empty until W28 adds its methods as minor additions, §7.7).
+- Each method is declared with `rpc_method!` (full form above, under `rpc`), each notification with `rpc_notification!(Marker, "ns.event", Params)`.
+- Each module exports `METHODS` (served by the daemon), `NOTIFICATIONS` (sent by the daemon) and `CLIENT_METHODS` (requests the daemon sends to clients). `registry() -> &'static [MethodInfo]`, `notifications()` and `client_methods()` concatenate them in the module order of `lib.rs`, and `namespaces()` lists the modules. The list of modules is fixed by W1, so area workstreams edit only their own module files.
+- The router, the permission engine and the schema export work from these values alone, without a concrete method type [D 93]:
+
+  ```rust
+  pub trait RpcMethod: Method { const INFO: MethodInfo; }                          // implemented by rpc_method!
+  pub trait RpcNotification: NotificationMethod { const INFO: NotificationInfo; }  // implemented by rpc_notification!
+  pub struct MethodInfo { pub name: &'static str, pub permission: Permission /* the ceiling */, pub dynamic_permission: bool,
+                          pub permission_of: PermissionOf, pub confirm: Confirm, pub long_running: bool,
+                          pub params: TypeHooks, pub result: TypeHooks /* JSON Schema and ts-rs hooks of the DTO */ }
+  pub type PermissionOf = fn(&serde_json::Value, &ConnInfo, &dyn Ownership) -> russet_core::Result<Permission>;
+      // the per-call class over raw params: static rows answer `permission` without reading them; `permission_fn` rows
+      // (dynamic_permission = true) deserialize them (core.invalidArgument if they do not fit) and call Method::permission
+  pub struct NotificationInfo { pub name: &'static str, pub params: TypeHooks }
+  ```
 - Every DTO derives `Serialize, Deserialize, JsonSchema, TS`, with `#[serde(rename_all = "camelCase")]` and the enum rules of §5.2. Inbound DTOs never use `deny_unknown_fields`.
 
 **`russet-ipc`** [core §5.2]
 - `Peer::{call, call_with, notify, connection, closed}`
-- `Router<C>::{request::<M>, notification::<N>, methods}`
-- `Authorizer::{on_connect, on_initialize, decide}`, returning `Decision::{Allow, Confirm, NeedsApproval, Deny}`
+- `Router<C>::{request::<M: RpcMethod>, notification::<N: RpcNotification>, methods, dispatch}`; `methods()` yields the `MethodInfo` of every registered handler [D 93]
+- `Authorizer::{on_connect, on_initialize, decide}`. `decide(grant, &MethodInfo, params, conn, ownership)` takes the call's class from `(info.permission_of)(params, conn, ownership)` and returns `Decision::{Allow, Confirm, NeedsApproval, Deny}` [D 93]
 - `Server::{bind, serve}`, `connect`, `connect_or_spawn(dirs, ClientInfo, SpawnSpec)`
 - `in_process() -> (Peer, Peer)`, used by `--no-daemon` and by the MCP HTTP service inside the daemon
 
@@ -557,8 +573,10 @@ pub fn patch_sdk_version(path: &Path, sdk: Version) -> Result<(), MachOError>;  
 **`russet-sign`** [SIGN §8.7]
 
 ```rust
+pub use x509_certificate::KeyInfoSigner;                 // apple-codesign 0.29.0's signing-key trait: it lives in x509-certificate 0.24.0,
+                                                         // which apple-codesign uses but does not re-export [D 92]
 pub trait CodeSigningIdentity: Send + Sync {             // implemented by russet-account's LoadedIdentity; breaks the sign↔account cycle
-    fn certificate_der(&self) -> &[u8]; fn team_id(&self) -> &str; fn signer(&self) -> &dyn apple_codesign::KeyInfoSigner; }
+    fn certificate_der(&self) -> &[u8]; fn team_id(&self) -> &str; fn signer(&self) -> &dyn KeyInfoSigner; }
 pub struct ProvisioningProfile { /* parsed CMS payload */ }
 impl ProvisioningProfile { pub fn parse(der: &[u8]) -> Result<Self>; pub fn covers(&self, bundle_id: &str, team: &str) -> bool;
                            pub fn has_certificate(&self, der: &[u8]) -> bool; pub fn has_device(&self, udid: &str) -> bool;
@@ -633,11 +651,16 @@ impl DeviceSlot { pub async fn manager(&self) -> Result<Arc<russet_device::Devic
     // otherwise device.liveBackendRefused (3019, with details.holder when another daemon holds the lock)
 // handler seam: every file crates/russetd/src/handlers/<ns>.rs exports
 pub fn register(r: &mut Router<DaemonCtx>);
-// doctor seam: every domain crate exports
+// doctor seam: every L3 domain crate and russet-mcp exports the function below. doctor_registry.rs concatenates them with
+// russet_doctor::checks (host), russetd's daemon::checks (W2) and handlers::doctor::checks (W3: the config, secrets and
+// toolchain checks, because L2 crates may not depend on russet-doctor, §5.2) [D 100]
 pub fn checks() -> Vec<Arc<dyn russet_doctor::Check>>;
 ```
 
 **`russet-cli`**: each area module `crates/russet-cli/src/cmd/<area>.rs` exports `pub fn command() -> clap::Command` and `pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode>`. `CliCtx` holds the daemon `Peer`, the reporter (`HumanReporter` or NDJSON `JsonReporter`) and the global flags (`--json --device --project -v/-q --color --no-daemon --yes`).
+- **Areas with several top-level commands** [D 94]. Such an area (W4's `app.rs` owns `app`, `install` and `launch`; `run.rs` owns `run`, `sessions`, `stop`, `relaunch` and `reload`) returns them wrapped in `cmd::group(area, [commands…])`, and every command of the group becomes a top-level command.
+- The seam's `cmd::run` finds the area that owns the top-level command and passes it the **root** `ArgMatches`, so an area reads `m.subcommand()` whether it is grouped or not. `cmd::owners()` lists the (command, area) pairs.
+- `cmd/flutter_run.rs` (W18) is not a top-level area: W17's `cmd/flutter.rs` owns `russet flutter` and calls it for the run half [D 101].
 
 ---
 
@@ -654,7 +677,8 @@ crates/russetd/src/
   pipeline/ (run.rs: build → provision → sign → install → launch/debug [W7]; install ledger)
   handlers/mod.rs (fixed list, W1) + handlers/<namespace>.rs (one per namespace; owner per §8;
            the `flutter` namespace is split into flutter_build.rs [W17] and flutter_run.rs [W18])
-  doctor_registry.rs (fixed list of crates' checks(), W1)
+  doctor_registry.rs (fixed list, W1: the crates' checks(), daemon::checks [W2] and handlers::doctor::checks [W3],
+           which holds the L2 crates' checks [D 100])
 ```
 
 ### 6.2 Jobs [core §6.4]
@@ -781,7 +805,7 @@ LSP base protocol: `Content-Length: <n>\r\n\r\n<n bytes of UTF-8 JSON-RPC 2.0>`.
 
 ### 7.5 Permissions
 
-Every method has a permission class (`russet_core::rpc::Permission`). The `PermissionEngine` decides per connection [core §7.5, QA §8.4] [D 6]. The §8 "Class" column is the method's ceiling (`Method::PERMISSION`); rows written "x (cond → y)" or "owner or system" are resolved per call by `Method::permission` (§5.3) [D 66].
+Every method has a permission class (`russet_core::rpc::Permission`). The `PermissionEngine` decides per connection [core §7.5, QA §8.4] [D 6]. The §8 "Class" column is the method's ceiling (`Method::PERMISSION`); rows written "x (cond → y)" or "owner or system" are resolved per call by `Method::permission` (§5.3) [D 66]. The engine reaches it through `MethodInfo.permission_of`; `MethodInfo.dynamic_permission` marks these rows, and their ceiling is the highest class they can resolve to (`doctor.run`: `system`) [D 93, D 98].
 
 | Class | Covers | `cli` | `ide` | `mcp` (tier) | `flutter-device` |
 |---|---|---|---|---|---|
@@ -1053,6 +1077,8 @@ Every method has a permission class (`russet_core::rpc::Permission`). The `Permi
 
 Global flags: `--json` (one document, or NDJSON for streams), `--device <udid|alias>`, `--project <dir>`, `-v`/`-q`, `--color`, `--no-daemon`, `--yes`.
 
+One area module may own several top-level commands through `cmd::group` (§5.3), for example `russet app`, `russet install` and `russet launch` (W4's `cmd/app.rs`) [D 94].
+
 ```text
 russet doctor [--fix] [--online] [--strict] [--check ID]…                      doctor.run                    W3
 russet daemon run|start|stop|restart|status|logs|path                          daemon.*                      W2
@@ -1075,6 +1101,7 @@ russet screenshot [-o f] · mirror [--stdout|--record f] · tap|swipe|button|typ
 russet build [--release|--profile P] [--ipa[=dev|store]] [--backend B] [--clean] [--set K=V]…              W5
 russet clean [--all] · build-settings · inspect <path> · lint <path> [--store] · package ipa <app> -o <ipa> W5/W16
 russet assets compile|app-icon · strings compile · ib convert-launch-screen|compile|dump                   W21/W21b/W28b/W28c
+russet oracle status|run --tool T --case ID   (development only: the Mac oracle of build §5.5, §9.3)        W16
 russet run [--configuration C] [--no-build] [--install if-changed|always|never] [--launch auto|coredevice|dvt]
            [--detach | --background] [--exit-code app] [-- app args]                                        run.start            W7
            (--detach: wait for the launch, print {sessionId, pid, bundleId}, exit; the session stays, §7.6)
@@ -1138,7 +1165,7 @@ These names replace `job.progress`, `job.done`, `job.output`, `build.event`, `bu
 
 ### 9.2 `JobEvent`
 
-`{seq, ts, kind, …}`; `kind` is one of the values below. Areas add fields only inside their own kinds.
+`{seq, ts, kind, …}`; `kind` is one of the values below. Areas add fields only inside their own kinds, and never a field named `kind`, which is the tag (§5.2) [D 96].
 
 | `kind` | Fields | Produced by |
 |---|---|---|
@@ -1147,7 +1174,7 @@ These names replace `job.progress`, `job.done`, `job.output`, `build.event`, `bu
 | `stage` | `stage: resolve\|prepare\|compile\|resources\|assemble\|lint\|package\|sign\|install\|launch\|attach, state: started\|finished\|failed` | build, run |
 | `task` | `taskId, title, tool?, state, durationMs?` | build |
 | `diagnostic` | `severity: error\|warning\|note, message, file?, line?, column?, tool?, code?` | build, sign, ship |
-| `artifact` | `kind: app\|ipa\|dsym\|archive\|report, path` | build, ship |
+| `artifact` | `artifactKind: app\|ipa\|dsym\|archive\|report, path` [D 96] | build, ship |
 | `warning` | `russetCode, message, hint?` | every job |
 | `transfer` | `bytesDone, bytesTotal, part?` | install, upload, symbols, toolchain |
 | `custom` | `name, data` | escape hatch; documented in the area doc |
@@ -1317,6 +1344,8 @@ OpenHands GUI ──HTTP──► russetd web endpoint /mcp (russet-mcp service 
 | 3 | `publish` | listed only when `tier-max = 3` | every call (`scope: once`) |
 | — | `account-destructive`, `secrets`, `system` | never exposed | — |
 
+**A tool's tier is the class of the calls it makes** [D 98]. For a method with a static class that is its ceiling. For the per-call rows of §5.3 (`MethodInfo.dynamic_permission`) it is the branch the tool is limited to: `doctor_run` never sends `fix`, so it is tier 0, although `doctor.run`'s ceiling is `system`. The daemon still resolves every call through `MethodInfo.permission_of`, so `doctor.run {fix: true}` from an MCP client is a `system` call and is denied.
+
 **Flow:**
 1. A tier-2/3 call without a valid `approval` fails with RPC error `perm.approvalRequired` (1204). `data.details` is `{approvalId, tool?, tier, summary, argsDigest, approveWith: "russet approve apr_… (or Approve in Russet IDE)", expiresAt}`. The bridge turns it into an MCP `isError: true` result with that structured content.
 2. The daemon emits `approval.requested`. The IDE shows a notification and the Approval panel, which is reachable only from its own message bus; no command id can grant [IDE §6.4]. A human can also run `russet approve <id>` in a TTY.
@@ -1349,7 +1378,7 @@ OpenHands GUI ──HTTP──► russetd web endpoint /mcp (russet-mcp service 
 | `device_list` | 0 | `device.list` | UDIDs masked to the last 6 characters unless policy `reveal-udid` |
 | `device_info` | 0 | `device.info` + `device.readiness` | |
 | `project_info` | 0 | `project.info` | |
-| `doctor_run` | 0 | `doctor.run` (no fix) | |
+| `doctor_run` | 0 | `doctor.run` (no fix) | per-call class `read`; the method's ceiling is `system` (§11.3) [D 98] |
 | `job_status` | 0 | `job.wait` (`waitSeconds ≤ 50`) | the continuation for every slow tool |
 | `job_log` | 0 | `job.log` | build and upload logs; replaces `russet_build_log` |
 | `build_settings` | 0 | `build.settings` | |
@@ -1403,7 +1432,7 @@ Area-doc names map onto this list as follows:
 - `secrets.*`, `approval.grant/deny`;
 - `ship.metadata.apply`, `ship.version.apply` and `ship.review.submit` (App Store review submission);
 - TestFlight group and tester management and beta review (`ship.testflight.groups.create`, `addTesters`, `removeTesters`, `betaReview.submit`);
-- `system`-class methods (toolchain, SDK, daemon, MCP admin);
+- `system`-class methods (toolchain, SDK, daemon, MCP admin), and the `system` branch of per-call rows such as `doctor.run {fix}` [D 98];
 - `files.push/remove`, `process.signal`.
 
 ### 11.6 Output rules [IDE §6.5, QA §8.4]
@@ -1502,20 +1531,25 @@ Area-doc names map onto this list as follows:
 | 3100–3199 | `app` | W4 |
 | 3200–3299 | `device` services (fallback, files, location) | W10 |
 | 4000–4099 | `build` | W5 |
-| 4100–4199 | `assets` (including `ib`), `flutter` (build), `xcode` | W16, W17, W21, W21b, W28, W28b, W28c |
+| 4100–4119 | `assets` (including `ib`) | W16, W21, W21b, W28b, W28c |
+| 4120–4149 | `flutter` (build; module `flutter_build`) | W17, W24 |
+| 4150–4199 | `xcode` | W28 |
 | 5000–5099 | `sign` | W6 |
 | 5100–5199 | `account` | W6, W12 |
 | 5200–5249 | `provision` | W6, W12 |
-| 5250–5299 | `gsa`, `anisette` | W22 |
+| 5250–5269 | `gsa` | W22 |
+| 5270–5299 | `anisette` | W22 |
 | 6000–6099 | `debug` | W7, W11, W18 (6016) |
 | 6100–6149 | `crash` | W11 |
-| 6150–6199 | `flutter` (run) | W18 |
+| 6150–6199 | `flutter` (run; module `flutter_run`) | W18 |
 | 7000–7199 | `ship` | W12, W23 |
 | 8000–8099 | `screen` (screenshot, mirror, input) | W10 |
 | 8100–8199 | `perf` | W10 |
 | 8200–8299 | `xctest` | W32, W28 |
 | 9000–9099 | `mcp` | W13 |
 | 9100–9199 | `agents` | W20 |
+
+The sub-ranges of 4100–4199 and 5250–5299 follow the codes §13.3 assigns. Each family file (`crates/russet-core/src/error/codes/<module>.rs`) holds one family; `codes::FAMILIES` records its prefix and ranges, and russet-core's registry tests check that every code is unique and sits in its family's range with its prefix [D 97].
 
 ### 13.3 Initial code registry
 
@@ -1578,20 +1612,21 @@ Each workstream adds codes only in its own range and family file (`crates/russet
 | Exit | Meaning | Families |
 |---|---|---|
 | 0 | Success | |
-| 1 | Unexpected failure | `core.internal`, unknown |
+| 1 | Unexpected failure | `core.internal` and every other `core` code without a row below (for example `core.invalidArgument`, a daemon-side validation error; clap's usage errors exit 2), `mcp.toolNotFound`, unknown [D 97] |
 | 2 | Usage (clap) | |
 | 3 | Not found | `*.notFound` |
 | 4 | Environment: run `russet doctor` | `config`, `toolchain`, `sdk`, `core.diskFull` |
 | 5 | Credentials and accounts | `secrets`, `account`, `gsa`, `anisette` |
-| 6 | Device state | `device` |
+| 6 | Device state | `device`; `app` except `app.launchFailed`; `screen`, `perf` [D 97] |
 | 7 | Build failed | `build`, `assets`, `flutter` (build), `xcode` |
 | 8 | Signing or provisioning failed | `sign`, `provision` |
 | 9 | Launch or debug failed | `app.launchFailed`, `debug`, `crash`, `flutter` (run) |
 | 10 | Publishing failed | `ship` |
-| 11 | Permission denied, declined, or approval needed | `perm` |
+| 11 | Permission denied, declined, or approval needed | `perm`; `mcp.httpUnauthorized`, `mcp.originRejected` [D 97] |
 | 12 | Daemon unavailable or version mismatch | `ipc` |
 | 130 | Cancelled (SIGINT) | `core.cancelled` |
 
+- Every code carries its exit status (`ErrorCode::exit_code`); russet-core's registry test checks that it is one of the values above and that every `*.notFound` exits 3. `xctest` (W32, W28) and `agents` (W20) have no codes yet; when their first codes land, a contract change adds those families to this table.
 - `russet run` and `russet debug` exit with these codes.
 - `--exit-code app` makes them exit with the app's status instead, with signals as 128 + signal [RD §20].
 - The lab harness uses its own convention (exit 3 = skipped environment) through `cargo xtask lab`, not the `russet` CLI.
@@ -2077,7 +2112,7 @@ The build plane writes an original → effective map; the signer rewrites entitl
 | idevice patch | `[patch.crates-io] idevice = { git = "<Russet's fork of jkcoxson/idevice>", rev = "<reviewed rev>" }` with a `deny.toml` `allow-git` entry. The rev is upstream `3854a5df4a5a6dee71ffce4d8befc2ea356a8065` plus one Russet commit with two fixes: (1) `CryptexdClient::install()` must send `request.persistence` (Xcode's 2) as `persistence`, not `request.nonce_persistence` (`src/services/cryptexd.rs:273-274` in 0.1.68 and at HEAD); (2) a cap on usbmuxd packet sizes: 3854a5d rejects a declared size below 17, but still allocates `vec![0; size - 16]` for any larger value, up to about 4 GiB (`idevice/src/usbmuxd/mod.rs:467-474`), so a declared size above 16 MiB must return `UsbmuxdError::BadCommand` before allocating, or QA's mock-usbmuxd fuzzing can exhaust memory [V lead, `~/russet-lab/idevice` at 3854a5d, 2026-10-11]. Upstream 3854a5d differs from crates.io 0.1.68 only in `src/usbmuxd/mod.rs` [V lead `diff -rq`, 2026-10-11]: the short-packet (`u32 - 16`) check, a `Send` listen stream and `Disconnected(u64)`. W4 creates the fork commit and files an upstream PR for each fix (DEV-23); the patch goes when a release carries all of them [D 22] | §20 |
 | tokio / tokio-util / serde_json / schemars / ts-rs | 1.53.2 / 0.7.20 / 1.0.152 / 1.2.2 / 12.0.1 | core §4.5 |
 | idevice / jktcp | `=0.1.68` (crates.io, patched as below) / `=0.1.7` [D 22] | device §5.1, QA V5 |
-| apple-codesign | 0.29.0, `default-features = false` | SIGN §3.1 |
+| apple-codesign / x509-certificate | 0.29.0, `default-features = false` / 0.24.0, the version apple-codesign uses, for `KeyInfoSigner` (re-exported as `russet_sign::KeyInfoSigner`; the two move together) [D 92] | SIGN §3.1 |
 | rmcp | 3.5.1 (MCP 2026-07-28 + 2025-11-25) | IDE V15 |
 | reqwest / rustls / ring | 0.13.5 / 0.23.x / 0.17.14 | §16.6 |
 | keyring-core + stores | 1.0.0; zbus-secret-service-keyring-store 1.0.1; windows-native-keyring-store 1.1.0 | core §4.5 |
@@ -2089,7 +2124,7 @@ The build plane writes an original → effective map; the signer rewrites entitl
 | Flutter / Dart | 3.47.7 / 3.13.5 | build §2 |
 | pymobiledevice3 (optional, user-installed) | ≥ 11.26.0 | device §12 |
 | xtool (optional build backend; xtool bundles read in place; the CI template's SwiftPM project generator, hash-pinned) | 1.21.0 | core §10.1, §14.7 |
-| SDK import codecs | `rsa` 0.9.10 (verify only), `liblzma` 0.4.8 or `lzma-rust2` 0.21.0, `junction` 2.1.0 (Windows), `udif` 0.4.2 / `hfsplus` 0.4.0 (optional) | §5.1 `russet-xar` |
+| SDK import codecs | `rsa` 0.9.10 (verify only), `lzma-rust2` 0.21.0 (`default-features = false`, features `std` and `xz`; every XZ stream in the workspace, never `liblzma` [D 95]), `junction` 2.1.0 (Windows), `udif` 0.4.2 / `hfsplus` 0.4.0 (optional) | §5.1 `russet-xar` |
 | GitHub Actions | runner labels and action SHAs in `pins/stable.toml` `[ci.github]` | §14.7 |
 
 ---
@@ -2209,6 +2244,10 @@ Wave 1 fallback: `--attach-mode legacy-async` runs the M1-verified async connect
   - Templates, fixtures, sample apps and any code injected into user apps (Runner scene delegate, probes) are **0BSD**; the Flutter Runner keeps BSD-3 [QA §9 L9].
 - **cargo-deny allowlist:** MIT, MIT-0, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2/3-Clause, ISC, Zlib, 0BSD, CC0-1.0, Unicode-3.0, BSL-1.0, MPL-2.0, GPL-3.0-or-later.
   - LGPL and anything else only as a per-crate exception after written review [D 48].
+  - **Approved per-crate exceptions** (W1's written review in `deny.toml`; lead sign-off at W1's merge, 2026-10-11) [D 99]. All three are permissive, not copyleft, and compatible with distributing a GPL-3.0 work; `about.toml` accepts them, and W26's notices list them with their texts:
+    - `BlueOak-1.0.0` for `minicbor` and `minicbor-derive`, unconditional dependencies of apple-codesign 0.29.0;
+    - `CDLA-Permissive-2.0` for `webpki-roots`, Mozilla's root list as data, pulled in by idevice, by hyper-rustls under both reqwest majors and by tokio-tungstenite;
+    - `bzip2-1.0.6` for `libbz2-rs-sys`, the default backend of bzip2 0.6, which `udif` 0.4.2 (russet-xar's optional UDIF reader) needs. It also counts as permissive for layer F (`.config/workstreams.toml` `[layer-rules] permissive`); dropping `udif` and reading UDIF in russet-xar itself would remove it.
   - AGPL code (xcross ≥ 2.0, StikDebug) and unlicensed repositories (android-loader, anisette-v3-server) are reference only, never code.
   - pymobiledevice3 (GPL-3.0) and netmuxd (LGPL-2.1) run only as user-installed subprocesses.
 - **REUSE.** Every source file has SPDX headers; `REUSE.toml` covers generated files; `reuse lint` runs in CI.
@@ -2332,6 +2371,16 @@ Each row names the disagreeing documents, the decision, and the reason. Rows are
 | 89 | DDI mount attribution | §9.5 attributed a mounted DDI by cryptex version and product build, which cannot tell the Wave-1 directory copy from an import of the same Xcode; `device.prepare` is a no-op while a DDI is mounted, so DC-29 could not show "mounted from the import" | Every mount Russet performs writes a `MountRecord` (`state/devices/<udid>/ddi.json`), and status reports the recorded source. DC-29 needs a Q33-approved reboot or an owner-approved `ddi mount --imported --force`; otherwise it records "import verified, mount not re-exercised", which Wave-2 gate item 9 accepts explicitly | Evidence must say which bytes were mounted, and must not require a device change the owner has not approved |
 | 90 | Storyboard card order and B21a scope | PLAN v1.1: W28's DC-24 needed W28b's B21b, while W28b's NetNewsWire acceptance needed W28's `russet-swb`; W21b's corpus and DC-32 include Flutter's `Main.storyboard` (custom class `FlutterViewController`), which build §5.4 assigned to B21b | W28b (B21b; DC-33 without NetNewsWire) → W28 (DC-24) → W28c (B21c and NetNewsWire, DC-35). B21a also compiles a single-scene main storyboard whose controller has an ObjC custom class (no module mangling) | No card waits on a later card; the acceptance of each card is reachable with its own scope |
 | 91 | Public-repository hygiene | Review round 2: decisions.md (lines 23–43) and the committed round-1 critique describe the private track's approach; the main repository goes public at G1 | Owner question Q34 (move those decision details to the private repository's own log, leaving one neutral line); the two strings in the round-1 critique are redacted; `cargo xtask guard public-terms` with hashed terms (§19); a going-public checklist (PLAN §5.9) that also covers the git history, whose earlier commits contain the same text | The approach must stay private until its legal review; deleting a file does not remove it from history |
+| 92 | `KeyInfoSigner` path | §5.3 and SIGN §6.3: `apple_codesign::KeyInfoSigner`; W1: apple-codesign 0.29.0 imports the trait privately from x509-certificate 0.24.0 and never re-exports it | russet-sign depends on x509-certificate 0.24.0, the version apple-codesign uses, and re-exports the trait as `russet_sign::KeyInfoSigner`. `CodeSigningIdentity::signer` returns `&dyn russet_sign::KeyInfoSigner`, and russet-account names the trait through that re-export (apple-codesign's `cryptography::InMemoryPrivateKey` implements it). The two pins move together (§16.7) | The §5.3 path does not compile; a second x509-certificate version would bring a second, incompatible trait |
+| 93 | Router bounds and `MethodInfo` | §5.3: `Router::request::<M>` and `notification::<N>` over `Method` and `NotificationMethod`, and `registry() -> &[MethodInfo]` with no shape; W1: the router, `capabilities.methods`, the schema export and the permission engine need a value per method, and the per-call class of [D 66] could not be reached through a type-erased path | `rpc_method!` also implements `russet_protocol::RpcMethod` (`const INFO: MethodInfo`), and `rpc_notification!` implements `RpcNotification` (`const INFO: NotificationInfo`); `Router::request` and `notification` take those bounds. `MethodInfo` carries the ceiling (`permission`), `dynamic_permission` (set by `permission_fn`), `permission_of` (`Method::permission` over raw params: static rows answer the ceiling without reading them, dynamic rows deserialize them or fail with `core.invalidArgument`), `confirm`, `long_running` and the DTOs' schema and TypeScript hooks. `Authorizer::decide` takes the `MethodInfo`, the raw params, the `ConnInfo` and the `Ownership` queries (§5.3) | One registry drives routing, permissions, `capabilities`, schemas and the MCP mapping; the engine needs no generic code per method, and W2 never edits the `registry.rs` seam |
+| 94 | Areas with several top-level commands | §5.3: one `command()` per area module; §8.7: one area owns several top-level commands (`app`/`install`/`launch`, `run`/`sessions`/`stop`/`relaunch`/`reload`, `screenshot`/`mirror`, `tap`/`swipe`/`button`/`type`, …) | The area returns `cmd::group(area, [commands…])`, a wrapper with a hidden marker argument whose subcommands become top-level commands. The seam's `cmd::run` routes each top-level name to its area and passes the root `ArgMatches`, so `m.subcommand()` names the command in both cases; `cmd::owners()` lists the (command, area) pairs | One file per area (PLAN §3) and the flat tree of §8.7, without a seam edit when an area adds a command |
+| 95 | XZ decoder | §5.1 and §16.7: russet-xar on `liblzma` 0.4 (static), or `lzma-rust2` 0.21 if W16b's benchmark allows; core §4.2 and §4.5: `liblzma` 0.4.8 for russet-toolchain; W1: `liblzma-sys` and apple-codesign's `lzma-sys` (through apple-xar and xz2) both declare `links = "lzma"`, and Cargo allows one package per `links` value in a dependency graph, which spans the whole workspace | `lzma-rust2` 0.21.0 (pure Rust; features `std` and `xz`) for every XZ stream in the workspace: russet-xar's pbzx chunks, and russet-toolchain's `.tar.xz` downloads such as the Flutter SDK. W16b still measures it against the §16.3 budget; if it misses, the native fallback is the `xz2` 0.1.7 / `lzma-sys` 0.1.20 pair that apple-codesign already pulls in (no second `links = "lzma"`), through a contract change | liblzma cannot resolve in the same workspace as apple-codesign 0.29.0; a pure-Rust decoder also cross-builds without a C build of XZ |
+| 96 | `JobEvent` artifact field | §9.2: the `artifact` kind has a field `kind: app\|ipa\|dsym\|archive\|report`, while `JobEventKind` is internally tagged with `kind` (§5.2) | The field is `artifactKind`, with the same values. No internally tagged wire enum has a field named after its tag (§5.2) | serde_derive rejects the clash at compile time ("variant field name `kind` conflicts with internal tag"), and the JSON would carry two `kind` keys |
+| 97 | Exit codes and code sub-ranges | §13.4 had no row for `screen`, `perf`, `mcp`, most `core` codes, `app.notInstalled` or `app.installFailed`; §13.2 gave `assets`, `flutter` (build) and `xcode` one range 4100–4199, and `gsa` and `anisette` one range 5250–5299, while each family has its own file | Exit 6 (device state) for `screen`, `perf` and every `app` code except `app.launchFailed` (9); exit 1 for the `core` codes without a row (`core.invalidArgument` is a daemon-side validation error; clap's usage errors stay 2) and for `mcp.toolNotFound`; exit 11 for `mcp.httpUnauthorized` and `mcp.originRejected`, like `perm.authFailed`. Sub-ranges, from the codes §13.3 already assigns: `assets` 4100–4119, `flutter` (build) 4120–4149, `xcode` 4150–4199, `gsa` 5250–5269, `anisette` 5270–5299 | Every code needs one exit status and every family one range for the registry tests |
+| 98 | `doctor.run`'s ceiling and the MCP tier | §5.3: MCP listings use `Method::PERMISSION`; §8.1: `doctor.run` is `read (fix → system)`, so its ceiling is `system`, which §11.3 never exposes; §11.4: `doctor_run` is a tier-0 tool | `doctor.run` keeps `PERMISSION = system` and resolves each call through `permission_fn` (`MethodInfo.dynamic_permission`). An MCP tool's tier is the class of the calls it makes, so `doctor_run`, which never sends `fix`, is tier 0. The daemon still resolves every call, and `fix` from an MCP client is a `system` call that is denied (§11.3, §11.5) | A fail-closed ceiling for docs and the F0 stubs, plus the read-only doctor that agents call first |
+| 99 | Licence exceptions | §19 and [D 48]: anything outside the allowlist only as a per-crate exception after written review; W1's `cargo deny` runs over every feature found three such licences in the real graph | Approved at W1's merge (2026-10-11): `BlueOak-1.0.0` (`minicbor`, `minicbor-derive`, from apple-codesign 0.29.0), `CDLA-Permissive-2.0` (`webpki-roots`, from idevice, hyper-rustls and tokio-tungstenite) and `bzip2-1.0.6` (`libbz2-rs-sys`, from bzip2 0.6 under udif 0.4.2), the last one also permissive for layer F (§19) | All three are permissive and compatible with GPL-3.0; avoiding them would mean dropping apple-codesign, the WebPKI roots or udif |
+| 100 | Doctor checks of layer-L2 crates | §5.3: "every domain crate exports `checks()`" over `russet_doctor::Check`; §5.2: L2 crates use only L0–L1 (plus toolchain → config), so russet-config, russet-secrets, russet-toolchain and russet-agent-config cannot name the trait | The L3 domain crates and russet-mcp export `checks()`. The host checks live in russet-doctor, the daemon's in `russetd::daemon` (W2), the configuration, secrets and toolchain checks in `crates/russetd/src/handlers/doctor.rs` (W3), and the MCP registration checks in russet-mcp; `doctor_registry.rs` lists them all | Keeps L2 free of a doctor edge; russetd may depend on everything |
+| 101 | The `flutter` namespace and modules without methods | §8 splits `flutter.*` between build (§8.3; W17, W24) and run/debug (§8.5; W18), but §5.3 had one module per namespace and §6.1 split only the handlers; §9.3–§9.5 named no module for `ui.*`, `ide.*` or the shared wire types | Split by owner wherever the namespace has a file: `flutter_build.rs` and `flutter_run.rs` in russet-protocol and in russetd's handlers, and the code families `flutter_build` (4120–4149) and `flutter_run` (6150–6199), both with the prefix `flutter`; in russet-cli, W17's `cmd/flutter.rs` owns `russet flutter` and calls W18's `cmd/flutter_run.rs`. In russet-protocol, `common` (W2) holds the §9.5 types, `ui` (W2) the §9.3 requests and `ui.showMessage`, and `ide` (W11) the §9.4 requests; `xcode` and `xctest` (W28) stay empty until W28 adds methods (§5.3) | Disjoint paths per card (PLAN §3) without renaming wire methods |
 
 ### 20.1 Superseded area-doc fields
 
@@ -2377,6 +2426,8 @@ The area docs keep their original text for its rationale; where they disagree wi
 | RD §17.2 | `SessionState` with `Detached` as a state | the `SessionState` wire values and `SessionSummary.debugger`/`lease` of §9.5 [D 84] |
 | device §6.3 | `Dir` as "any Restore-style dir"; source attribution by cryptex version and product build | `Dir` is the DDI root (`<dir>/Restore` is loaded); attribution by `MountRecord` (§5.3, §9.5) [D 82, D 89] |
 | QA §3.9.3, E2E-04 | the breakpoint on `@State var counter = 42`; `counter == 42`; "after `continue`" | the `RUSSET_PROBE_BREAK` marker line in `ContentView.body`; `probeValue == 42`; after the batch detaches (PLAN §4.10) [D 84] |
+| core §4.2 (`russet-toolchain` dependencies), §4.5 (archives and formats) | `liblzma` 0.4.8 | `lzma-rust2` 0.21.0 for every XZ stream (§16.7) [D 95] |
+| SIGN §6.3 `LoadedIdentity` | implements `apple_codesign::KeyInfoSigner` | implements `russet_sign::KeyInfoSigner`, x509-certificate 0.24.0's trait re-exported by russet-sign (§5.3) [D 92] |
 
 ---
 
@@ -2448,6 +2499,13 @@ Each question has a **default** that the plan uses until you answer, and the wor
 - `~/russet-lab/idevice` at 3854a5d: `idevice/src/services/cryptexd/assets.rs` (`Cryptex1Assets::load(restore_dir)` reads `restore_dir.join("BuildManifest.plist")`); `idevice/src/usbmuxd/mod.rs:467-474` (sizes below 17 rejected, larger sizes allocated unchecked) [D 22, D 82].
 - Swift 6.4's LLDB 21.0.0 on the dev box, host processes only: `lldb -b -o 'process launch --stop-at-entry' -o 'process continue' -- /usr/bin/sleep 4` took 6.2 s (it returned only after the exit); the same with `process detach` returned after 7.2 s while `sleep 20` kept running [D 84].
 - The iPhone13,2 27.0 (24A437) `BuildManifest.plist` (re-read from the earlier `ipsw extract --remote` output): identities 0–3 (Customer Erase/Upgrade, d53gap and d53pap) list `Firmware/txm.iphoneos.release.im4p`; identities 4–5 (Research Customer Erase/Upgrade, d53gap) list `Firmware/txm.iphoneos.research.im4p`; all six list `Firmware/sptm.t8101.release.im4p`.
+
+**W1 contract notes (2026-10-11; D 92–D 101), checked against `main` at the W1 merge (a82eb50):**
+- `crates/russet-sign/src/lib.rs`, `crates/russet-protocol/src/{lib,registry,macros,doctor}.rs`, `crates/russet-ipc/src/lib.rs`, `crates/russet-core/src/{rpc,progress}.rs`, `crates/russet-core/src/error/codes/*.rs`, `crates/russet-cli/src/cmd/{mod,app,flutter,flutter_run}.rs`, `crates/russetd/src/{doctor_registry.rs,handlers/doctor.rs}`, `deny.toml`, `about.toml`, `.config/workstreams.toml`.
+- `~/.cargo/registry/src/*/apple-codesign-0.29.0/src/lib.rs` re-exports no `KeyInfoSigner` (its modules import it from `x509_certificate`); `x509-certificate-0.24.0/src/lib.rs`: `pub use signing::{InMemorySigningKeyPair, KeyInfoSigner, Sign, Signature}` [D 92].
+- `links = "lzma"` in `lzma-sys-0.1.20/Cargo.toml` and in the crates.io index entries of `liblzma-sys` 0.4.7–0.4.9 (`liblzma` 0.4.8 needs `liblzma-sys` ^0.4.8); `cargo tree -i lzma-sys`: apple-codesign → apple-xar → xz2 → lzma-sys [D 95].
+- `serde_derive-1.0.229/src/internals/check.rs`: "variant field name `{}` conflicts with internal tag" [D 96].
+- `cargo tree -i` over every feature and target: `minicbor`/`minicbor-derive` ← apple-codesign; `webpki-roots` 1.0.9 ← idevice, hyper-rustls (reqwest 0.12.28 and 0.13.5); 0.26.11 ← tokio-tungstenite; `libbz2-rs-sys` ← bzip2 0.6.1 ← udif 0.4.2 ← russet-xar [D 99].
 
 **External specifications and projects:**
 
