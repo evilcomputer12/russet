@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Copy to .envrc (direnv) or source it in each shell of this worktree (PLAN §0 rules 4 and 7, AGENTS.md).
+
+# ---- Lane D (default) -----------------------------------------------------------------------------------
+# One daemon per worktree: socket, locks, state, config, caches and the keyring entry all move here.
+export RUSSET_HOME="$PWD/.russet-dev"
+# Never the phone. `none` never constructs a live connector (ARCHITECTURE §14.9); switch to the scripted backend
+# once W8 lands crates/russet-testkit/scenarios/default.toml:
+export RUSSET_DEVICE_BACKEND=none
+# export RUSSET_DEVICE_BACKEND="scripted:$PWD/crates/russet-testkit/scenarios/default.toml"
+# The cargo target slot from your card: `a` at tier AMBER for everyone; `b` from tier GREEN for its cards. Slots
+# are shared between worktrees; the worktree guard in .cargo/config.toml makes cargo rebuild the workspace crates
+# after another worktree used the slot (AGENTS.md §6). Run cargo from inside this worktree.
+export CARGO_TARGET_DIR="$HOME/.cache/russet-dev/target-a"
+export CARGO_BUILD_JOBS=6
+export CARGO_INCREMENTAL=0
+
+# ---- Lane A (the device lane only; one agent at a time) -------------------------------------------------
+# export RUSSET_LANE=A
+# export RUSSET_HOME="$HOME/russet-lab/home-A"   # persistent across lane-A cards (DDI dir, accounts, ledger)
+# unset RUSSET_DEVICE_BACKEND                      # the `live` backend, under the host-wide live-device lock
+# export CARGO_TARGET_DIR="$HOME/.cache/russet-dev/target-b"   # slot b from tier GREEN; slot a at AMBER

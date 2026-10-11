@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# REUSE (core §18, ARCHITECTURE §19): every source file carries SPDX headers; this file covers what cannot carry
+# one (generated files, lock files, documents written before the headers existed). `reuse lint` runs in CI (W8).
+version = 1
+SPDX-PackageName = "russet"
+SPDX-PackageDownloadLocation = "https://github.com/evilcomputer12/russet"
+
+[[annotations]]
+path = ["Cargo.lock"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+# Generated, committed outputs (PLAN §0 rule 2): regenerate, never hand-edit.
+path = ["schemas/**", "extension/src/generated/**", "docs/reference/**", "pins/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+# Project documents and the pre-W1 skeleton.
+path = [
+    "README.md",
+    "NOTICE.md",
+    "LICENSE",
+    ".gitignore",
+    "docs/**",
+    "demo/**",
+    "crates/*/README.md",
+    "tests/lab/README.md",
+    "xtask/README.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+# The READMEs of the permissive layer-F crates follow their crate's licence.
+path = [
+    "crates/russet-plist/README.md",
+    "crates/russet-macho/README.md",
+    "crates/russet-ipa/README.md",
+    "crates/russet-car/README.md",
+    "crates/russet-assets/README.md",
+    "crates/russet-xcstrings/README.md",
+    "crates/russet-ib/README.md",
+    "crates/russet-xcodeproj/README.md",
+    "crates/russet-pif/README.md",
+    "crates/russet-xar/README.md",
+    "crates/russet-tool/README.md",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["crates/russet-gdbremote/README.md"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "MIT OR Apache-2.0"

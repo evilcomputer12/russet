@@ -1,0 +1,195 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Seam file: lead-only after W1 merges (PLAN §0 rule 2). Crate layout and layering: ARCHITECTURE §4–§5.
+# A card adds a new third-party dependency to its own crate's Cargo.toml (version from ARCHITECTURE §16.7
+# or a crates.io-checked version, licence-checked with `cargo deny check licenses`); the lead hoists it here.
+
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask", "tests/lab"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99" # ARCHITECTURE §16.7 [D 70]; rust-toolchain.toml names `stable`, never `1.99.0`
+license = "GPL-3.0-or-later"
+repository = "https://github.com/evilcomputer12/russet"
+authors = ["Russet contributors"]
+publish = false
+
+[workspace.dependencies]
+# ---- Russet crates (ARCHITECTURE §5.1) --------------------------------------------------------------
+# F: format/protocol libraries (MIT; russet-gdbremote MIT OR Apache-2.0)
+russet-plist = { path = "crates/russet-plist" }
+russet-macho = { path = "crates/russet-macho" }
+russet-ipa = { path = "crates/russet-ipa" }
+russet-gdbremote = { path = "crates/russet-gdbremote" }
+russet-car = { path = "crates/russet-car" }
+russet-assets = { path = "crates/russet-assets" }
+russet-xcstrings = { path = "crates/russet-xcstrings" }
+russet-ib = { path = "crates/russet-ib" }
+russet-xcodeproj = { path = "crates/russet-xcodeproj" }
+russet-pif = { path = "crates/russet-pif" }
+russet-xar = { path = "crates/russet-xar" }
+# L0–L2
+russet-core = { path = "crates/russet-core" }
+russet-protocol = { path = "crates/russet-protocol" }
+russet-ipc = { path = "crates/russet-ipc" }
+russet-config = { path = "crates/russet-config" }
+russet-secrets = { path = "crates/russet-secrets" }
+russet-toolchain = { path = "crates/russet-toolchain" }
+russet-doctor = { path = "crates/russet-doctor" }
+russet-agent-config = { path = "crates/russet-agent-config" }
+# L3: domain crates
+russet-device = { path = "crates/russet-device" }
+russet-sdk = { path = "crates/russet-sdk" }
+russet-build = { path = "crates/russet-build" }
+russet-sign = { path = "crates/russet-sign" }
+russet-asc = { path = "crates/russet-asc" }
+russet-account = { path = "crates/russet-account" }
+russet-gsa = { path = "crates/russet-gsa" }
+russet-anisette = { path = "crates/russet-anisette" }
+russet-debug = { path = "crates/russet-debug" }
+russet-ship = { path = "crates/russet-ship" }
+russet-xctest = { path = "crates/russet-xctest" }
+# L4
+russetd = { path = "crates/russetd" }
+russet-mcp = { path = "crates/russet-mcp" }
+# dev
+russet-testkit = { path = "crates/russet-testkit" }
+russet-golden = { path = "crates/russet-golden" }
+russet-oracle = { path = "crates/russet-oracle" }
+
+# ---- Third-party: ARCHITECTURE §16.7 pins; other versions from core §4.5, checked on crates.io --------
+# Async runtime and utilities
+tokio = "1.53.2"
+tokio-util = "0.7.20"
+futures = "0.3.34"
+async-trait = "0.1.92"
+bytes = "1.12.1"
+# Serialization, schemas, generated TypeScript
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.152"
+schemars = "1.2.2"
+ts-rs = "12.0.1"
+# Errors
+thiserror = "2.0.21"
+anyhow = "1.0.104" # xtask, tests and russet-mcp's serve_stdio signature only (core §13.1)
+# Paths, time, ids
+camino = "1.2.6"
+url = "2.5.8"
+time = "0.3.55"
+uuid = "1.28.0"
+# Processes and files
+process-wrap = { version = "10.0.1", default-features = false }
+fs4 = "1.1.0"
+# Config
+toml = "1.1.8"
+toml_edit = "0.25.17"
+notify = "8.2.0"
+jsonc-parser = "0.34.0" # comment-preserving JSON(C) edits for agent registrations (russet-agent-config, IDE §6.6)
+# CLI
+clap = "4.6.7"
+clap_complete = "4.6.11"
+clap_mangen = "0.3.3"
+comfy-table = "8.0.1"
+indicatif = "0.18.6"
+anstream = "1.0.0"
+# Logging (core §12)
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+tracing-appender = "0.2.5"
+tracing-journald = "0.3.2"
+# The daemon's web endpoint (ARCHITECTURE §6.6): routes mirror (W10) and mcp (W20)
+axum = { version = "0.8.9", default-features = false }
+# Secrets and crypto
+secrecy = "0.10.3"
+zeroize = "1.9.1"
+keyring-core = "1.0.0"
+zbus-secret-service-keyring-store = { version = "1.0.1", default-features = false, features = ["rt-tokio-crypto-rust"] }
+windows-native-keyring-store = "1.1.0"
+chacha20poly1305 = "0.11.0"
+argon2 = "0.6.0"
+sha2 = "0.11.0"
+minisign-verify = "0.3.0"
+pgp = { version = "0.21.0", default-features = false }
+# HTTP and TLS: one rustls provider, `ring` (ARCHITECTURE §16.6 [D 21]); aws-lc, openssl and native-tls are banned
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+ring = "0.17.14"
+# Archives and formats
+tar = "0.4.46"
+zstd = "0.14.2"
+# russet-xar uses lzma-rust2 (ARCHITECTURE §5.1's alternative): liblzma 0.4.8 cannot coexist with apple-codesign
+# 0.29.0, whose apple-xar → xz2 → lzma-sys also declares `links = "lzma"` (found by W1; W16b benchmarks it).
+lzma-rust2 = { version = "0.21.0", default-features = false, features = ["std", "xz"] }
+flate2 = "1.1.10"
+zip = { version = "9.0.1", default-features = false, features = ["deflate"] }
+plist = "1.10.1"
+goblin = "0.10.7"
+quick-xml = "0.42.0"
+sha1 = "0.10.6"
+# Device plane: crates.io idevice with `ring` and the feature list of device.md §5.1; the reviewed
+# [patch.crates-io] fork rev lands with W4 [D 22]
+idevice = { version = "=0.1.68", default-features = false, features = [
+    "ring", "usbmuxd", "tcp", "pair", "mdns", "heartbeat",
+    "core_device_proxy", "tunnel_tcp_stack", "rsd", "xpc", "remote_pairing",
+    "core_device", "display_stream", "debug_proxy",
+    "dvt", "sysmontap", "device_info", "energy_monitor", "network_monitor", "graphics",
+    "condition_inducer", "location_simulation",
+    "afc", "house_arrest", "installation_proxy", "crashreportcopymobile", "syslog_relay",
+    "mobile_image_mounter", "cryptexd", "tss", "amfi", "misagent", "springboardservices",
+    "notification_proxy", "diagnostics_relay", "xctest",
+] }
+jktcp = "=0.1.7"
+# Signing and accounts
+apple-codesign = { version = "0.29.0", default-features = false }
+x509-certificate = "0.24.0" # apple-codesign 0.29.0's KeyInfoSigner trait lives here (not re-exported)
+p256 = "0.14.0"
+rsa = "0.9.10"
+x509-cert = "0.2.5"
+cms = "0.2.3"
+p12-keystore = "0.4.0"
+num-bigint = "0.4.6"
+aes-gcm = "0.11.1"
+tokio-tungstenite = { version = "0.30.0", default-features = false }
+# SDK import (russet-xar, W16b): optional readers pinned exactly (ARCHITECTURE §5.1)
+udif = "=0.4.2"
+hfsplus = "=0.4.0"
+# Debugging, resources, MCP
+symbolic = { version = "13.9.0", default-features = false }
+image = { version = "0.25.10", default-features = false }
+resvg = { version = "0.48.1", default-features = false }
+lzfse_rust = "0.2.1" # pure Rust LZFSE for CAR renditions (russet-car, russet-assets); already in the graph via udif
+rmcp = { version = "3.5.1", default-features = false }
+# Platform
+windows-sys = "0.61.2"
+# xtask and tests
+cargo_metadata = "0.23.1"
+globset = "0.4.20"
+tempfile = "3.27.0"
+
+# The idevice patch of ARCHITECTURE §16.7 (upstream 3854a5d plus one reviewed Russet commit) is a lead edit
+# once W4's fork commit exists; deny.toml then gets the matching `allow-git` entry:
+# [patch.crates-io]
+# idevice = { git = "<Russet's fork of jkcoxson/idevice>", rev = "<reviewed rev>" }
+
+[workspace.lints.rust]
+unsafe_code = "deny" # #[allow] only with a // SAFETY: note (russet-ipc pipe DACL, russet-core::proc, russet-secrets)
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny" # tests may opt out with #[allow]
+dbg_macro = "deny"
+print_stdout = "deny" # only russet-cli's renderer and xtask print (module- or crate-level allow)
+
+[profile.dev]
+debug = "line-tables-only" # PLAN §0 rule 7: roughly halves target/
+incremental = false        # CARGO_INCREMENTAL=0 locally too [D 81]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+debug = "line-tables-only" # symbolized panics; full debuginfo ships as split release assets
+panic = "unwind"           # the daemon survives task panics (core §14)

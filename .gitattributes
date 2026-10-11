@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+
+# LF everywhere (QA-01).
+* text=auto eol=lf
+
+# Binary fixtures and recorded traces.
+*.png binary
+*.jpg binary
+*.zst binary
+*.rdt.jsonl.zst binary
+
+# Generated files: regenerate on conflict, never hand-merge (PLAN §0 rule 2).
+Cargo.lock linguist-generated=true
+schemas/** linguist-generated=true
+extension/src/generated/** linguist-generated=true
+docs/reference/** linguist-generated=true
+pins/** linguist-generated=true

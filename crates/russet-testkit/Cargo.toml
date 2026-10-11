@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-testkit"
+description = "Scripted, replay and recording connectors, mock usbmuxd, cassettes, HTTP fakes, temp-home daemon fixture, RDT traces"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+russet-core.workspace = true

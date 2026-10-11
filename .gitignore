@@ -19,7 +19,12 @@ dist/
 .build/
 xtool/
 .russet/
+# Per-worktree daemon home (RUSSET_HOME, PLAN §0 rule 4)
+.russet-dev/
 russet.local.toml
+
+# direnv: copy .envrc.example to .envrc
+.envrc
 
 # Editors / OS
 .DS_Store

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# ARCHITECTURE §16.7 [D 70]: name the installed `stable` toolchain (rustc 1.99.0 on the dev box), never
+# `1.99.0`, which would make rustup 1.29.1 auto-install a second copy (0.6-1.5 GiB). The workspace sets
+# `rust-version = "1.99"`; CI pins `RUSTUP_TOOLCHAIN=1.99.0`.
+[toolchain]
+channel = "stable"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

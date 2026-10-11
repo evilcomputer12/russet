@@ -1,0 +1,761 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# The machine-readable copy of PLAN §3 (who owns which paths) and ARCHITECTURE §5.1–§5.2 (the layer of every
+# workspace package, binaries included, and the layering rules). Read by `cargo xtask check-layers` and
+# `cargo xtask check-paths --ws WNN`. Paths are repository-relative globs (`*` stays inside one directory, `**`
+# crosses directories, `{a,b}` alternates). Within a wave, owned paths are disjoint (`cargo test -p xtask` checks
+# it), except between a card and the card it is `after` (a sequential handover inside the wave, PLAN §2); across
+# waves a path changes owner after the earlier card merged (PLAN §3). Lead-owned after W1 merges.
+
+schema = 1
+
+[seams]
+# Lead-only after W1 merges (PLAN §0 rule 2). `extension/package.json` joins this list once W14 merges it.
+lead-only = [
+    "Cargo.toml",
+    "crates/russet-protocol/Cargo.toml",
+    "crates/russetd/Cargo.toml",
+    "crates/russet-cli/Cargo.toml",
+    "crates/russet-protocol/src/{lib,registry,macros}.rs",
+    "crates/russetd/src/handlers/mod.rs",
+    "crates/russetd/src/doctor_registry.rs",
+    "crates/russet-cli/src/cmd/mod.rs",
+    "crates/russet-core/src/error/codes/mod.rs",
+    "xtask/src/main.rs",
+    "xtask/Cargo.toml",
+    "docs/ARCHITECTURE.md",
+]
+
+[generated]
+# PLAN §0 rule 2: regenerate (`cargo xtask schema`; cargo writes Cargo.lock) and commit, never hand-merge. Every card
+# that changes their inputs commits them, so check-paths reports them as notes, never as warnings.
+paths = ["Cargo.lock", "schemas/**", "extension/src/generated/**", "docs/reference/**"]
+
+[layers]
+# ARCHITECTURE §5.1 "Layer" column; binaries (russet-tool, russet-adi-host, russet-cli's `russet`) included.
+"russet-plist" = "F"
+"russet-macho" = "F"
+"russet-ipa" = "F"
+"russet-gdbremote" = "F"
+"russet-car" = "F"
+"russet-assets" = "F"
+"russet-xcstrings" = "F"
+"russet-ib" = "F"
+"russet-xcodeproj" = "F"
+"russet-pif" = "F"
+"russet-xar" = "F"
+"russet-tool" = "F"
+"russet-core" = "L0"
+"russet-protocol" = "L1"
+"russet-ipc" = "L2"
+"russet-config" = "L2"
+"russet-secrets" = "L2"
+"russet-toolchain" = "L2"
+"russet-doctor" = "L2"
+"russet-agent-config" = "L2"
+"russet-device" = "L3"
+"russet-sdk" = "L3"
+"russet-build" = "L3"
+"russet-sign" = "L3"
+"russet-asc" = "L3"
+"russet-account" = "L3"
+"russet-gsa" = "L3"
+"russet-anisette" = "L3"
+"russet-adi-host" = "L3"
+"russet-debug" = "L3"
+"russet-ship" = "L3"
+"russet-xctest" = "L3"
+"russetd" = "L4"
+"russet-mcp" = "L4"
+"russet-cli" = "L4"
+"russet-testkit" = "dev"
+"russet-golden" = "dev"
+"russet-oracle" = "dev"
+"russet-lab" = "dev"
+"xtask" = "dev"
+
+[layer-rules]
+# SPDX ids that count as permissive for layer F and its dependencies (ARCHITECTURE §5.2, §19). `bzip2-1.0.6`
+# (libbz2-rs-sys under russet-xar's optional udif reader) is a reviewed deny.toml exception awaiting the lead's
+# sign-off [D 48]; drop it here if the lead drops udif instead.
+permissive = [
+    "MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "CC0-1.0",
+    "Unicode-3.0", "Unicode-DFS-2016", "BSL-1.0", "Unlicense", "bzip2-1.0.6",
+]
+# No L3 crate uses the transport (ARCHITECTURE §5.2).
+l3-never = ["russet-ipc"]
+
+[layer-rules.l2-may-use]
+# "L2 → L0–L1 (toolchain → config)": the only L2 → L2 edge.
+"russet-toolchain" = ["russet-config"]
+
+[layer-rules.l3-may-use]
+# ARCHITECTURE §5.2 writes "A → B" for "B may depend on A"; this table lists, per dependent, the L3 crates it
+# may use directly. check-layers takes the transitive closure. (`toolchain → sdk` and `ipa → device` name crates
+# of layers L2 and F, which L3 may use anyway.)
+"russet-build" = ["russet-sdk"]
+"russet-sign" = ["russet-build"]
+"russet-account" = ["russet-sign", "russet-asc", "russet-gsa"]
+"russet-gsa" = ["russet-asc", "russet-anisette"]
+"russet-ship" = ["russet-sign", "russet-account", "russet-asc"]
+"russet-debug" = ["russet-device", "russet-build"]
+"russet-xctest" = ["russet-device"]
+
+[layer-rules.only]
+# Packages that may use only these layers and packages (ARCHITECTURE §3.1, §5.2).
+"russet-tool" = ["F"]
+"russet-adi-host" = ["F", "L0"]
+"russet-mcp" = ["L0", "L1", "L2"]
+"russet-cli" = ["L0", "L1", "L2", "russetd", "russet-agent-config", "russet-mcp"]
+
+[ws.W1]
+# Wave 1, first and alone: W1 writes the first version of every crate and pre-created module file (PLAN §3). `bootstrap` keeps it out of other cards' owner lists.
+title = "Bootstrap: workspace, seams and contracts"
+wave = "1"
+lane = "D"
+bootstrap = true
+owns = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    "rustfmt.toml",
+    ".cargo/**",
+    "deny.toml",
+    "about.toml",
+    "REUSE.toml",
+    "LICENSES/**",
+    "typos.toml",
+    ".gitattributes",
+    ".editorconfig",
+    ".gitignore",
+    ".config/**",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".envrc.example",
+    "crates/**",
+    "tests/lab/**",
+    "xtask/**",
+]
+
+[ws.W2]
+title = "Core runtime: IPC, daemon, CLI framework, permissions, approvals"
+wave = "1"
+lane = "D"
+owns = [
+    "crates/russet-core/**",
+    "crates/russet-ipc/**",
+    "crates/russetd/src/{lib.rs,ctx.rs}",
+    "crates/russetd/src/{daemon,jobs,leases,subs,perms,approvals,audit,state}/**",
+    "crates/russetd/src/web/{mod.rs,server.rs}",
+    "crates/russet-cli/src/{main.rs,lib.rs,global.rs,spawn.rs}",
+    "crates/russet-cli/src/render/**",
+    "xtask/src/schema.rs",
+    "schemas/rpc/**",
+    "extension/src/generated/**",
+    "docs/reference/rpc.md",
+    "crates/russetd/src/handlers/{initialize,daemon,subscription,lease,job,approval,audit}.rs",
+    "crates/russetd/tests/{initialize,daemon,subscription,lease,job,approval,audit}_*.rs",
+    "crates/russet-protocol/src/{initialize,daemon,subscription,lease,job,approval,audit,ui,common}.rs",
+    "crates/russet-protocol/tests/{initialize,daemon,subscription,lease,job,approval,audit,ui,common}_*.rs",
+    "crates/russet-cli/src/cmd/{daemon,approvals,audit,completions,bugreport}.rs",
+    "crates/russet-cli/tests/{daemon,approvals,audit,completions,bugreport}_*.rs",
+]
+except = [
+    "crates/russet-core/src/error/codes/{config,secrets,toolchain,sdk,device,app,build,sign,account,provision,debug}.rs",
+]
+
+[ws.W3]
+title = "Config, secrets, toolchain resolver, doctor"
+wave = "1"
+lane = "D"
+owns = [
+    "crates/russet-{config,secrets,toolchain,doctor}/**",
+    "pins/**",
+    "schemas/config/**",
+    "xtask/src/pins.rs",
+    "crates/russetd/src/handlers/{config,secrets,toolchain,sdk,doctor}.rs",
+    "crates/russetd/tests/{config,secrets,toolchain,sdk,doctor}_*.rs",
+    "crates/russet-protocol/src/{config,secrets,toolchain,sdk,doctor}.rs",
+    "crates/russet-protocol/tests/{config,secrets,toolchain,sdk,doctor}_*.rs",
+    "crates/russet-cli/src/cmd/{config,secrets,toolchain,sdk,doctor}.rs",
+    "crates/russet-cli/tests/{config,secrets,toolchain,sdk,doctor}_*.rs",
+    "crates/russet-core/src/error/codes/{config,secrets,toolchain,sdk}.rs",
+]
+
+[ws.W4]
+title = "Device plane I (lane A)"
+wave = "1"
+lane = "A"
+owns = [
+    "crates/russet-device/**",
+    "docs/lab/queue.md",
+    "crates/russetd/src/handlers/{device,app,process,forward,logs}.rs",
+    "crates/russetd/tests/{device,app,process,forward,logs}_*.rs",
+    "crates/russet-protocol/src/{device,app,process,forward,logs}.rs",
+    "crates/russet-protocol/tests/{device,app,process,forward,logs}_*.rs",
+    "crates/russet-cli/src/cmd/{device,app,process,logs,forward}.rs",
+    "crates/russet-cli/tests/{device,app,process,logs,forward}_*.rs",
+    "crates/russet-core/src/error/codes/{device,app}.rs",
+]
+except = [
+    "crates/russet-device/src/{wifi,a11y}/**",
+]
+
+[ws.W5]
+title = "Build plane I: SDK facts, SwiftPM builder, bundle, IPA"
+wave = "1"
+lane = "D"
+owns = [
+    "crates/russet-{plist,sdk,build,ipa}/**",
+    "tests/fixtures/apps/RussetProbe/**",
+    "crates/russetd/src/handlers/{build,project}.rs",
+    "crates/russetd/tests/{build,project}_*.rs",
+    "crates/russet-protocol/src/{build,project}.rs",
+    "crates/russet-protocol/tests/{build,project}_*.rs",
+    "crates/russet-cli/src/cmd/{build,project,inspect,package}.rs",
+    "crates/russet-cli/tests/{build,project,inspect,package}_*.rs",
+    "crates/russet-core/src/error/codes/build.rs",
+]
+except = [
+    "crates/russet-sdk/src/import/**",
+    "crates/russet-build/src/stack/{flutter,xcode,rn,maui}/**",
+    "crates/russet-build/src/resources/**",
+    "crates/russet-build/src/platform/windows/**",
+]
+
+[ws.W6]
+title = "Signing I: Mach-O, signer, ASC read client, xtool import, read-only provisioning"
+wave = "1"
+lane = "D"
+owns = [
+    "crates/russet-{macho,sign,asc,account}/**",
+    "crates/russetd/src/handlers/{account,identity,portal,provision,sign}.rs",
+    "crates/russetd/tests/{account,identity,portal,provision,sign}_*.rs",
+    "crates/russet-protocol/src/{account,identity,portal,provision,sign}.rs",
+    "crates/russet-protocol/tests/{account,identity,portal,provision,sign}_*.rs",
+    "crates/russet-cli/src/cmd/{account,provision,sign}.rs",
+    "crates/russet-cli/tests/{account,provision,sign}_*.rs",
+    "crates/russet-core/src/error/codes/{sign,account,provision}.rs",
+]
+except = [
+    "crates/russet-account/src/free/**",
+    "crates/russet-asc/src/ds2.rs",
+]
+
+[ws.W7]
+title = "Run and debug I: gdb-remote, broker, launch, attach plan, run pipeline"
+wave = "1"
+lane = "D"
+owns = [
+    "crates/russet-{gdbremote,debug}/**",
+    "crates/russetd/src/pipeline/**",
+    "crates/russetd/tests/pipeline_*.rs",
+    "crates/russet-testkit/src/debug/**",
+    "docs/design/run-debug-prototypes/**",
+    "crates/russetd/src/handlers/{run,debug}.rs",
+    "crates/russetd/tests/{run,debug}_*.rs",
+    "crates/russet-protocol/src/{run,debug}.rs",
+    "crates/russet-protocol/tests/{run,debug}_*.rs",
+    "crates/russet-cli/src/cmd/{run,debug}.rs",
+    "crates/russet-cli/tests/{run,debug}_*.rs",
+    "crates/russet-core/src/error/codes/debug.rs",
+]
+except = [
+    "crates/russet-debug/src/wifi.rs",
+]
+
+[ws.W8]
+title = "Testkit, CI and repository gates"
+wave = "1"
+lane = "D"
+owns = [
+    "crates/russet-testkit/**",
+    "xtask/src/{guard,disk_guard,ci,ci_budget,sweep}.rs",
+    ".github/**",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "docs/contributing/**",
+]
+except = [
+    "crates/russet-testkit/src/debug/**",
+    ".github/workflows/apple-release.yml",
+]
+
+[ws.W9]
+title = "Vertical-slice integration and lab smoke (lane A)"
+wave = "1"
+lane = "A"
+after = "W4" # takes docs/lab/queue.md over from W4 (PLAN §3); W9 starts after W2–W8 merged
+owns = [
+    "demo/m1-russet.sh",
+    "tests/lab/**",
+    "xtask/src/lab.rs",
+    "docs/lab/**",
+    "docs/verified-facts.md",
+]
+
+[ws.W10]
+title = "Device plane II: screen, mirror, HID, crashes, perf, files, DDI (lane A)"
+wave = "2"
+lane = "A"
+owns = [
+    "crates/russet-device/**",
+    "crates/russetd/src/web/mirror.rs",
+    "tests/lab/**",
+    "docs/lab/**",
+    "tests/fixtures/apps/RussetProbe/**",
+    "crates/russetd/src/handlers/{device,app,process,forward,screen,input,files,perf,location}.rs",
+    "crates/russetd/tests/{device,app,process,forward,screen,input,files,perf,location}_*.rs",
+    "crates/russet-protocol/src/{device,app,process,forward,screen,input,files,perf,location}.rs",
+    "crates/russet-protocol/tests/{device,app,process,forward,screen,input,files,perf,location}_*.rs",
+    "crates/russet-cli/src/cmd/{device,app,process,forward,screen,input,files,perf,location}.rs",
+    "crates/russet-cli/tests/{device,app,process,forward,screen,input,files,perf,location}_*.rs",
+    "crates/russet-core/src/error/codes/{device,app,screen,perf}.rs",
+]
+except = [
+    "crates/russet-device/src/{wifi,a11y}/**",
+]
+
+[ws.W11]
+title = "Run and debug II: DAP hub, crashes, symbols, Quick Relaunch, po"
+wave = "2"
+lane = "D"
+owns = [
+    "crates/russet-{debug,gdbremote}/**",
+    "crates/russetd/src/pipeline/**",
+    "crates/russet-protocol/src/ide.rs",
+    "crates/russetd/src/handlers/{run,debug,crash}.rs",
+    "crates/russetd/tests/{run,debug,crash}_*.rs",
+    "crates/russet-protocol/src/{run,debug,crash}.rs",
+    "crates/russet-protocol/tests/{run,debug,crash}_*.rs",
+    "crates/russet-cli/src/cmd/{run,debug,crash,symbols}.rs",
+    "crates/russet-cli/tests/{run,debug,crash,symbols}_*.rs",
+    "crates/russet-core/src/error/codes/{debug,crash}.rs",
+]
+except = [
+    "crates/russet-debug/src/wifi.rs",
+]
+
+[ws.W12]
+title = "Signing II: provisioning apply, approvals, archive"
+wave = "2"
+lane = "D"
+owns = [
+    "crates/russet-{macho,sign,asc,account}/**",
+    "crates/russet-ship/src/{lib.rs,archive.rs,ipa.rs,dsym.rs}",
+    "crates/russetd/src/handlers/{account,identity,portal,provision,sign,asc,ship}.rs", # handlers/ship.rs: the ship.archive and ship.ipa rows only
+    "crates/russet-protocol/src/ship.rs", # the ship.archive and ship.ipa rows only (W23 owns the file in Wave 4)
+    "crates/russetd/tests/{account,identity,portal,provision,sign,asc,ship}_*.rs",
+    "crates/russet-protocol/src/{account,identity,portal,provision,sign,asc}.rs",
+    "crates/russet-protocol/tests/{account,identity,portal,provision,sign,asc}_*.rs",
+    "crates/russet-cli/src/cmd/{account,provision,sign,ship}.rs",
+    "crates/russet-cli/tests/{account,provision,sign,ship}_*.rs",
+    "crates/russet-core/src/error/codes/{sign,account,provision,ship}.rs",
+]
+except = [
+    "crates/russet-account/src/free/**",
+    "crates/russet-asc/src/ds2.rs",
+]
+
+[ws.W13]
+title = "MCP server v1 and agent registration"
+wave = "2"
+lane = "D"
+owns = [
+    "crates/russet-{mcp,agent-config}/**",
+    "schemas/mcp/**",
+    "crates/russetd/src/handlers/mcp.rs",
+    "crates/russetd/tests/mcp_*.rs",
+    "crates/russet-protocol/src/mcp.rs",
+    "crates/russet-protocol/tests/mcp_*.rs",
+    "crates/russet-cli/src/cmd/mcp.rs",
+    "crates/russet-cli/tests/mcp_*.rs",
+    "crates/russet-core/src/error/codes/mcp.rs",
+]
+
+[ws.W14]
+title = "Extension v0 (IDE Tier 0)"
+wave = "2"
+lane = "D"
+owns = [
+    "extension/**",
+]
+except = [
+    "extension/src/generated/**",
+]
+
+[ws.W15]
+title = "QA II: record/replay, mock device, contracts, security, Windows CI"
+wave = "2"
+lane = "D"
+owns = [
+    "crates/russet-testkit/**",
+    "xtask/src/{traces,contracts}.rs",
+    ".github/workflows/{ci,nightly}.yml",
+    "docs/security/**",
+]
+except = [
+    "crates/russet-testkit/src/debug/**",
+]
+
+[ws.W16]
+title = "Build II: dynamic products, lints, russet-tool, golden/oracle, Apple-hardware smoke"
+wave = "2"
+lane = "D+B"
+owns = [
+    "crates/russet-{build,plist,ipa,tool,golden,oracle,sdk}/**",
+    "corpus/**",
+    "templates/**",
+    "xtask/src/golden.rs",
+    ".github/workflows/{oracle,apple-smoke}.yml",
+    "crates/russetd/src/handlers/{build,project}.rs",
+    "crates/russetd/tests/{build,project}_*.rs",
+    "crates/russet-protocol/src/{build,project}.rs",
+    "crates/russet-protocol/tests/{build,project}_*.rs",
+    "crates/russet-cli/src/cmd/{build,project,inspect,package,oracle,cache}.rs",
+    "crates/russet-cli/tests/{build,project,inspect,package,oracle,cache}_*.rs",
+    "crates/russet-core/src/error/codes/{build,assets}.rs",
+]
+except = [
+    "crates/russet-sdk/src/import/**",
+    "templates/github/**",
+    "crates/russet-build/src/stack/{flutter,xcode,rn,maui}/**",
+    "crates/russet-build/src/resources/**",
+    "crates/russet-build/src/platform/windows/**",
+]
+
+[ws.W16b]
+title = "Apple containers and native SDK/DDI import"
+wave = "2"
+lane = "D+B"
+owns = [
+    "crates/russet-xar/**",
+    "crates/russet-sdk/src/import/**",
+    "fuzz/russet-xar/**",
+    "tests/fixtures/xip/**",
+    "crates/russetd/src/handlers/sdk.rs",
+    "crates/russetd/tests/sdk_*.rs",
+    "crates/russet-protocol/src/sdk.rs",
+    "crates/russet-protocol/tests/sdk_*.rs",
+    "crates/russet-cli/src/cmd/sdk.rs",
+    "crates/russet-cli/tests/sdk_*.rs",
+    "crates/russet-core/src/error/codes/sdk.rs",
+]
+except = [
+    "crates/russet-sdk/src/import/windows/**",
+]
+
+[ws.W17]
+title = "Flutter build (lane C)"
+wave = "3"
+lane = "C"
+owns = [
+    "crates/russet-build/src/stack/flutter/**",
+    "templates/flutter-runner/**",
+    "tests/fixtures/apps/RussetFlutterProbe/**",
+    "crates/russetd/src/handlers/flutter_build.rs",
+    "crates/russetd/tests/flutter_build_*.rs",
+    "crates/russet-protocol/src/flutter_build.rs",
+    "crates/russet-protocol/tests/flutter_build_*.rs",
+    "crates/russet-cli/src/cmd/flutter.rs",
+    "crates/russet-cli/tests/flutter_*.rs",
+    "crates/russet-core/src/error/codes/flutter_build.rs",
+]
+except = [
+    "crates/russet-build/src/stack/flutter/aot.rs",
+    "crates/russet-cli/tests/flutter_run_*.rs", # W18's
+]
+
+[ws.W18]
+title = "Flutter run/debug and the JIT servicer (lane A)"
+wave = "3"
+lane = "A"
+owns = [
+    "crates/russet-debug/**",
+    "crates/russet-testkit/src/debug/**",
+    "tests/fixtures/apps/RussetJitProbe/**",
+    "tests/lab/**",
+    "docs/lab/**",
+    "crates/russetd/src/handlers/flutter_run.rs",
+    "crates/russetd/tests/flutter_run_*.rs",
+    "crates/russet-protocol/src/flutter_run.rs",
+    "crates/russet-protocol/tests/flutter_run_*.rs",
+    "crates/russet-cli/src/cmd/flutter_run.rs",
+    "crates/russet-cli/tests/flutter_run_*.rs",
+    "crates/russet-core/src/error/codes/{debug,flutter_run}.rs",
+]
+except = [
+    "crates/russet-debug/src/wifi.rs",
+]
+
+[ws.W19]
+title = "IDE panels (first-build GUI features)"
+wave = "3"
+lane = "D"
+owns = [
+    "extension/src/{panels,editors,setup}/**",
+    "extension/webview/**",
+    "extension/data/**",
+]
+except = [
+    "extension/src/agents/**",
+    "extension/webview/{agents,approval}/**",
+    "extension/src/editors/assets/**",
+    "extension/webview/assets/**",
+    "extension/src/panels/publishing*",
+    "extension/webview/publishing/**",
+]
+
+[ws.W20]
+title = "Agents II: approvals UI, HTTP MCP, nine clients, ACP panel, local models"
+wave = "3"
+lane = "D"
+owns = [
+    "crates/russet-{mcp,agent-config}/**",
+    "crates/russetd/src/web/mcp.rs",
+    "extension/src/agents/**",
+    "extension/webview/{agents,approval}/**",
+    "schemas/mcp/**",
+    "crates/russetd/src/handlers/mcp.rs",
+    "crates/russetd/tests/mcp_*.rs",
+    "crates/russet-protocol/src/mcp.rs",
+    "crates/russet-protocol/tests/mcp_*.rs",
+    "crates/russet-cli/src/cmd/mcp.rs",
+    "crates/russet-cli/tests/mcp_*.rs",
+    "crates/russet-core/src/error/codes/agents.rs",
+]
+
+[ws.W21]
+title = "Resource compilers (lane B oracle)"
+wave = "3"
+lane = "D+B"
+owns = [
+    "crates/russet-{car,assets,xcstrings,ib}/**",
+    "crates/russet-tool/src/{actool,ibtool,xcstringstool}.rs",
+    "crates/russet-build/src/resources/**",
+    "corpus/{actool,xcstrings,ib}/**",
+    "extension/src/editors/assets/**",
+    "extension/webview/assets/**",
+    "docs/re/assets/**",
+    "crates/russetd/src/handlers/assets.rs",
+    "crates/russetd/tests/assets_*.rs",
+    "crates/russet-protocol/src/assets.rs",
+    "crates/russet-protocol/tests/assets_*.rs",
+    "crates/russet-cli/src/cmd/{assets,ib}.rs",
+    "crates/russet-cli/tests/{assets,ib}_*.rs",
+    "crates/russet-core/src/error/codes/assets.rs",
+]
+except = [
+    "crates/russet-ib/src/{nib,compile}/**",
+]
+
+[ws.W22]
+# Also the account.appleId.* and account.anisette.* rows of handlers/account.rs (rows, not files).
+title = "Free Apple ID (opt-in)"
+wave = "3"
+lane = "D"
+owns = [
+    "crates/russet-{gsa,anisette,adi-host}/**",
+    "crates/russet-account/src/free/**",
+    "crates/russet-asc/src/ds2.rs",
+    "crates/russet-core/src/error/codes/{gsa,anisette}.rs",
+]
+except = [
+    "crates/russet-anisette/src/windows/**",
+]
+
+[ws.W23]
+title = "Ship (M5)"
+wave = "4"
+lane = "D"
+owns = [
+    "crates/russet-ship/**",
+    "extension/src/panels/publishing*",
+    "extension/webview/publishing/**",
+    "templates/github/**",
+    ".github/workflows/apple-release.yml",
+    "crates/russetd/src/handlers/ship.rs",
+    "crates/russetd/tests/ship_*.rs",
+    "crates/russet-protocol/src/ship.rs",
+    "crates/russet-protocol/tests/ship_*.rs",
+    "crates/russet-cli/src/cmd/ship.rs",
+    "crates/russet-cli/tests/ship_*.rs",
+    "crates/russet-core/src/error/codes/ship.rs",
+]
+
+[ws.W24]
+# Also the flutter.genSnapshot.* rows of handlers/flutter_build.rs.
+title = "Flutter release (AOT)"
+wave = "4"
+lane = "C"
+owns = [
+    ".github/workflows/gen-snapshot.yml",
+    "tools/gen-snapshot/**",
+    "crates/russet-build/src/stack/flutter/aot.rs",
+]
+
+[ws.W25]
+title = "IDE product build (G6)"
+wave = "4"
+lane = "C"
+owns = [
+    "ide/**",
+    ".github/workflows/ide.yml",
+    "extension/scripts/package*",
+    "packaging/aur/russet-ide-bin/**",
+]
+
+[ws.W26]
+title = "Release engineering, packaging, docs, legal"
+wave = "4"
+lane = "D"
+owns = [
+    "packaging/linux/**",
+    "packaging/windows/**",
+    ".github/workflows/{release,publish,docs}.yml",
+    "xtask/src/{release,legal,docs,pins}.rs",
+    "docs/site/**",
+    "docs/reference/errors.md",
+    "crates/russet-cli/src/cmd/self_update.rs",
+    "CHANGELOG.md",
+    "cliff.toml",
+]
+
+[ws.W21b]
+title = "Storyboard compiler I: NIBArchive and launch storyboards (B21a)"
+wave = "4"
+lane = "D+B"
+owns = [
+    "crates/russet-ib/src/{nib,compile}/**",
+    "crates/russet-tool/src/ibtool.rs",
+    "corpus/ib/**",
+    "crates/russetd/src/handlers/ib.rs",
+    "crates/russetd/tests/ib_*.rs",
+    "crates/russet-protocol/src/ib.rs",
+    "crates/russet-protocol/tests/ib_*.rs",
+    "crates/russet-cli/src/cmd/ib.rs",
+    "crates/russet-cli/tests/ib_*.rs",
+]
+
+[ws.W32]
+title = "SwiftPM XCTest on device (russet test, stack 1)"
+wave = "4"
+lane = "D"
+owns = [
+    "crates/russet-xctest/**",
+    "tests/fixtures/apps/RussetProbe/Tests/**",
+    "crates/russetd/src/handlers/test.rs",
+    "crates/russetd/tests/test_*.rs",
+    "crates/russet-protocol/src/test.rs",
+    "crates/russet-protocol/tests/test_*.rs",
+    "crates/russet-cli/src/cmd/test.rs",
+    "crates/russet-cli/tests/test_*.rs",
+    "crates/russet-core/src/error/codes/xctest.rs",
+]
+
+[ws.W27a]
+# Also the cfg(windows) platform modules of core §15: the russet-ipc pipe transport, the russet-secrets backend, spawn.
+title = "Windows core, IPC, device and debug"
+wave = "5"
+lane = "A"
+owns = [
+    "crates/**/src/**/windows*.rs",
+    "docs/windows/**",
+]
+except = [
+    "crates/russet-build/src/platform/windows/**", # W27b
+    "crates/russet-sdk/src/import/windows/**", # W27b
+    "crates/russet-anisette/src/windows/**", # W27c
+]
+
+[ws.W27b]
+title = "Windows build plane, SDK and DDI import"
+wave = "5"
+lane = "A+D"
+owns = [
+    "crates/russet-build/src/platform/windows/**",
+    "crates/russet-sdk/src/import/windows/**",
+    ".github/workflows/oam-windows.yml",
+]
+
+[ws.W27c]
+title = "Windows packaging, IDE and anisette"
+wave = "5"
+lane = "D+A"
+owns = [
+    "packaging/windows/**",
+    "crates/russet-anisette/src/windows/**",
+]
+
+[ws.W28b]
+title = "Storyboard compiler II: main storyboards and XIBs (B21b)"
+wave = "6"
+lane = "D+B"
+owns = [
+    "crates/russet-ib/**",
+    "corpus/ib/**",
+    "tests/fixtures/apps/RussetProbe/IBHarness/**",
+]
+
+[ws.W28]
+title = "Xcode projects, CocoaPods, russet test"
+wave = "6"
+lane = "D+B"
+owns = [
+    "crates/russet-{xcodeproj,pif,xctest}/**",
+    "tools/russet-swb/**",
+    "crates/russet-build/src/stack/xcode/**",
+    "corpus/pif/**",
+    "crates/russetd/src/handlers/{test,xcode,xctest}.rs",
+    "crates/russetd/tests/{test,xcode,xctest}_*.rs",
+    "crates/russet-protocol/src/{test,xcode,xctest}.rs",
+    "crates/russet-protocol/tests/{test,xcode,xctest}_*.rs",
+    "crates/russet-cli/src/cmd/{xcode,test}.rs",
+    "crates/russet-cli/tests/{xcode,test}_*.rs",
+    "crates/russet-core/src/error/codes/{xcode,xctest}.rs",
+]
+
+[ws.W28c]
+title = "Storyboard compiler III: tables, collections, traits (B21c) and NetNewsWire"
+wave = "6"
+lane = "D+B"
+after = "W28b" # takes crates/russet-ib/**, corpus/ib/** and the IB harness over once W28b merges (PLAN §9.3)
+owns = [
+    "crates/russet-ib/**",
+    "corpus/ib/**",
+    "tests/fixtures/apps/RussetProbe/IBHarness/**",
+]
+
+[ws.W29]
+title = "React Native / Expo adapter and .NET MAUI study"
+wave = "6"
+lane = "D+C"
+owns = [
+    "crates/russet-build/src/stack/{rn,maui}/**",
+    "docs/design/maui-feasibility.md",
+]
+
+[ws.W30]
+title = "Device plane III: Wi-Fi and native accessibility (lane A)"
+wave = "6"
+lane = "A"
+owns = [
+    "crates/russet-device/src/{wifi,a11y}/**",
+    "crates/russet-debug/src/wifi.rs",
+]
+
+[ws.W31]
+# Owns nothing in this repository.
+title = "Virtual iPhone (separate private repository)"
+wave = "parallel"
+lane = "-"
+owns = []
+
+[ws.W33]
+# The sdk.deviceSupport.* rows of handlers/sdk.rs and protocol/sdk.rs (rows, not files).
+title = "Apple Device Support fetch (deferred)"
+wave = "deferred"
+lane = "D"
+owns = []

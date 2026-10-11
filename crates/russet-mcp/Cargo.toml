@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-mcp"
+description = "MCP server on rmcp 3.5.x: tool catalog, stdio bridge, HTTP service mounted by russetd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server", "elicitation"] }
+russet-core.workspace = true
+russet-doctor.workspace = true
+russet-ipc.workspace = true
+russet-protocol.workspace = true

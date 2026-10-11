@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-toolchain"
+description = "Pin manifest, probes, resolver with the env contract, installer, GC, SDK registry probe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+goblin.workspace = true
+minisign-verify.workspace = true
+pgp.workspace = true
+reqwest = { workspace = true, features = ["json", "stream"] }
+russet-config.workspace = true
+russet-core.workspace = true
+sha2.workspace = true
+tar.workspace = true
+tokio-util.workspace = true
+zstd.workspace = true

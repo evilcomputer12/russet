@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-tool"
+description = "Multi-call Xcode-tool shims for Swift Build and flutter_tools (ARCHITECTURE §3.1)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "russet-tool"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]

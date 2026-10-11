@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+[package]
+name = "russet-sign"
+description = "Bundle walk, provisioning profiles, entitlements, signing through apple-codesign, verify, lints"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+apple-codesign.workspace = true
+russet-core.workspace = true
+russet-doctor.workspace = true
+russet-macho.workspace = true
+x509-certificate.workspace = true

@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Seam file: lead-only after W1 merges (PLAN §0 rule 2).
+[package]
+name = "russet-cli"
+description = "Russet L4: the multi-call `russet` binary (CLI, daemon, MCP bridge, flutter custom device)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "russet"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anstream.workspace = true
+clap.workspace = true
+indicatif.workspace = true
+russet-agent-config.workspace = true
+russet-core.workspace = true
+russet-ipc.workspace = true
+russet-mcp.workspace = true
+russet-protocol.workspace = true
+russetd.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
+# Pre-declared for W2 (CORE-07: the runtime, `-v` diagnostics on stderr, `completions`, man pages and the human
+# reporter's tables; core §4.5, §12), so no card edits this seam file mid-wave [D 86].
+clap_complete.workspace = true
+clap_mangen.workspace = true
+comfy-table.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
