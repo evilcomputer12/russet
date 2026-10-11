@@ -81,8 +81,14 @@ pub(crate) struct Session {
     registry: Option<PathBuf>,
     /// Kept alive while the session runs (the launch channel in legacy-async mode, relay tasks).
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
-    /// The device's exit notice, held back while the broker decides how the process ended.
-    exit_watch: Mutex<Option<crate::launch::ExitWatch>>,
+    /// The device's exit notice and the end of stdout, held back while the broker decides how the process ended.
+    exit_watch: Mutex<Option<ExitSignals>>,
+}
+
+/// What tells a session that its process ended when no debugger holds it.
+pub(crate) struct ExitSignals {
+    pub exit: Option<crate::launch::ExitWatch>,
+    pub stdio_done: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -396,12 +402,12 @@ impl SessionHandle {
         self.inner.kill_requested.store(true, Ordering::SeqCst);
     }
 
-    pub(crate) fn stash_exit_watch(&self, w: Option<crate::launch::ExitWatch>) {
-        *lock(&self.inner.exit_watch) = w;
+    pub(crate) fn stash_exit_signals(&self, w: ExitSignals) {
+        *lock(&self.inner.exit_watch) = Some(w);
     }
 
-    pub(crate) fn take_exit_watch(&self) -> Option<crate::launch::ExitWatch> {
-        lock(&self.inner.exit_watch).take()
+    pub(crate) fn take_exit_signals(&self) -> ExitSignals {
+        lock(&self.inner.exit_watch).take().unwrap_or(ExitSignals { exit: None, stdio_done: None })
     }
 
     /// The process exited: `exited`, or `crashed` for a signal Russet did not send.

@@ -60,7 +60,7 @@ pub use async_trait::async_trait;
 use crate::broker::{Broker, BrokerEvent, EndpointSpec};
 use crate::launch::{InstalledAppInfo, LaunchChannel, LaunchSpec, LaunchStrategy, Launched};
 use crate::lldb::{AttachPlan, InitSettings, LldbPlatform};
-use crate::session::{Control, ProcessRef, SessionInit};
+use crate::session::{Control, ExitSignals, ProcessRef, SessionInit};
 
 /// A byte stream to debugserver or to LLDB.
 pub trait DebugStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
@@ -559,7 +559,7 @@ impl DebugService {
             // LLDB drives the process: the device's exit notice (or the end of stdout) ends the session.
             AttachMode::LegacyAsync => watch_exit(h.clone(), launched.exit.take(), stdio_done),
             // The broker reports exits while it holds the process; the device's notice takes over after a detach.
-            AttachMode::Broker => h.stash_exit_watch(launched.exit.take()),
+            AttachMode::Broker => h.stash_exit_signals(ExitSignals { exit: launched.exit.take(), stdio_done }),
         }
 
         let plan = AttachPlan {
@@ -775,7 +775,8 @@ fn follow_broker(
                         .await;
                     h.set_debugger(DebuggerState::Detached);
                     h.set_state(SessionState::Running);
-                    watch_exit(h.clone(), h.take_exit_watch(), None);
+                    let signals = h.take_exit_signals();
+                    watch_exit(h.clone(), signals.exit, signals.stdio_done);
                     return;
                 }
                 BrokerEvent::DebuggerLost(broker::LostPolicy::Keep) => {

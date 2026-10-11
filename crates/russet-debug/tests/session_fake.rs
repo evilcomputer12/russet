@@ -169,3 +169,53 @@ async fn a_failed_attach_kills_the_suspended_app_and_fails_the_session() {
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].state, WireSessionState::Failed);
 }
+
+/// A device whose app console the test controls, with the fake debugserver behind it.
+struct ConsoleDevice {
+    fake: FakeDebugserver,
+    console: Mutex<Option<tokio::io::DuplexStream>>,
+}
+
+#[async_trait]
+impl DeviceServices for ConsoleDevice {
+    async fn resolve(&self, _sel: &DeviceSelector) -> Result<Udid> {
+        Ok(Udid("u".into()))
+    }
+
+    async fn launch(&self, _udid: &Udid, _spec: &LaunchSpec) -> Result<Launched> {
+        let (app_side, russet_side) = tokio::io::duplex(1024);
+        *self.console.lock().unwrap() = Some(app_side);
+        let mut l = Launched::pid_only(932);
+        l.stdio = Some(Box::new(russet_side));
+        Ok(l)
+    }
+
+    async fn connect_debugserver(&self, _udid: &Udid) -> Result<BoxStream> {
+        Ok(Box::new(tokio::net::TcpStream::connect(self.fake.addr()).await.unwrap()))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn after_a_detach_the_end_of_stdout_ends_the_session() {
+    let fake = FakeDebugserver::start(FakeSpec { pid: 932, ..FakeSpec::default() }).unwrap();
+    let dev = Arc::new(ConsoleDevice { fake, console: Mutex::new(None) });
+    let svc = DebugService::new(dev.clone(), DebugConfig::default());
+    let prepared = svc.prepare_debug(request(SessionLease::Detached)).await.unwrap();
+    let s = prepared.session.clone();
+    let russet_debug::BrokerEndpoint::Unix { path } = &prepared.broker else { panic!("unix expected") };
+    let stream: BoxStream = Box::new(tokio::net::UnixStream::connect(path).await.unwrap());
+    let lldb = GdbClient::handshake(stream, HandshakeOptions::default()).await.unwrap().0;
+    // While the broker holds the process, the console's end does not end the session.
+    lldb.detach().await.unwrap();
+    s.wait_for(Duration::from_secs(5), |_| s.debugger() == DebuggerState::Detached).await;
+    assert!(!s.is_ended());
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut console = dev.console.lock().unwrap().take().unwrap();
+        console.write_all(b"last line\r\n").await.unwrap();
+    }
+    let end = s.wait_for(Duration::from_secs(5), SessionState::is_final).await;
+    assert!(matches!(end, SessionState::Exited { .. }), "{end:?}");
+    let (entries, _) = s.logs().query(None, None, &Default::default());
+    assert!(entries.iter().any(|e| e.message == "last line"));
+}

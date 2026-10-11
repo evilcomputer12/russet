@@ -444,6 +444,8 @@ async fn serve_task(
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!(error = %e, "broker accept failed");
+                    // A persistent error (for example no free descriptors) must not spin.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
                 }
             },
@@ -490,7 +492,9 @@ async fn serve_task(
         let resume_pending = out.resume_pending;
         client = GdbClient::from_parts(out.upstream);
         drop(out.downstream);
-        if let Some((code, signal)) = hooks.exited {
+        // The debugger's `k` kills even when debugserver closed before its reply arrived.
+        let exited = hooks.exited.or(hooks.killed.then_some((None, Some(9))));
+        if let Some((code, signal)) = exited {
             emit(BrokerEvent::ProcessExited { code, signal, requested: hooks.killed });
             set(BrokerState::Exited { code, signal });
             if let Some(Command::Terminate { done, .. }) = command {
