@@ -1915,6 +1915,9 @@ name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "derive_arbitrary"
@@ -5492,12 +5495,23 @@ dependencies = [
  "futures",
  "idevice",
  "jktcp",
+ "plist",
  "russet-core",
  "russet-doctor",
  "russet-ipa",
+ "russet-protocol",
+ "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
  "time",
  "tokio",
+ "tokio-util",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
+ "tracing",
+ "uuid",
+ "zip 9.0.1",
 ]
 
 [[package]]
@@ -6994,6 +7008,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

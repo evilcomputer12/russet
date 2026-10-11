@@ -19,9 +19,23 @@ async-trait.workspace = true
 futures.workspace = true
 idevice.workspace = true
 jktcp.workspace = true
+plist.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
 russet-ipa.workspace = true
+russet-protocol.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-time.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+sha2.workspace = true
+time = { workspace = true, features = ["formatting", "parsing", "macros", "serde"] }
+tokio = { workspace = true, features = ["sync", "rt", "net", "io-util", "time", "macros", "fs"] }
+tokio-util.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+tracing.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }
