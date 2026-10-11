@@ -301,6 +301,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> GdbClient<S> {
         self.running
     }
 
+    /// Marks a resume as outstanding, for a client rebuilt from a relay while the inferior runs, so that
+    /// [`GdbClient::interrupt`] sends `0x03` instead of `?`.
+    pub fn assume_running(&mut self) {
+        self.running = true;
+    }
+
     /// Sends one packet and returns its decoded reply. `O` output packets that arrive first are queued for
     /// [`GdbClient::wait_stop`].
     pub async fn request(&mut self, payload: &[u8]) -> Result<Bytes, GdbError> {
