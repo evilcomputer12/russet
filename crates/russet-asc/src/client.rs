@@ -305,7 +305,7 @@ impl AscClient {
         })
     }
 
-    /// DELETEs `path` (`/v1/…/{id}`); App Store Connect answers 204 No Content.
+    /// Sends an HTTP DELETE to `path` (`/v1/…/{id}`); App Store Connect answers 204 No Content.
     pub async fn delete(&self, path: &str) -> Result<()> {
         self.send_mutation(reqwest::Method::DELETE, path, None).await?;
         Ok(())

@@ -745,7 +745,7 @@ mod tests {
         assert!(r.extensions().get::<BundleIdResolver>().is_some());
         let w = World::new();
         w.engine.install_typed_texts(texts);
-        match w.decide(ClientKind::Cli, true, "portal.certificates.revoke", json!({"certificateId": "c"})) {
+        match w.decide(ClientKind::Cli, true, "portal.certificates.revoke", json!({"certId": "c"})) {
             Decision::Confirm(ConfirmSpec { typed: Some(t), .. }) => assert_eq!(t, "ABCDE12345"),
             other => panic!("expected a typed confirmation, got {other:?}"),
         }
