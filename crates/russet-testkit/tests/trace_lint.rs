@@ -42,7 +42,7 @@ fn the_lint_catches_planted_identifiers() {
         api: "lockdown.get_value".into(),
         args: serde_json::json!({}),
         result: Some(serde_json::json!({
-            "UniqueDeviceID": "00008101-000A4D830C01001E",
+            "UniqueDeviceID": "00008101-0000000000000000",
             "WiFiAddress": "ac:de:48:00:11:22",
             "AppleId": "victim@gmail.com",
             "HostPrivateKey": "-----BEGIN EC PRIVATE KEY-----",
@@ -61,7 +61,7 @@ fn the_lint_catches_planted_identifiers() {
 #[test]
 fn redaction_makes_a_result_clean() {
     let mut v = serde_json::json!({
-        "UniqueDeviceID": "00008101-000A4D830C01001E",
+        "UniqueDeviceID": "00008101-0000000000000000",
         "SerialNumber": "F2LXXXXXXXXX",
         "WiFiAddress": "ac:de:48:00:11:22",
         "DeviceName": "Martin's iPhone",
@@ -78,7 +78,7 @@ fn redaction_makes_a_result_clean() {
     });
     assert!(redaction::lint(&trace).is_empty(), "redacted result still trips the lint: {:?}", redaction::lint(&trace));
     assert_eq!(v["ProductType"], serde_json::json!("iPhone13,2"), "non-sensitive keys are kept");
-    assert_ne!(v["UniqueDeviceID"], serde_json::json!("00008101-000A4D830C01001E"), "the UDID is gone");
+    assert_ne!(v["UniqueDeviceID"], serde_json::json!("00008101-0000000000000000"), "the UDID is gone");
 }
 
 /// SEC-elide-01: an elided service's payload becomes an `Elided` record, not bytes — and without elision the

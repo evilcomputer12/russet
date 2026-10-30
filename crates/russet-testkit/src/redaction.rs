@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn real_identifiers_are_caught() {
         let cases = [
-            ("00008101-000A4D830C01001E", "udid"),
+            ("00008101-0000000000000000", "udid"),
             ("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", "udid"),
             ("ac:de:48:00:11:22", "mac"),
             ("victim@gmail.com", "email"),
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn redaction_replaces_sensitive_keys() {
-        let mut v = serde_json::json!({ "UniqueDeviceID": "00008101-000A4D830C01001E", "ProductType": "iPhone13,2" });
+        let mut v = serde_json::json!({ "UniqueDeviceID": "00008101-0000000000000000", "ProductType": "iPhone13,2" });
         redact_value(&mut v);
         assert_eq!(v["UniqueDeviceID"], serde_json::json!("REDACTED-UniqueDeviceID"));
         assert_eq!(v["ProductType"], serde_json::json!("iPhone13,2"));
