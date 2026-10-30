@@ -143,6 +143,12 @@ A single Russet IDE window that is a true Xcode/Android-Studio peer:
      (or guides it), pulls the image, and "just works". That bundling *is* the paid product.
    - **Build on Windows**: `russet-core`/`russetd`/`russet-cli` should cross-compile / build on Windows for the
      thin GUI-side pieces; the heavy toolchain work happens in the container.
+   - **START A NEW REPO for the Windows product.** The closed-source Windows app must **not** live in this GPL
+     repo (dual-license hygiene: the GPL engine is consumed as a dependency/submodule, the Windows shell +
+     installer + Docker glue are a separate proprietary repo). Create e.g. `evilcomputer12/russet-windows`
+     (private). It depends on the `russet` engine (git submodule or a versioned crate), adds the Windows GUI
+     shell, the `Dockerfile`/compose for the Linux toolchain container, the USB bridge, and the MSIX packaging.
+     Keep the engine edits in *this* repo and consume them; never copy GPL engine source into the closed repo.
 
 **C. Flutter stack (W17)** — Flutter build/run/**hot-reload** wired into the pipeline and the IDE. High value for
    Martin's work PC (cross-platform devs on Windows are the prime market).
@@ -216,3 +222,72 @@ Full plan in `~/russet-strategy.md` on Martin's Linux box (not in the repo — n
    connection, and the `usbipd-win`/usbmuxd device bridge; prototype build→install→debug on the iPhone from Windows
    through the container.
 4. Keep everything **button-driven**; every new capability gets an IDE surface, not a CLI-only path.
+5. **Stand up a GPU-accelerated Windows VM on this Linux box** (§11) to develop and test the Windows app here
+   without the physical work PC, and **start the new `russet-windows` repo** (§6B) for the Windows product.
+
+## 11. Set up a GPU-accelerated Windows VM on THIS Linux box (Codex: do this)
+
+Martin wants a **Windows VM with GPU acceleration on this Linux box** so the Windows app (and the Docker build
+backend, and eventually the emulator) can be developed and tested here, not only on the physical work PC.
+
+**This box's actual state (probed 2026-10-30) — build on these facts, don't assume:**
+- CPU **AMD Ryzen 5 5600X**, **AMD-V** virtualization on, `/dev/kvm` present → **KVM works**.
+- GPU: **one AMD Radeon RX 7600 XT (Navi 33, PCI `1002:7480`), NO integrated GPU** (the 5600X has no iGPU).
+- **IOMMU is NOT enabled** in the kernel cmdline (no `amd_iommu=on`); 23 IOMMU groups exist in hardware.
+- `qemu-system-x86_64`, `virt-manager`, `virsh` installed; **`libvirtd` is inactive**; **`looking-glass-client`
+  is missing**; **no Windows ISO and no `virtio-win` ISO** on disk.
+- **Docker 29.9.2** present (for the container track).
+- **Disk: only ~18 GiB free (97% full)** — a Windows VM needs 60 GiB+. **This is a blocker; free space first.**
+
+**The GPU constraint and the three honest options (single AMD GPU, no iGPU):**
+1. **virtio-gpu paravirtual 3D accel (venus/Vulkan or virgl/OpenGL)** — host keeps its display; no passthrough.
+   Best for a *dev/test* Windows VM. Caveat: **Windows-guest virtio-gpu 3D drivers are experimental** (Linux
+   guests are solid). Good enough to run/build/test the Windows GUI; may not fully accelerate the emulator.
+2. **Single-GPU VFIO passthrough** — real GPU in the guest, but it **detaches the host desktop while the VM runs**
+   (bind/unbind scripts). View the guest via **Looking Glass** in a host window. Most powerful, most disruptive.
+3. **Add a cheap second GPU** → clean dedicated passthrough, host keeps its RX 7600 XT. The clean long-term answer
+   if Martin wants both at once; needs hardware.
+
+**Recommended path for Codex:** start with **option 1 (virtio-gpu venus)** for a usable dev VM that keeps the host
+intact; only move to option 2 if the Windows side needs true GPU (e.g. to test the emulator's GPU path under
+Windows — though that specific question really belongs on the Intel-iGPU work PC).
+
+**Prerequisites to automate/do first (in order):**
+1. **Free disk** to ≥ 80 GiB (clear `~/.cache/russet-dev/target-{a,b}`, old game downloads; keep >25 GiB reserve).
+2. `sudo systemctl enable --now libvirtd` (+ add Martin to the `libvirt`/`kvm` groups).
+3. For passthrough only: add `amd_iommu=on iommu=pt` to the bootloader kernel cmdline and **reboot**; set up
+   `vfio-pci` for `1002:7480` (+ its HDMI-audio function in the same IOMMU group) and install `looking-glass`.
+4. **ISOs are >500 MB → needs Martin's explicit OK before downloading** (AGENTS §6): Windows 11 ISO (~6 GB) and
+   `virtio-win.iso` (~0.7 GB).
+
+**Where to put it:** VM disk + ISOs under `~/vms/windows/` (or libvirt's `/var/lib/libvirt/images/`). Deliver a
+libvirt domain XML + a start script, and later a one-click "Start Windows VM" surface. Virtio everywhere (disk,
+net, gpu, input); SPICE or Looking Glass for display; share a folder (virtiofs) with the host for the repos.
+
+**Note for Codex:** confirm the disk-free and ISO-download steps with Martin before running them (they cross the
+AGENTS >500 MB / reboot thresholds). Everything else (libvirt domain, scripts, container, repo) you can build.
+
+## 12. Where everything is (resource map on Martin's Linux box)
+
+- **This handoff**: `~/russet/HANDOFF-CODEX.md` (also committed to the repo → in the clone).
+- **Russet engine + IDE (GPL, open)**: `~/russet/` → repo `github.com/evilcomputer12/russet` (private).
+  - CLI/daemon binary: `~/.local/bin/russet` (now on PATH); release build output
+    `~/.cache/russet-dev/target-a/release/russet`.
+  - IDE extension source: `~/russet/extension/`; built VSIX `~/russet/extension/russet.vsix`; installed in
+    VS Code + VSCodium as `russet.russet`.
+  - Templates: `~/russet/templates/swiftpm-app/` (0BSD).
+- **New Windows product repo**: create `~/russet-windows/` → `github.com/evilcomputer12/russet-windows` (private,
+  proprietary). Consumes the engine; holds the Windows shell, Docker glue, USB bridge, MSIX. (§6B)
+- **Virtual iPhone emulator (separate project)**: `~/russet-lab/thirdparty/vphone-linux/`
+  — `run-vphone.sh`, `snapshot-vphone.sh`, `resume-vphone.sh`, `build.sh`, `tools/{qmp.py,vphoned.sh,screen-changed.py}`,
+  `reims-vgpu/` (LGPL, run out-of-process). VM bundles: `~/vphone-setup-work/devices/…` (Disk.img/nvram/ROMs/ecid —
+  Mac-origin, **never redistribute**).
+- **Private strategy** (not in any repo, Linux box only): `~/russet-strategy.md` (monetization/licensing).
+- **Commercial memory/plan**: Claude memory `russet-wave2-merged.md` + `ios-dev-without-mac.md`.
+- **Docker**: `/usr/bin/docker` (29.9.2) — for the Linux toolchain container.
+- **Toolchains**: Rust stable 1.99 (`rustup`); Swift 6.4 `/usr/lib/swift/usr/bin`; Darwin SDK
+  `~/.swiftpm/swift-sdks/darwin.artifactbundle` (read-only); node 26.
+- **Virtualization**: `qemu-system-x86_64`, `virt-manager`, `virsh` installed; `/dev/kvm` present; `libvirtd`
+  inactive (start it); Looking Glass + Windows/virtio ISOs not yet present.
+- **Real device**: iPhone 12 on USB; `russet device list` shows it (`state: ready`).
+- **Mac (RE only, `ssh mac`)**: Xcode 27 + the iOS 27 vphone boot oracle. The product must never require it.
