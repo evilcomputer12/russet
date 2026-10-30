@@ -215,6 +215,11 @@ impl AccountStore {
         client_for(key.clone(), &self.asc_base, self.limiter(&key.key_id))
     }
 
+    /// A bearer-token client of `key` for the writes an approved plan performs (W12), sharing the key's limiter.
+    pub(crate) fn mut_client(&self, key: &AscKey) -> Result<AscClient> {
+        mut_client_for(key.clone(), &self.asc_base, self.limiter(&key.key_id))
+    }
+
     /// Points the App Store Connect client at `base` (`Endpoints.asc`; fakes in tests).
     pub fn with_asc_base(mut self, base: Url) -> Self {
         self.asc_base = base;
@@ -405,7 +410,7 @@ impl AccountStore {
             Error::new(codes::account::NO_ACCOUNT, format!("the team of {id} is unknown"))
                 .with_hint("Re-add the key (`russet account add-key …`) or import xtool's identity so Russet can discover the team; `russet account verify` shows what the key can read.")
         })?;
-        Ok(Arc::new(AscPortal::new(self.client(&key)?, team_id, key_is_individual(&account))))
+        Ok(Arc::new(AscPortal::new(self.client(&key)?, self.mut_client(&key)?, team_id, key_is_individual(&account))))
     }
 
     /// The account's App Store Connect key, unsealed (in-process only).
@@ -486,6 +491,12 @@ pub(crate) fn no_account(id: Option<&AccountId>) -> Error {
 /// A GET-only client with per-request scopes (Wave 1) that shares `limiter` with the key's other clients.
 pub(crate) fn client_for(key: AscKey, base: &Url, limiter: Arc<RateLimiter>) -> Result<AscClient> {
     let auth = JwtAuth::per_request(base.clone(), Arc::new(TokenFactory::new(key)));
+    AscClient::with_limiter(Arc::new(auth), RetryPolicy::default(), limiter)
+}
+
+/// A bearer-token (mutation-capable) client, for the writes an approved plan performs (W12).
+pub(crate) fn mut_client_for(key: AscKey, base: &Url, limiter: Arc<RateLimiter>) -> Result<AscClient> {
+    let auth = JwtAuth::bearer(base.clone(), Arc::new(TokenFactory::new(key)));
     AscClient::with_limiter(Arc::new(auth), RetryPolicy::default(), limiter)
 }
 

@@ -3,14 +3,19 @@
 
 //! `provision` handlers (§8.4). Owner: W6 (Wave 1), W12 (Wave 2).
 //!
-//! `provision.plan` is GET-only; `provision.apply` performs zero-mutation plans and refuses account changes
-//! without an approval (`perm.approvalRequired`); with one they wait for W12 (`core.notImplemented`).
-//! `provision.capabilities` is W12's.
+//! `provision.plan` is GET-only. `provision.apply` performs a zero-mutation plan without an approval; a plan
+//! with account changes needs a human approval (`perm.approvalRequired`). For an `mcp` connection the permission
+//! engine already requires and validates a tier-2 approval before the handler runs; for `cli`/`ide` the handler
+//! itself creates and validates a plan-bound approval ([`ApprovalSubject::Plan`]), so a forged `approval` string
+//! cannot trigger the mutations. `provision.capabilities` is the §6.5 map.
 
 use russet_account::{AccountId, AccountService, ApprovalRef, IdentityId, Mutation, ProvisionOutcome, ProvisionPlan};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
-use russet_ipc::Router;
+use russet_core::ids::ApprovalId;
+use russet_core::rpc::{ClientKind, ConnInfo};
+use russet_ipc::{RequestCtx, Router};
+use russet_protocol::approval::{ApprovalRequiredDetails, ApprovalState, ApprovalSubject};
 use russet_protocol::provision as p;
 use russet_protocol::sign::Distribution as WireDistribution;
 
@@ -23,9 +28,9 @@ pub fn register(r: &mut Router<DaemonCtx>) {
         let svc = accounts_of(&cx)?;
         redacted(Some(&svc), plan(&svc, params).await).await
     });
-    r.request::<p::ProvisionApply, _, _>(|cx: DaemonCtx, _rq, params: p::ProvisionApplyParams| async move {
+    r.request::<p::ProvisionApply, _, _>(|cx: DaemonCtx, rq: RequestCtx, params: p::ProvisionApplyParams| async move {
         let svc = accounts_of(&cx)?;
-        redacted(Some(&svc), apply(&svc, params).await).await
+        redacted(Some(&svc), apply(&cx, rq.peer.connection(), &svc, params).await).await
     });
     r.request::<p::ProvisionCapabilities, _, _>(
         |_cx: DaemonCtx, _rq, _params: p::ProvisionCapabilitiesParams| async move { Ok(capabilities()) },
@@ -78,17 +83,115 @@ pub async fn plan(svc: &AccountService, params: p::ProvisionPlanParams) -> Resul
     Ok(plan_dto(&plan))
 }
 
-/// `provision.apply`.
-pub async fn apply(svc: &AccountService, params: p::ProvisionApplyParams) -> Result<p::ProvisionApplyResult> {
-    let approval_id = match params.approval {
-        Some(a) => Some(serde_json::from_value(serde_json::Value::String(a)).map_err(|_| {
-            Error::new(codes::core::INVALID_ARGUMENT, "approval must be an approval id (`apr_…`)")
-                .with_hint("Pass the approvalId that perm.approvalRequired returned (`russet approvals list`).")
-        })?),
-        None => None,
+/// `provision.apply`. A zero-mutation plan applies with no approval. A mutating plan needs a human approval: for
+/// an `mcp` connection the permission engine has already required and validated a tier-2 approval (the `approval`
+/// here is that id), so the handler passes it through; for `cli`/`ide` the handler creates a plan-bound approval
+/// when none is presented, and validates a presented one against the plan's digest and the caller.
+pub async fn apply(
+    cx: &DaemonCtx,
+    conn: &ConnInfo,
+    svc: &AccountService,
+    params: p::ProvisionApplyParams,
+) -> Result<p::ProvisionApplyResult> {
+    let plan = svc.plan(&params.plan_id)?;
+    let approval_id = if plan.mutations.is_empty() {
+        None
+    } else {
+        Some(resolve_mutation_approval(cx, conn, &plan, params.approval.as_deref())?)
     };
     let outcome = svc.apply_plan(&params.plan_id, &ApprovalRef { approval_id }).await?;
     Ok(outcome_dto(&outcome))
+}
+
+/// The approval id to apply a mutating plan with, or `perm.approvalRequired`/`perm.approvalInvalid`.
+fn resolve_mutation_approval(
+    cx: &DaemonCtx,
+    conn: &ConnInfo,
+    plan: &ProvisionPlan,
+    presented: Option<&str>,
+) -> Result<ApprovalId> {
+    // An `mcp` call is gated by the permission engine (a tier-2 method approval it already validated); trust and
+    // pass the id through. `mcp` never reaches the handler without a valid approval.
+    if conn.kind == ClientKind::Mcp {
+        return parse_id(presented.ok_or_else(approval_missing_internal)?);
+    }
+    let digest = russet_sign::hex(&plan.digest);
+    match presented {
+        None => Err(request_plan_approval(cx, conn, plan, &digest)),
+        Some(id) => {
+            let id = parse_id(id)?;
+            validate_plan_approval(cx, conn, plan, &digest, &id)?;
+            Ok(id)
+        }
+    }
+}
+
+/// Creates a pending plan-bound approval and returns the `perm.approvalRequired` error to send.
+fn request_plan_approval(cx: &DaemonCtx, conn: &ConnInfo, plan: &ProvisionPlan, digest: &str) -> Error {
+    let summary = format!("apply provisioning plan {} ({} account change(s))", plan.plan_id.0, plan.mutations.len());
+    let detail = plan.mutations.iter().map(Mutation::summary).collect::<Vec<_>>().join("; ");
+    let approval = cx.approvals.request(
+        conn,
+        ApprovalSubject::Plan { plan_id: plan.plan_id.0.clone(), plan_digest: digest.to_owned() },
+        2,
+        summary.clone(),
+        Some(detail),
+    );
+    let details = ApprovalRequiredDetails {
+        approval_id: approval.approval_id.clone(),
+        tool: None,
+        tier: 2,
+        summary,
+        args_digest: digest.to_owned(),
+        approve_with: format!("russet approve {} (or Approve in Russet IDE)", approval.approval_id),
+        expires_at: approval.expires_at.clone(),
+    };
+    Error::new(codes::perm::APPROVAL_REQUIRED, format!("applying plan {} needs a human approval", plan.plan_id.0))
+        .with_hint(format!(
+            "Ask the user to run `russet approve {}` in a terminal or to approve it in Russet IDE, then apply \
+             again with approval: \"{}\".",
+            approval.approval_id, approval.approval_id
+        ))
+        .with_details(serde_json::to_value(details).unwrap_or_default())
+}
+
+/// Checks that `id` is a granted plan approval, bound to this plan's id and digest, from this caller.
+fn validate_plan_approval(
+    cx: &DaemonCtx,
+    conn: &ConnInfo,
+    plan: &ProvisionPlan,
+    digest: &str,
+    id: &ApprovalId,
+) -> Result<()> {
+    let invalid = |why: &str| {
+        Error::new(codes::perm::APPROVAL_INVALID, format!("approval {id} {why}"))
+            .with_hint("Request a new approval: apply again without `approval`, then approve it.")
+    };
+    let approval = cx.approvals.get(id).map_err(|_| invalid("does not exist"))?;
+    if approval.state != ApprovalState::Granted {
+        return Err(invalid("is not granted"));
+    }
+    match &approval.subject {
+        ApprovalSubject::Plan { plan_id, plan_digest } if plan_id == &plan.plan_id.0 && plan_digest == digest => {}
+        ApprovalSubject::Plan { .. } => return Err(invalid("was granted for another plan")),
+        ApprovalSubject::Method { .. } => return Err(invalid("is not a provisioning-plan approval")),
+    }
+    if approval.requested_by.kind != conn.kind || approval.requested_by.name != conn.name {
+        return Err(invalid("belongs to another client"));
+    }
+    Ok(())
+}
+
+fn parse_id(s: &str) -> Result<ApprovalId> {
+    ApprovalId::parse(s).map_err(|_| {
+        Error::new(codes::core::INVALID_ARGUMENT, "approval must be an approval id (`apr_…`)")
+            .with_hint("Pass the approvalId that perm.approvalRequired returned (`russet approvals list`).")
+    })
+}
+
+/// An `mcp` call that reached the handler without an approval would be a permission-engine bug.
+fn approval_missing_internal() -> Error {
+    Error::new(codes::core::INTERNAL, "an MCP provision.apply reached the handler without an approval")
 }
 
 /// The wire form of a plan: the team masked, the identity named by its certificate serial, UDIDs already redacted

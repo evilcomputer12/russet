@@ -301,7 +301,7 @@ async fn plans_zero_mutations_for_the_existing_xtool_profile() {
 }
 
 #[tokio::test]
-async fn plans_list_every_needed_change_and_apply_refuses_them() {
+async fn plans_list_every_needed_change_and_applies_them_with_an_approval() {
     let e = env();
     write_xtool(&e.xtool, true);
     let bundle = "com.example.hello";
@@ -340,13 +340,26 @@ async fn plans_list_every_needed_change_and_apply_refuses_them() {
     ));
     assert_eq!(fake.non_get_requests(), 0);
 
+    // Without an approval a mutating plan is refused (exit 11) and nothing is changed.
     let err = svc.apply_plan(&plan.plan_id.0, &ApprovalRef::default()).await.unwrap_err();
     assert_eq!(err.code(), codes::perm::APPROVAL_REQUIRED);
     assert_eq!(err.code().exit_code(), 11);
+    assert_eq!(fake.non_get_requests(), 0, "a refused plan changes nothing");
+
+    // With an approval the plan is applied: register the device and the widget bundle ID, enable push, and
+    // create both profiles, caching them for signing.
     let approved =
         ApprovalRef { approval_id: Some(serde_json::from_str("\"apr_01J00000000000000000000000\"").unwrap()) };
-    assert_eq!(svc.apply_plan(&plan.plan_id.0, &approved).await.unwrap_err().code(), codes::core::NOT_IMPLEMENTED);
-    assert_eq!(fake.non_get_requests(), 0, "nothing was changed on the account");
+    let out = svc.apply_plan(&plan.plan_id.0, &approved).await.unwrap();
+    assert_eq!(out.bundles.len(), 2, "app and widget");
+    assert!(out.bundles.iter().all(|b| b.profile_path.is_file()));
+    assert_eq!(svc.profiles().index().unwrap().len(), 2);
+    assert!(fake.non_get_requests() >= 4, "device, bundle id, capability, two profiles: {}", fake.non_get_requests());
+    assert!(fake.state.lock().unwrap().devices.iter().any(|u| u == UDID), "the device was registered");
+    assert!(
+        fake.state.lock().unwrap().bundle_ids.iter().any(|(_, id, _)| id == "com.example.hello.widget"),
+        "the widget bundle ID was registered"
+    );
     assert_eq!(
         svc.apply_plan("pln_unknown", &ApprovalRef::default()).await.unwrap_err().code(),
         codes::core::NOT_FOUND

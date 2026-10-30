@@ -76,6 +76,13 @@ impl JwtAuth {
         Self::new(base, tokens, TokenMode::PerRequest { lifetime: Duration::from_secs(600) })
     }
 
+    /// One cached, unscoped bearer token (SIGN §5.2). App Store Connect refuses non-GET requests under a scoped
+    /// token, so an approved mutation (W12) uses this mode, which also sends GETs. The caller gates the writes
+    /// behind the permission engine and an approval.
+    pub fn bearer(base: Url, tokens: Arc<TokenFactory>) -> Self {
+        Self::new(base, tokens, TokenMode::Bearer)
+    }
+
     pub fn tokens(&self) -> &Arc<TokenFactory> {
         &self.tokens
     }
@@ -92,12 +99,12 @@ impl Auth for JwtAuth {
     }
 
     async fn authorize(&self, req: &mut reqwest::Request) -> Result<()> {
-        if req.method() != reqwest::Method::GET {
+        if req.method() != reqwest::Method::GET && !matches!(self.mode, TokenMode::Bearer) {
             return Err(Error::new(
                 codes::core::INVALID_ARGUMENT,
-                "Wave 1 sends GET requests only to App Store Connect",
+                "a scoped App Store Connect token sends GET requests only",
             )
-            .with_hint("Mutations go through an approved provisioning plan (W12)."));
+            .with_hint("Mutations go through an approved provisioning plan over a bearer-token client (W12)."));
         }
         let token = match &self.mode {
             TokenMode::Bearer => self.tokens.bearer()?,
@@ -283,6 +290,27 @@ impl AscClient {
         Ok((out, included))
     }
 
+    /// POSTs a JSON:API request body to `path` (`/v1/…`) and decodes the created resource document. The client
+    /// must be in bearer mode (an approved mutation, W12); a scoped client refuses non-GET.
+    pub async fn post_json<T: DeserializeOwned>(&self, path: &str, body: &serde_json::Value) -> Result<T> {
+        let bytes = serde_json::to_vec(body)
+            .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot encode a request body: {e}")))?;
+        let (_, body) = self.send_mutation(reqwest::Method::POST, path, Some(bytes)).await?;
+        serde_json::from_slice(&body).map_err(|e| {
+            Error::new(
+                codes::account::APPLE_SERVICE_UNAVAILABLE,
+                format!("unexpected App Store Connect response for {}: {e}", strip_query(path)),
+            )
+            .with_hint("App Store Connect changed its response format, or a proxy answered; retry later.")
+        })
+    }
+
+    /// DELETEs `path` (`/v1/…/{id}`); App Store Connect answers 204 No Content.
+    pub async fn delete(&self, path: &str) -> Result<()> {
+        self.send_mutation(reqwest::Method::DELETE, path, None).await?;
+        Ok(())
+    }
+
     /// An allowlisted GET returning the status and JSON body (`asc.get`, W12). Errors are returned as the
     /// status and body, not mapped. The allowlist is checked on the URL as it will be sent ([`Self::raw_get_url`]).
     pub async fn raw_get(&self, path_and_query: &str) -> Result<(u16, serde_json::Value)> {
@@ -427,6 +455,64 @@ impl AscClient {
                 return Ok((status, body));
             }
             return Err(map_status(status, &body, path_and_query));
+        }
+    }
+
+    /// Sends a mutating request (POST/DELETE) with a JSON:API `application/json` body. It is not retried on a
+    /// transport error or 5xx (mutations are not idempotent and may have been applied); a 429 is retried, since
+    /// App Store Connect rejected it before processing. Non-2xx answers are mapped to Russet errors.
+    async fn send_mutation(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<(u16, Vec<u8>)> {
+        let url = self.auth.base_url().join(path.trim_start_matches('/')).map_err(|e| {
+            Error::new(codes::core::INVALID_ARGUMENT, format!("invalid App Store Connect path {path}: {e}"))
+        })?;
+        refuse_offline(&url)?;
+        let mut rate_attempt = 0u32;
+        loop {
+            self.pace().await;
+            let mut builder = self.http.request(method.clone(), url.clone());
+            if let Some(b) = &body {
+                builder = builder.header(reqwest::header::CONTENT_TYPE, "application/json").body(b.clone());
+            }
+            let mut req = builder.build().map_err(|e| {
+                Error::new(codes::core::INTERNAL, format!("cannot build a request: {}", without_url(&e)))
+            })?;
+            self.auth.authorize(&mut req).await?;
+            let resp = self.http.execute(req).await.map_err(|e| {
+                Error::new(
+                    codes::account::APPLE_SERVICE_UNAVAILABLE,
+                    format!("cannot reach App Store Connect: {}", without_url(&e)),
+                )
+                .with_hint("Check the network; `russet doctor --online` tests the connection.")
+                .retryable(true)
+            })?;
+            let status = resp.status().as_u16();
+            if let Some(q) = resp.headers().get("x-rate-limit").and_then(|v| v.to_str().ok()).map(parse_rate_limit) {
+                self.limiter.observe(q);
+            }
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(Duration::from_secs);
+            let body = resp.bytes().await.map(|b| b.to_vec()).unwrap_or_default();
+            if status == 429 {
+                rate_attempt += 1;
+                if rate_attempt < self.policy.rate_limited_attempts {
+                    let wait = retry_after.unwrap_or_else(|| self.backoff(rate_attempt)).min(self.policy.max_backoff);
+                    tokio::time::sleep(wait).await;
+                    continue;
+                }
+            }
+            if (200..300).contains(&status) {
+                return Ok((status, body));
+            }
+            return Err(map_status(status, &body, strip_query(path)));
         }
     }
 

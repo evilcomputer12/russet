@@ -100,7 +100,8 @@ pub trait DevPortal: Send + Sync {
     /// One profile with its content.
     async fn profile(&self, id: &str) -> Result<ProfileRecord>;
 
-    // Mutations: W12 implements them behind an approved plan (ARCHITECTURE §8.4).
+    // Mutations: W12 implements them behind an approved plan (ARCHITECTURE §8.4). The default refuses, so a
+    // portal that cannot mutate (the free-team DS2 portal of W22, until it implements them) stays safe.
     async fn register_device(&self, _udid: &str, _name: &str, _approval: &ApprovalRef) -> Result<DeviceRecord> {
         Err(mutations_later())
     }
@@ -120,13 +121,24 @@ pub trait DevPortal: Send + Sync {
     ) -> Result<()> {
         Err(mutations_later())
     }
+    /// Creates a profile bound to `bundle`, the given certificates and (development/ad hoc) devices.
     async fn create_profile(
         &self,
         _name: &str,
         _kind: &str,
         _bundle: &BundleIdRecord,
+        _certificate_ids: &[String],
+        _device_ids: &[String],
         _approval: &ApprovalRef,
     ) -> Result<ProfileRecord> {
+        Err(mutations_later())
+    }
+    /// Deletes a profile by its portal id (only Russet-named stale ones are ever planned).
+    async fn delete_profile(&self, _id: &str, _approval: &ApprovalRef) -> Result<()> {
+        Err(mutations_later())
+    }
+    /// Revokes a certificate by its portal id (`portal.certificates.revoke`, typed confirmation).
+    async fn revoke_certificate(&self, _id: &str, _approval: &ApprovalRef) -> Result<()> {
         Err(mutations_later())
     }
 }
@@ -136,9 +148,11 @@ pub(crate) fn mutations_later() -> Error {
         .with_hint("Wave 1 only reads App Store Connect; approved account changes arrive with W12.")
 }
 
-/// The public App Store Connect API with a team key (per-request GET scopes).
+/// The public App Store Connect API with a team key: a per-request GET-scoped `client` for reads, and a
+/// bearer-token `mut_client` for the writes an approved plan performs (W12).
 pub struct AscPortal {
     client: AscClient,
+    mut_client: AscClient,
     team_id: String,
     individual: bool,
 }
@@ -150,13 +164,23 @@ impl std::fmt::Debug for AscPortal {
 }
 
 impl AscPortal {
-    pub fn new(client: AscClient, team_id: String, individual: bool) -> Self {
-        Self { client, team_id, individual }
+    pub fn new(client: AscClient, mut_client: AscClient, team_id: String, individual: bool) -> Self {
+        Self { client, mut_client, team_id, individual }
     }
 
     pub fn client(&self) -> &AscClient {
         &self.client
     }
+}
+
+/// A JSON:API `relationships` entry pointing at one resource (`{"data":{"type":t,"id":id}}`).
+fn rel_one(t: &str, id: &str) -> serde_json::Value {
+    serde_json::json!({"data": {"type": t, "id": id}})
+}
+
+/// A JSON:API `relationships` entry pointing at many resources.
+fn rel_many(t: &str, ids: &[String]) -> serde_json::Value {
+    serde_json::json!({"data": ids.iter().map(|id| serde_json::json!({"type": t, "id": id})).collect::<Vec<_>>()})
 }
 
 fn cert_info(r: Resource<CertificateAttributes>) -> CertInfo {
@@ -266,4 +290,87 @@ impl DevPortal for AscPortal {
             .with_hint("Retry later; report it with `russet bugreport` if it persists.")
         })
     }
+
+    async fn register_device(&self, udid: &str, name: &str, _approval: &ApprovalRef) -> Result<DeviceRecord> {
+        let body = serde_json::json!({
+            "data": {"type": "devices", "attributes": {"name": name, "platform": "IOS", "udid": udid}}
+        });
+        let doc: russet_asc::model::Document<Resource<DeviceAttributes>> =
+            self.mut_client.post_json("/v1/devices", &body).await?;
+        device_record(doc.data).ok_or_else(|| missing_attributes("device"))
+    }
+
+    async fn register_bundle_id(
+        &self,
+        identifier: &str,
+        name: &str,
+        _approval: &ApprovalRef,
+    ) -> Result<BundleIdRecord> {
+        let body = serde_json::json!({
+            "data": {"type": "bundleIds", "attributes": {"identifier": identifier, "name": name, "platform": "IOS"}}
+        });
+        let doc: russet_asc::model::Document<Resource<BundleIdAttributes>> =
+            self.mut_client.post_json("/v1/bundleIds", &body).await?;
+        bundle_record(&doc.data, Vec::new()).ok_or_else(|| missing_attributes("bundle ID"))
+    }
+
+    async fn enable_capability(
+        &self,
+        bundle: &BundleIdRecord,
+        capability: &str,
+        _approval: &ApprovalRef,
+    ) -> Result<()> {
+        let body = serde_json::json!({
+            "data": {
+                "type": "bundleIdCapabilities",
+                "attributes": {"capabilityType": capability},
+                "relationships": {"bundleId": rel_one("bundleIds", &bundle.id)}
+            }
+        });
+        self.mut_client.post_json::<serde_json::Value>("/v1/bundleIdCapabilities", &body).await?;
+        Ok(())
+    }
+
+    async fn create_profile(
+        &self,
+        name: &str,
+        kind: &str,
+        bundle: &BundleIdRecord,
+        certificate_ids: &[String],
+        device_ids: &[String],
+        _approval: &ApprovalRef,
+    ) -> Result<ProfileRecord> {
+        let mut relationships = serde_json::Map::new();
+        relationships.insert("bundleId".into(), rel_one("bundleIds", &bundle.id));
+        relationships.insert("certificates".into(), rel_many("certificates", certificate_ids));
+        if !device_ids.is_empty() {
+            relationships.insert("devices".into(), rel_many("devices", device_ids));
+        }
+        let body = serde_json::json!({
+            "data": {
+                "type": "profiles",
+                "attributes": {"name": name, "profileType": kind},
+                "relationships": relationships
+            }
+        });
+        let doc: russet_asc::model::Document<Resource<ProfileAttributes>> =
+            self.mut_client.post_json("/v1/profiles", &body).await?;
+        profile_record(doc.data).ok_or_else(|| missing_attributes("profile"))
+    }
+
+    async fn delete_profile(&self, id: &str, _approval: &ApprovalRef) -> Result<()> {
+        self.mut_client.delete(&format!("/v1/profiles/{id}")).await
+    }
+
+    async fn revoke_certificate(&self, id: &str, _approval: &ApprovalRef) -> Result<()> {
+        self.mut_client.delete(&format!("/v1/certificates/{id}")).await
+    }
+}
+
+fn missing_attributes(what: &str) -> Error {
+    Error::new(
+        codes::account::APPLE_SERVICE_UNAVAILABLE,
+        format!("App Store Connect returned a {what} without attributes"),
+    )
+    .with_hint("Retry later; report it with `russet bugreport` if it persists.")
 }

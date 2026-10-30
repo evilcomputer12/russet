@@ -200,6 +200,84 @@ fn err(status: u16, code: &str) -> ResponseTemplate {
 
 struct Responder(Arc<FakeAsc>);
 
+impl Responder {
+    /// Handles a POST/DELETE from an approved plan (W12), mutating [`FakeState`].
+    fn mutate(&self, req: &Request, path: &str) -> ResponseTemplate {
+        let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+        let attr = |k: &str| body["data"]["attributes"][k].as_str().unwrap_or_default().to_owned();
+        let created = |v: Value| ResponseTemplate::new(201).set_body_json(v);
+        let mut state = self.0.state.lock().unwrap();
+        match (req.method.as_str(), path) {
+            ("POST", "/v1/devices") => {
+                let udid = attr("udid");
+                let id = format!("D{}", state.devices.len());
+                state.devices.push(udid.clone());
+                created(json!({"data": {"type": "devices", "id": id,
+                    "attributes": {"udid": udid, "platform": "IOS", "status": "ENABLED", "deviceClass": "IPHONE"}}}))
+            }
+            ("POST", "/v1/bundleIds") => {
+                let ident = attr("identifier");
+                let id = format!("BID{}", state.bundle_ids.len() + 1);
+                state.bundle_ids.push((id.clone(), ident.clone(), Vec::new()));
+                created(json!({"data": {"type": "bundleIds", "id": id,
+                    "attributes": {"identifier": ident, "platform": "IOS", "seedId": TEAM}}}))
+            }
+            ("POST", "/v1/bundleIdCapabilities") => {
+                let cap = attr("capabilityType");
+                let bid = body["data"]["relationships"]["bundleId"]["data"]["id"].as_str().unwrap_or_default();
+                if let Some(entry) = state.bundle_ids.iter_mut().find(|(id, _, _)| id == bid) {
+                    entry.2.push(cap.clone());
+                }
+                created(json!({"data": {"type": "bundleIdCapabilities", "id": format!("{bid}-{cap}"),
+                    "attributes": {"capabilityType": cap}}}))
+            }
+            ("POST", "/v1/profiles") => {
+                let name = attr("name");
+                let kind = attr("profileType");
+                let bid = body["data"]["relationships"]["bundleId"]["data"]["id"].as_str().unwrap_or_default();
+                let Some((_, ident, _)) = state.bundle_ids.iter().find(|(id, _, _)| id == bid).cloned() else {
+                    return err(404, "NOT_FOUND");
+                };
+                let (id, _) = rsa_identity();
+                let mut b = match kind.as_str() {
+                    "IOS_APP_STORE" => ProfileBuilder::app_store(TEAM, &ident),
+                    "IOS_APP_ADHOC" => ProfileBuilder::ad_hoc(TEAM, &ident),
+                    _ => ProfileBuilder::development(TEAM, &ident),
+                };
+                let uuid = format!("NEWU{}", state.profiles.len());
+                b = b.name(&name).uuid(&uuid).certificate(&id.cert_der);
+                if kind != "IOS_APP_STORE" {
+                    b = b.device(UDID);
+                }
+                let content = b.build();
+                let prof = FakeProfile {
+                    id: format!("NEWP{}", state.profiles.len()),
+                    bundle_resource: bid.to_owned(),
+                    name,
+                    profile_type: kind.clone(),
+                    content: content.clone(),
+                };
+                let pid = prof.id.clone();
+                state.profiles.push(prof);
+                created(json!({"data": {"type": "profiles", "id": pid, "attributes": {
+                    "name": body["data"]["attributes"]["name"], "profileType": kind, "profileState": "ACTIVE",
+                    "uuid": uuid, "profileContent": b64(&content), "expirationDate": "2027-10-10T00:00:00.000+0000"}}}))
+            }
+            ("DELETE", p) if p.starts_with("/v1/profiles/") => {
+                let id = p.trim_start_matches("/v1/profiles/");
+                state.profiles.retain(|x| x.id != id);
+                ResponseTemplate::new(204)
+            }
+            ("DELETE", p) if p.starts_with("/v1/certificates/") => {
+                let id = p.trim_start_matches("/v1/certificates/");
+                state.certificates.retain(|(cid, _)| cid != id);
+                ResponseTemplate::new(204)
+            }
+            _ => err(404, "NOT_FOUND"),
+        }
+    }
+}
+
 impl Respond for Responder {
     fn respond(&self, req: &Request) -> ResponseTemplate {
         self.0.requests.lock().unwrap().push((req.method.to_string(), req.url.path().to_owned()));
@@ -216,6 +294,14 @@ impl Respond for Responder {
         if !authorized {
             return err(401, "NOT_AUTHORIZED");
         }
+        let path = req.url.path().to_owned();
+        // A mutation (W12) carries an unscoped bearer token; the GET scope check does not apply to it.
+        if req.method.as_str() != "GET" {
+            if state.individual {
+                return err(403, "FORBIDDEN_ERROR");
+            }
+            return self.mutate(req, &path);
+        }
         let want = match req.url.query() {
             Some(q) => russet_asc::ScopeEntry::get(&format!("{}?{q}", req.url.path())).0,
             None => format!("GET {}", req.url.path()),
@@ -224,10 +310,6 @@ impl Respond for Responder {
         if !scoped {
             return err(403, "FORBIDDEN.REQUEST_DOES_NOT_MATCH_SCOPE");
         }
-        if req.method.as_str() != "GET" {
-            return err(405, "METHOD_NOT_ALLOWED");
-        }
-        let path = req.url.path().to_owned();
         let provisioning = ["/v1/certificates", "/v1/devices", "/v1/bundleIds", "/v1/profiles"];
         if state.forbidden.contains(&path) || (state.individual && provisioning.iter().any(|p| path.starts_with(p))) {
             return err(403, "FORBIDDEN_ERROR");

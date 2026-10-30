@@ -506,24 +506,23 @@ impl Provisioner {
             .collect())
     }
 
-    /// Applies a plan. A zero-mutation plan needs no approval: it is re-planned (staleness check against the
-    /// digest), and its profiles are cached. Mutations need an approval and are applied by W12.
+    /// Applies a plan (SIGN §6.4). A zero-mutation plan needs no approval; a plan with account changes needs an
+    /// `approval` (the handler validates it against the plan's digest through the `ApprovalService`). Either way
+    /// the plan is re-planned first (a staleness check against its digest): a drift answers `provision.planStale`.
+    /// Then the mutations run in dependency order and every chosen profile — reused or just created — is
+    /// downloaded and cached for `russet sign`.
+    ///
+    /// Certificate creation is a separate step (§6.6): a plan whose only path forward is `CreateCertificate` is
+    /// refused here with a hint to import or reuse one, since the CSR flow is not wired yet.
     pub async fn apply(&self, plan: &ProvisionPlan, approval: &ApprovalRef) -> Result<ProvisionOutcome> {
-        if !plan.mutations.is_empty() {
+        if !plan.mutations.is_empty() && approval.approval_id.is_none() {
             let summary: Vec<String> = plan.mutations.iter().map(Mutation::summary).collect();
-            if approval.approval_id.is_none() {
-                return Err(Error::new(
-                    codes::perm::APPROVAL_REQUIRED,
-                    format!(
-                        "the plan changes the developer account ({} change(s)): {}",
-                        summary.len(),
-                        summary.join("; ")
-                    ),
-                )
-                .with_hint("Wave 1 applies only plans without account changes; approved changes arrive with W12.")
-                .with_details(serde_json::json!({"planId": plan.plan_id.0, "mutations": summary})));
-            }
-            return Err(crate::portal::mutations_later().with_details(serde_json::json!({"mutations": summary})));
+            return Err(Error::new(
+                codes::perm::APPROVAL_REQUIRED,
+                format!("the plan changes the developer account ({} change(s)): {}", summary.len(), summary.join("; ")),
+            )
+            .with_hint("Grant the approval (`russet approve …`, or Approve in Russet IDE), then apply again.")
+            .with_details(serde_json::json!({"planId": plan.plan_id.0, "mutations": summary})));
         }
         let fresh = self.plan(&plan.request).await?;
         if fresh.digest != plan.digest {
@@ -534,8 +533,80 @@ impl Provisioner {
             .with_hint("Plan again: `russet provision --dry-run`, then apply the new plan.")
             .with_details(serde_json::json!({"planId": plan.plan_id.0, "reason": "drifted"})));
         }
+        self.execute(&fresh, approval).await
+    }
+
+    /// Runs a (re-planned, digest-matched) plan's mutations and caches its profiles.
+    async fn execute(&self, plan: &ProvisionPlan, approval: &ApprovalRef) -> Result<ProvisionOutcome> {
+        let creating = plan.mutations.iter().any(|m| matches!(m, Mutation::CreateProfile { .. }));
+        if plan.mutations.iter().any(|m| matches!(m, Mutation::CreateCertificate { .. })) {
+            return Err(Error::new(
+                codes::sign::NO_IDENTITY,
+                "this plan needs a new signing certificate, which Russet cannot create during apply yet",
+            )
+            .with_hint(
+                "Import or reuse a certificate (`russet account import --from-xtool`, or a .p12 with \
+                 `russet account import-p12`), then plan and apply again.",
+            ));
+        }
+
+        // The portal certificate id of the plan's identity, needed to bind new profiles.
+        let cert_ids = if creating {
+            let id = plan.identity.as_ref().ok_or_else(|| {
+                Error::new(codes::sign::NO_IDENTITY, "the plan has no signing identity to bind the new profiles to")
+                    .with_hint("Add an identity (`russet account import --from-xtool` or a .p12) and plan again.")
+            })?;
+            vec![self.portal_certificate_id(id, plan.distribution).await?]
+        } else {
+            Vec::new()
+        };
+
+        // Development and ad hoc profiles bind every enabled mobile device (SIGN §6.4 step 5); register the
+        // selected UDIDs that are missing first.
+        let device_ids = if creating && plan.distribution != Distribution::AppStore {
+            let registered = self.portal.list_devices().await?;
+            for udid in &plan.request.devices {
+                if !registered.iter().any(|x| x.udid.eq_ignore_ascii_case(udid) && x.enabled()) {
+                    self.portal.register_device(udid, &format!("Russet {}", redact_udid(udid)), approval).await?;
+                }
+            }
+            self.portal
+                .list_devices()
+                .await?
+                .into_iter()
+                .filter(|d| d.enabled() && is_mobile_class(d))
+                .map(|d| d.id)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Delete stale Russet profiles before recreating (only Russet-named ones are ever planned).
+        for m in &plan.mutations {
+            if let Mutation::DeleteProfile { id, .. } = m {
+                self.portal.delete_profile(id, approval).await?;
+            }
+        }
+
+        // Register bundle IDs, then enable their missing capabilities.
+        let mut records: std::collections::BTreeMap<String, BundleIdRecord> = std::collections::BTreeMap::new();
+        for m in &plan.mutations {
+            if let Mutation::RegisterBundleId { identifier, name } = m {
+                let rec = self.portal.register_bundle_id(identifier, name, approval).await?;
+                records.insert(identifier.clone(), rec);
+            }
+        }
+        for m in &plan.mutations {
+            if let Mutation::EnableCapability { bundle, capability } = m {
+                let rec = self.bundle_record(&records, bundle).await?;
+                self.portal.enable_capability(&rec, capability, approval).await?;
+                records.insert(bundle.clone(), rec);
+            }
+        }
+
+        // Cache the reused profiles, then create and cache the new ones.
         let mut bundles = Vec::new();
-        for p in &fresh.profiles {
+        for p in &plan.profiles {
             let (profile, path) = self.profiles.put(&p.content, Some(&p.profile_id))?;
             bundles.push(BundleProvision {
                 rel_path: p.rel_path.clone(),
@@ -544,8 +615,79 @@ impl Provisioner {
                 profile_path: path,
             });
         }
-        Ok(ProvisionOutcome { identity: fresh.identity, bundles })
+        for m in &plan.mutations {
+            if let Mutation::CreateProfile { name, kind, bundle, .. } = m {
+                let rec = self.bundle_record(&records, bundle).await?;
+                let created = self.portal.create_profile(name, kind, &rec, &cert_ids, &device_ids, approval).await?;
+                let content = match created.content {
+                    Some(c) => c,
+                    None => self.portal.profile(&created.id).await?.content.ok_or_else(|| {
+                        Error::new(
+                            codes::account::APPLE_SERVICE_UNAVAILABLE,
+                            "the created profile has no content to cache",
+                        )
+                        .with_hint("Retry later; report it with `russet bugreport` if it persists.")
+                    })?,
+                };
+                let (profile, path) = self.profiles.put(&content, Some(&created.id))?;
+                let rel_path = plan
+                    .request
+                    .bundles
+                    .iter()
+                    .find(|s| &s.bundle_id == bundle)
+                    .map_or_else(String::new, |s| s.rel_path.clone());
+                bundles.push(BundleProvision {
+                    rel_path,
+                    bundle_id: bundle.clone(),
+                    profile_uuid: profile.uuid,
+                    profile_path: path,
+                });
+            }
+        }
+        bundles.sort_by_key(|b| {
+            plan.request.bundles.iter().position(|s| s.bundle_id == b.bundle_id).unwrap_or(usize::MAX)
+        });
+        Ok(ProvisionOutcome { identity: plan.identity.clone(), bundles })
     }
+
+    /// The bundle-ID record for `bundle`: one just registered, else looked up (it must already exist).
+    async fn bundle_record(
+        &self,
+        registered: &std::collections::BTreeMap<String, BundleIdRecord>,
+        bundle: &str,
+    ) -> Result<BundleIdRecord> {
+        if let Some(r) = registered.get(bundle) {
+            return Ok(r.clone());
+        }
+        self.portal.find_bundle_id(bundle).await?.ok_or_else(|| {
+            Error::new(codes::core::NOT_FOUND, format!("the bundle ID {bundle} is not registered"))
+                .with_hint("Plan again (`russet provision --dry-run`); the account changed since the plan was made.")
+        })
+    }
+
+    /// The portal certificate id of a local identity (matched by serial), for binding new profiles.
+    async fn portal_certificate_id(&self, id: &IdentityId, d: Distribution) -> Result<String> {
+        let identity = self.identities.get(id)?;
+        let wanted = normalize_serial(&identity.serial);
+        self.portal
+            .list_certificates(None)
+            .await?
+            .into_iter()
+            .find(|c| c.serial.as_deref().map(normalize_serial) == Some(wanted.clone()))
+            .map(|c| c.id)
+            .ok_or_else(|| {
+                Error::new(
+                    codes::sign::NO_IDENTITY,
+                    format!("the portal no longer lists the {} certificate the plan chose", d.as_str()),
+                )
+                .with_hint("Plan again (`russet provision --dry-run`); the certificate may have been revoked.")
+            })
+    }
+}
+
+/// Whether a device is a class a development/ad-hoc profile lists (iPhone, iPad or iPod).
+fn is_mobile_class(d: &crate::portal::DeviceRecord) -> bool {
+    matches!(d.device_class.as_deref(), Some("IPHONE" | "IPAD" | "IPOD"))
 }
 
 /// The capability types a bundle's requested entitlements need.
