@@ -1638,6 +1638,46 @@
       ],
       "type": "object"
     },
+    "Capability": {
+      "description": "One capability the developer portal manages (SIGN §6.5).",
+      "properties": {
+        "docs": {
+          "description": "Apple's capabilities documentation.",
+          "type": "string"
+        },
+        "entitlements": {
+          "description": "The entitlement keys that request it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "freeTeam": {
+          "description": "Whether free (personal) teams can use it.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "The App Store Connect `capabilityType`.",
+          "type": "string"
+        },
+        "needsPortalStep": {
+          "description": "Whether part of it needs a manual step in the developer portal (app groups, iCloud containers).",
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "entitlements",
+        "freeTeam",
+        "needsPortalStep",
+        "docs"
+      ],
+      "type": "object"
+    },
     "CertificateKind": {
       "description": "A certificate kind.",
       "enum": [
@@ -6466,6 +6506,34 @@
       ],
       "type": "object"
     },
+    "ProvisionCapabilitiesParams": {
+      "description": "Params of `provision.capabilities`.",
+      "properties": {
+        "accountId": {
+          "description": "Omitted: the default account (reserved; the map is the same for every paid team).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ProvisionCapabilitiesResult": {
+      "description": "Result of `provision.capabilities`.",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "capabilities"
+      ],
+      "type": "object"
+    },
     "ProvisionPlanParams": {
       "description": "Params of `provision.plan`.",
       "properties": {
@@ -10833,11 +10901,11 @@
       "longRunning": false,
       "namespace": "provision",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProvisionCapabilitiesParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProvisionCapabilitiesResult"
       }
     },
     "provision.plan": {

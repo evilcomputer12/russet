@@ -15,7 +15,6 @@ use russet_protocol::provision as p;
 use russet_protocol::sign::Distribution as WireDistribution;
 
 use super::account::{absolute, accounts_of, redacted};
-use super::not_implemented;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
@@ -28,7 +27,28 @@ pub fn register(r: &mut Router<DaemonCtx>) {
         let svc = accounts_of(&cx)?;
         redacted(Some(&svc), apply(&svc, params).await).await
     });
-    r.request::<p::ProvisionCapabilities, _, _>(not_implemented::<p::ProvisionCapabilities>);
+    r.request::<p::ProvisionCapabilities, _, _>(
+        |_cx: DaemonCtx, _rq, _params: p::ProvisionCapabilitiesParams| async move { Ok(capabilities()) },
+    );
+}
+
+/// Apple's capabilities documentation (one page for the whole map).
+const CAPABILITIES_DOCS: &str = "https://developer.apple.com/help/account/reference/supported-capabilities-ios/";
+
+/// `provision.capabilities`: the entitlement → capability map (SIGN §6.5), the same for every paid team.
+pub fn capabilities() -> p::ProvisionCapabilitiesResult {
+    let capabilities = russet_sign::all_capabilities()
+        .into_iter()
+        .map(|c| p::Capability {
+            id: c.id.to_owned(),
+            title: c.title,
+            entitlements: c.entitlements.iter().map(|e| (*e).to_owned()).collect(),
+            free_team: c.free_team,
+            needs_portal_step: c.needs_portal_step,
+            docs: CAPABILITIES_DOCS.to_owned(),
+        })
+        .collect();
+    p::ProvisionCapabilitiesResult { capabilities }
 }
 
 /// The domain distribution of a wire value.

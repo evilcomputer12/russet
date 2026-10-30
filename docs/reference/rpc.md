@@ -436,7 +436,7 @@ Methods:
 |---|---|---|---|---|---|
 | `provision.plan` | read |  | plain | `ProvisionPlanParams` | `ProvisionPlanResult` |
 | `provision.apply` | account | L | plain | `ProvisionApplyParams` | `ProvisionApplyResult` |
-| `provision.capabilities` | read |  | plain | `Unspecified` | `Unspecified` |
+| `provision.capabilities` | read |  | plain | `ProvisionCapabilitiesParams` | `ProvisionCapabilitiesResult` |
 
 ## `sign` (module `sign`)
 

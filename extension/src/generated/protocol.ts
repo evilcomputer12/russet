@@ -607,6 +607,31 @@ profilePath: string, };
 export type CancelParams = { id: RequestIdValue, };
 
 /**
+ * One capability the developer portal manages (SIGN §6.5).
+ */
+export type Capability = { 
+/**
+ * The App Store Connect `capabilityType`.
+ */
+id: string, title: string, 
+/**
+ * The entitlement keys that request it.
+ */
+entitlements: Array<string>, 
+/**
+ * Whether free (personal) teams can use it.
+ */
+freeTeam: boolean, 
+/**
+ * Whether part of it needs a manual step in the developer portal (app groups, iCloud containers).
+ */
+needsPortalStep: boolean, 
+/**
+ * Apple's capabilities documentation.
+ */
+docs: string, };
+
+/**
  * A certificate kind.
  */
 export type CertificateKind = "development" | "distribution";
@@ -2264,6 +2289,20 @@ export type ProvisionApplyResult = {
 identityId?: string, bundles: Array<BundleProvision>, };
 
 /**
+ * Params of `provision.capabilities`.
+ */
+export type ProvisionCapabilitiesParams = { 
+/**
+ * Omitted: the default account (reserved; the map is the same for every paid team).
+ */
+accountId?: string, };
+
+/**
+ * Result of `provision.capabilities`.
+ */
+export type ProvisionCapabilitiesResult = { capabilities: Array<Capability>, };
+
+/**
  * Params of `provision.plan`.
  */
 export type ProvisionPlanParams = { 
@@ -3340,7 +3379,7 @@ export interface Methods {
   "portal.certificates.revoke": { params: Unspecified; result: Unspecified };
   "provision.plan": { params: ProvisionPlanParams; result: ProvisionPlanResult };
   "provision.apply": { params: ProvisionApplyParams; result: ProvisionApplyResult };
-  "provision.capabilities": { params: Unspecified; result: Unspecified };
+  "provision.capabilities": { params: ProvisionCapabilitiesParams; result: ProvisionCapabilitiesResult };
   "sign.run": { params: SignRunParams; result: SignRunResult };
   "sign.verify": { params: SignPathParams; result: SignVerifyResult };
   "sign.lint": { params: SignPathParams; result: SignLintResult };
