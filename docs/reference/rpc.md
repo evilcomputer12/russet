@@ -572,9 +572,9 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `mcp.status` | read |  | plain | `Unspecified` | `Unspecified` |
-| `mcp.install` | system |  | plain | `Unspecified` | `Unspecified` |
-| `mcp.uninstall` | system |  | plain | `Unspecified` | `Unspecified` |
+| `mcp.status` | read |  | plain | `McpStatusParams` | `McpStatusResult` |
+| `mcp.install` | system |  | plain | `McpInstallParams` | `McpInstallResult` |
+| `mcp.uninstall` | system |  | plain | `McpUninstallParams` | `McpInstallResult` |
 | `mcp.http.set` | system |  | plain | `Unspecified` | `Unspecified` |
 | `mcp.policy.get` | read |  | plain | `Unspecified` | `Unspecified` |
 | `mcp.policy.set` | system |  | plain | `Unspecified` | `Unspecified` |
@@ -583,7 +583,7 @@ Notifications:
 
 | Notification | Params |
 |---|---|
-| `mcp.toolCall` | `Unspecified` |
+| `mcp.toolCall` | `McpToolCallParams` |
 
 ## `ide` (module `ide`)
 

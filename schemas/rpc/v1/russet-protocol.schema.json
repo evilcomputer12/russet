@@ -5528,6 +5528,314 @@
         }
       ]
     },
+    "McpChange": {
+      "description": "One planned change to a client's config file (ARCHITECTURE §11.7; `russet-agent-config::Change`).",
+      "properties": {
+        "after": {
+          "description": "The file's content after the change.",
+          "type": "string"
+        },
+        "before": {
+          "description": "The file's content before the change (`None` when it did not exist).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "The file the change writes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "viaCli": {
+          "description": "The client's own `mcp add` command, for reference.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "after"
+      ],
+      "type": "object"
+    },
+    "McpClientStatus": {
+      "description": "One agent client's registration state (ARCHITECTURE §8.6, §11.7).",
+      "properties": {
+        "id": {
+          "description": "The client id (`claude-code`, `codex`, …).",
+          "type": "string"
+        },
+        "installed": {
+          "description": "Whether the client appears installed.",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "The file inspected, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "registered": {
+          "description": "Whether Russet is registered with this client (user scope).",
+          "type": "boolean"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The scope the registration was found in, if any."
+        }
+      },
+      "required": [
+        "id",
+        "registered",
+        "installed"
+      ],
+      "type": "object"
+    },
+    "McpHttpInfo": {
+      "description": "The HTTP endpoint summary (W20; present only when enabled).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "listeners": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "enabled",
+        "listeners"
+      ],
+      "type": "object"
+    },
+    "McpInstallParams": {
+      "description": "Params of `mcp.install`: `{client, scope?: user|project, project?, dryRun?, tierMax?}`.",
+      "properties": {
+        "client": {
+          "description": "The client id to register (`claude-code`, `codex`, `gemini`, `vscode`).",
+          "type": "string"
+        },
+        "dryRun": {
+          "description": "Plan only; do not write (default false).",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "The project directory for `project` scope (defaults to the client's workspace).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`user` (default) or `project`."
+        },
+        "tierMax": {
+          "description": "The client's tier ceiling to record in policy (ARCHITECTURE §11.3); not written by W13.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "client"
+      ],
+      "type": "object"
+    },
+    "McpInstallResult": {
+      "description": "Result of `mcp.install` / `mcp.uninstall`.",
+      "properties": {
+        "applied": {
+          "description": "Whether the changes were written (`false` for a dry run or when nothing changed).",
+          "type": "boolean"
+        },
+        "changes": {
+          "description": "The changes made (or that would be made with `dryRun`); empty when already in the target state.",
+          "items": {
+            "$ref": "#/$defs/McpChange"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "changes",
+        "applied"
+      ],
+      "type": "object"
+    },
+    "McpScope": {
+      "description": "The registration scope of an agent client (ARCHITECTURE §11.7).",
+      "oneOf": [
+        {
+          "const": "user",
+          "description": "The per-user config (the stable shim as the command).",
+          "type": "string"
+        },
+        {
+          "const": "project",
+          "description": "A file committed in a repository (`russet` from PATH).",
+          "type": "string"
+        }
+      ]
+    },
+    "McpStatusParams": {
+      "description": "Params of `mcp.status`: `{}`.",
+      "type": "object"
+    },
+    "McpStatusResult": {
+      "description": "Result of `mcp.status`.",
+      "properties": {
+        "clients": {
+          "items": {
+            "$ref": "#/$defs/McpClientStatus"
+          },
+          "type": "array"
+        },
+        "http": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpHttpInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stdio": {
+          "$ref": "#/$defs/McpStdioInfo"
+        }
+      },
+      "required": [
+        "stdio",
+        "clients"
+      ],
+      "type": "object"
+    },
+    "McpStdioInfo": {
+      "description": "How the stdio bridge is launched (`russet mcp serve`).",
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "args"
+      ],
+      "type": "object"
+    },
+    "McpToolCallParams": {
+      "description": "Params of the `mcp.toolCall` notification: `{client, tool, tier, argsSummary, outcome, durationMs}; to ide`.",
+      "properties": {
+        "argsSummary": {
+          "description": "A redacted one-line summary of the arguments (no secrets or full UDIDs).",
+          "type": "string"
+        },
+        "client": {
+          "description": "The MCP client id that made the call (the trusted `--client` identity).",
+          "type": "string"
+        },
+        "durationMs": {
+          "description": "How long the call took.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outcome": {
+          "description": "`ok`, `error` or `approvalRequired`.",
+          "type": "string"
+        },
+        "tier": {
+          "description": "The tool's tier (0–3).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tool": {
+          "description": "The tool name (ARCHITECTURE §11.4).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "client",
+        "tool",
+        "tier",
+        "argsSummary",
+        "outcome",
+        "durationMs"
+      ],
+      "type": "object"
+    },
+    "McpUninstallParams": {
+      "description": "Params of `mcp.uninstall`: `{client, scope?: user|project, project?, dryRun?}`.",
+      "properties": {
+        "client": {
+          "type": "string"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "client"
+      ],
+      "type": "object"
+    },
     "MessageLevel": {
       "description": "Message levels.",
       "enum": [
@@ -10412,11 +10720,11 @@
       "longRunning": false,
       "namespace": "mcp",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/McpInstallParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/McpInstallResult"
       }
     },
     "mcp.policy.get": {
@@ -10451,11 +10759,11 @@
       "longRunning": false,
       "namespace": "mcp",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/McpStatusParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/McpStatusResult"
       }
     },
     "mcp.uninstall": {
@@ -10464,11 +10772,11 @@
       "longRunning": false,
       "namespace": "mcp",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/McpUninstallParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/McpInstallResult"
       }
     },
     "perf.export": {
@@ -11601,7 +11909,7 @@
     "mcp.toolCall": {
       "namespace": "mcp",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/McpToolCallParams"
       }
     },
     "perf.samples": {
