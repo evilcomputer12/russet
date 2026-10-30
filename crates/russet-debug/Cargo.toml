@@ -28,7 +28,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
-symbolic = { workspace = true, features = ["demangle"] }
+symbolic = { workspace = true, features = ["debuginfo", "symcache", "demangle"] }
 time = { workspace = true, features = ["formatting", "parsing"] }
 tokio = { workspace = true, features = ["sync", "net", "io-util", "time", "rt", "macros", "fs", "process"] }
 tokio-util.workspace = true

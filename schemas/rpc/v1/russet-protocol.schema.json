@@ -2106,6 +2106,294 @@
       ],
       "type": "object"
     },
+    "ControlAction": {
+      "description": "An execution-control action (`debug.control`).",
+      "enum": [
+        "continue",
+        "pause",
+        "step-over",
+        "step-into",
+        "step-out"
+      ],
+      "type": "string"
+    },
+    "CrashFetchParams": {
+      "description": "Params of `crash.fetch`: pull new reports off the device into the store.",
+      "properties": {
+        "bundleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CrashFetchResult": {
+      "description": "Result of `crash.fetch`.",
+      "properties": {
+        "fetched": {
+          "items": {
+            "$ref": "#/$defs/CrashSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "fetched"
+      ],
+      "type": "object"
+    },
+    "CrashFormat": {
+      "description": "The rendering `crash.symbolicate` returns.",
+      "enum": [
+        "json",
+        "text"
+      ],
+      "type": "string"
+    },
+    "CrashFrame": {
+      "description": "One symbolicated stack frame (`SymbolicatedCrash`).",
+      "properties": {
+        "file": {
+          "description": "The source file, when a dSYM resolved it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "description": "The image (binary) the frame is in, for example `RussetProbe` or `UIKitCore`.",
+          "type": "string"
+        },
+        "imageOffset": {
+          "description": "The byte offset into the image.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "index": {
+          "description": "The frame index within its thread.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inlined": {
+          "description": "Whether this frame was inlined (`symbolic` inline expansion).",
+          "type": "boolean"
+        },
+        "line": {
+          "description": "The source line, when a dSYM resolved it.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "symbol": {
+          "description": "The resolved symbol, when Russet could name it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "image",
+        "imageOffset"
+      ],
+      "type": "object"
+    },
+    "CrashListParams": {
+      "description": "Params of `crash.list`: filter the local store.",
+      "properties": {
+        "bundleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "since": {
+          "description": "Only crashes at or after this RFC 3339 time.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CrashListResult": {
+      "description": "Result of `crash.list`: newest first.",
+      "properties": {
+        "crashes": {
+          "items": {
+            "$ref": "#/$defs/CrashSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "crashes"
+      ],
+      "type": "object"
+    },
+    "CrashSummary": {
+      "description": "One stored crash report (`crash.list`, `crash.fetch`): the fields a reader needs before opening it.",
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "crashId": {
+          "description": "The stable id in the local store (`<timestamp>-<incident>`).",
+          "type": "string"
+        },
+        "exception": {
+          "description": "The exception type, for example `EXC_BAD_ACCESS (SIGSEGV)`.",
+          "type": "string"
+        },
+        "process": {
+          "description": "The crashing process name (the executable), for example `RussetProbe`.",
+          "type": "string"
+        },
+        "signal": {
+          "description": "The terminating signal name, for example `SIGSEGV`, when the report has one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "symbolicated": {
+          "description": "Whether a symbolicated rendering is already cached next to the `.ips`.",
+          "type": "boolean"
+        },
+        "timestamp": {
+          "description": "RFC 3339 UTC of the crash (the `.ips` header's `timestamp`, normalised).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "crashId",
+        "bundleId",
+        "process",
+        "timestamp",
+        "exception",
+        "symbolicated"
+      ],
+      "type": "object"
+    },
+    "CrashSymbolicateParams": {
+      "description": "Params of `crash.symbolicate`: a stored crash by id, or an `.ips` file by path.",
+      "properties": {
+        "crashId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrashFormat"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "description": "An `.ips` file to symbolicate without storing it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CrashSymbolicateResult": {
+      "anyOf": [
+        {
+          "description": "`format: json` (the default).",
+          "properties": {
+            "crash": {
+              "$ref": "#/$defs/SymbolicatedCrash"
+            }
+          },
+          "required": [
+            "crash"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`format: text`: an Xcode-like rendering.",
+          "properties": {
+            "crash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "crash"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "Result of `crash.symbolicate`: the symbolicated crash (JSON), or a text rendering under `text`."
+    },
+    "CrashThread": {
+      "description": "One thread of a symbolicated crash.",
+      "properties": {
+        "crashed": {
+          "description": "Whether this is the crashing thread.",
+          "type": "boolean"
+        },
+        "frames": {
+          "items": {
+            "$ref": "#/$defs/CrashFrame"
+          },
+          "type": "array"
+        },
+        "index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The thread name or queue label, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "frames"
+      ],
+      "type": "object"
+    },
     "DaemonLogBatchParams": {
       "description": "Params of the `daemon.logBatch` notification (to subscribers).",
       "properties": {
@@ -2543,6 +2831,254 @@
       ],
       "type": "object"
     },
+    "DebugAttachParams": {
+      "description": "What to attach to (`debug.attach`): a running pid, or the newest process of a bundle id.",
+      "properties": {
+        "bundleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "frontend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DebugFrontend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "project": {
+          "description": "The local build with debug info to load, when known (its UUID must match the running image).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionLease": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionLease"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DebugBreakpointRemoveParams": {
+      "description": "Params of `debug.breakpoint.remove`.",
+      "properties": {
+        "breakpointId": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "breakpointId"
+      ],
+      "type": "object"
+    },
+    "DebugBreakpointRemoveResult": {
+      "description": "Result of `debug.breakpoint.remove`.",
+      "type": "object"
+    },
+    "DebugBreakpointSetParams": {
+      "description": "Params of `debug.breakpoint.set`.",
+      "properties": {
+        "condition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "logMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The session; when omitted, the breakpoint is a pending source breakpoint applied to every matching session."
+        }
+      },
+      "required": [
+        "file",
+        "line"
+      ],
+      "type": "object"
+    },
+    "DebugBreakpointSetResult": {
+      "description": "Result of `debug.breakpoint.set`.",
+      "properties": {
+        "breakpointId": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pending": {
+          "description": "Whether the breakpoint is pending a load that binds it.",
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "breakpointId",
+        "verified",
+        "pending"
+      ],
+      "type": "object"
+    },
+    "DebugControlParams": {
+      "description": "Params of `debug.control`.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/ControlAction"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "threadId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "waitForStopMs": {
+          "description": "Wait up to this long for the next stop before returning (0 or omitted returns at once).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "action"
+      ],
+      "type": "object"
+    },
+    "DebugControlResult": {
+      "description": "Result of `debug.control`: the resulting state, and the stop when one happened (so agents need not poll).",
+      "properties": {
+        "state": {
+          "description": "`running` or `stopped`.",
+          "type": "string"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "DebugEvaluateParams": {
+      "description": "Params of `debug.evaluate`: `po`/`expr`, or an LLDB command prefixed with a backtick (RD §19).",
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvalContext"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expression": {
+          "type": "string"
+        },
+        "frameId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "required": [
+        "sessionId",
+        "expression"
+      ],
+      "type": "object"
+    },
+    "DebugEvaluateResult": {
+      "description": "Result of `debug.evaluate`.",
+      "properties": {
+        "result": {
+          "type": "string"
+        },
+        "ty": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variablesReference": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "type": "object"
+    },
     "DebugFrontend": {
       "description": "Which debugger front end will connect (`debug.prepare {frontend}`).",
       "oneOf": [
@@ -2562,6 +3098,86 @@
           "type": "string"
         }
       ]
+    },
+    "DebugInspectParams": {
+      "description": "Params of `debug.inspect`.",
+      "properties": {
+        "depth": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "frameId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scope": {
+          "description": "The variable scope (`locals`, `globals`, …) or a DAP `variablesReference`, for `what: variables`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "threadId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "what": {
+          "$ref": "#/$defs/InspectWhat"
+        }
+      },
+      "required": [
+        "sessionId",
+        "what"
+      ],
+      "type": "object"
+    },
+    "DebugInspectResult": {
+      "description": "Result of `debug.inspect`: DAP-shaped data; the field for the requested `what` is set.",
+      "properties": {
+        "stackFrames": {
+          "items": {
+            "$ref": "#/$defs/StackFrame"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "threads": {
+          "items": {
+            "$ref": "#/$defs/ThreadInfo"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "variables": {
+          "items": {
+            "$ref": "#/$defs/Variable"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "DebugPrepareParams": {
       "description": "Params of `debug.prepare`: the `run.start` params plus the debugger options.",
@@ -2793,6 +3409,231 @@
         "attachCommands",
         "dapConfig",
         "attachMode"
+      ],
+      "type": "object"
+    },
+    "DebugSymbolsFetchParams": {
+      "description": "Params of `debug.symbols.fetch`.",
+      "properties": {
+        "confirmBytes": {
+          "description": "Headless and MCP callers must pass the planned total; interactive clients are asked with `ui.confirm`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "keepRawDsc": {
+          "description": "Keep the raw dyld shared cache after extraction (default: delete it).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tier": {
+          "$ref": "#/$defs/SymbolTier",
+          "description": "`core` or `full` (not `auto`/`none`)."
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tier"
+      ],
+      "type": "object"
+    },
+    "DebugSymbolsFetchResult": {
+      "description": "Result of `debug.symbols.fetch` (`SymbolSet`): the extracted symbol set now on disk.",
+      "properties": {
+        "build": {
+          "type": "string"
+        },
+        "bytesOnDisk": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dscUuid": {
+          "type": "string"
+        },
+        "path": {
+          "description": "The sysroot LLDB loads with `--sysroot`.",
+          "type": "string"
+        },
+        "tier": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "build",
+        "dscUuid",
+        "tier",
+        "bytesOnDisk",
+        "path"
+      ],
+      "type": "object"
+    },
+    "DebugSymbolsPlanParams": {
+      "description": "Params of `debug.symbols.plan`.",
+      "properties": {
+        "tier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymbolTier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The tier to plan for (defaults to `core`)."
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DebugSymbolsPlanResult": {
+      "description": "Result of `debug.symbols.plan`: the files and sizes, with the space and quota check (RD §11.2 N3).",
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/PlanFile"
+          },
+          "type": "array"
+        },
+        "freeBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "description": "Whether a fetch is allowed: free space ≥ total + 2 GiB and the quota admits it.",
+          "type": "boolean"
+        },
+        "quotaBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Why not, when `ok` is false.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totalBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "files",
+        "totalBytes",
+        "freeBytes",
+        "quotaBytes",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "DebugSymbolsPruneParams": {
+      "description": "Params of `debug.symbols.prune`.",
+      "properties": {
+        "build": {
+          "description": "Prune only this build's set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maxBytes": {
+          "description": "Prune least-recently-used sets until the cache is at most this big (defaults to the quota).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DebugSymbolsPruneResult": {
+      "description": "Result of `debug.symbols.prune`.",
+      "properties": {
+        "freedBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "freedBytes"
+      ],
+      "type": "object"
+    },
+    "DebugSymbolsStatusParams": {
+      "description": "Params of `debug.symbols.status`.",
+      "properties": {
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DebugSymbolsStatusResult": {
+      "description": "Result of `debug.symbols.status`: what the local symbol cache holds for this device's build.",
+      "properties": {
+        "build": {
+          "description": "The device's iOS build (`ProductBuildVersion`), when known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bytesOnDisk": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dscUuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawDscPresent": {
+          "description": "Whether the raw dyld shared cache is still present (it can be pruned after extraction).",
+          "type": "boolean"
+        },
+        "tier": {
+          "description": "0 (memory index only), 1 (core) or 2 (full).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tier",
+        "bytesOnDisk",
+        "rawDscPresent"
       ],
       "type": "object"
     },
@@ -3728,6 +4569,14 @@
       ],
       "type": "object"
     },
+    "EvalContext": {
+      "description": "The expression context (`debug.evaluate`).",
+      "enum": [
+        "repl",
+        "watch"
+      ],
+      "type": "string"
+    },
     "ExecutableId": {
       "description": "`{dev, ino, mtimeNs, size}` of the daemon's executable (Windows: volume serial and file index).",
       "properties": {
@@ -3984,6 +4833,21 @@
       ],
       "type": "object"
     },
+    "HotReloadKind": {
+      "description": "What `run.hotReload` does.",
+      "oneOf": [
+        {
+          "const": "reload",
+          "description": "Reload without restarting (Flutter hot reload); for Swift this maps to Quick Relaunch.",
+          "type": "string"
+        },
+        {
+          "const": "restart",
+          "description": "Restart the app (Flutter hot restart, or Swift relaunch).",
+          "type": "string"
+        }
+      ]
+    },
     "IdentityListParams": {
       "description": "Params of `identity.list`.",
       "properties": {
@@ -4103,6 +4967,15 @@
         "endpoints"
       ],
       "type": "object"
+    },
+    "InspectWhat": {
+      "description": "What `debug.inspect` returns.",
+      "enum": [
+        "threads",
+        "stack",
+        "variables"
+      ],
+      "type": "string"
     },
     "InstallMode": {
       "description": "When the pipeline installs (`[run] install`).",
@@ -5657,6 +6530,24 @@
       ],
       "type": "object"
     },
+    "PlanFile": {
+      "description": "One file a symbol fetch would download.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "size"
+      ],
+      "type": "object"
+    },
     "PlanMutation": {
       "description": "One account change a plan needs.",
       "properties": {
@@ -6660,6 +7551,57 @@
       ],
       "type": "object"
     },
+    "RunHotReloadParams": {
+      "description": "Params of `run.hotReload`.",
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HotReloadKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "RunHotReloadResult": {
+      "description": "Result of `run.hotReload`.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/HotReloadKind"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "supported": {
+          "description": "Whether the session supports hot reload (Swift supports only Quick Relaunch).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "supported",
+        "kind",
+        "ms"
+      ],
+      "type": "object"
+    },
     "RunListParams": {
       "description": "Params of `run.list`.",
       "type": "object"
@@ -6785,6 +7727,38 @@
       "required": [
         "entries",
         "dropped"
+      ],
+      "type": "object"
+    },
+    "RunRelaunchParams": {
+      "description": "Params of `run.relaunch`: Swift Quick Relaunch of a session's app (RD §4.7).",
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "RunRelaunchResult": {
+      "description": "Result of `run.relaunch`: the new pid and how long the relaunch took.",
+      "properties": {
+        "ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "ms"
       ],
       "type": "object"
     },
@@ -8154,6 +9128,53 @@
       ],
       "type": "object"
     },
+    "StackFrame": {
+      "description": "One stack frame in DAP shape (`debug.inspect what: stack`, `debug.control` stops).",
+      "properties": {
+        "column": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "instructionPointer": {
+          "description": "The frame's program counter, as a hex string.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
     "Stage": {
       "description": "Pipeline stages (`JobEvent` kind `stage`).",
       "enum": [
@@ -8179,6 +9200,40 @@
         "failed"
       ],
       "type": "string"
+    },
+    "StopInfo": {
+      "description": "Where the process stopped (`debug.control` result).",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "frames": {
+          "items": {
+            "$ref": "#/$defs/StackFrame"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "description": "The DAP stop reason, for example `breakpoint`, `step`, `exception`, `pause`.",
+          "type": "string"
+        },
+        "threadId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "reason",
+        "frames"
+      ],
+      "type": "object"
     },
     "StopMode": {
       "description": "How `run.stop` ends a session.",
@@ -8215,6 +9270,26 @@
       "pattern": "^sub_[0-9A-HJKMNP-TV-Z]{26}$",
       "type": "string"
     },
+    "SymbolCoverage": {
+      "description": "How much of a crash Russet could symbolicate (RD §11.4).",
+      "oneOf": [
+        {
+          "const": "app",
+          "description": "App frames resolved from a dSYM or debug map.",
+          "type": "string"
+        },
+        {
+          "const": "system",
+          "description": "System frames resolved too (symbols tier ≥ 1).",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Only `<image> + 0x<offset>`.",
+          "type": "string"
+        }
+      ]
+    },
     "SymbolTier": {
       "description": "Device-symbol tiers (W11).",
       "enum": [
@@ -8225,6 +9300,69 @@
       ],
       "type": "string"
     },
+    "SymbolicatedCrash": {
+      "description": "The symbolicated crash `crash.symbolicate` returns as JSON (RD §11.4, §13).",
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "coverage": {
+          "$ref": "#/$defs/SymbolCoverage",
+          "description": "How far symbolication got: `app` (dSYM app frames), `system` (tier ≥ 1) or `none`."
+        },
+        "crashId": {
+          "description": "The stable id in the local store (`<timestamp>-<incident>`).",
+          "type": "string"
+        },
+        "exception": {
+          "description": "The exception type, for example `EXC_BAD_ACCESS (SIGSEGV)`.",
+          "type": "string"
+        },
+        "process": {
+          "description": "The crashing process name (the executable), for example `RussetProbe`.",
+          "type": "string"
+        },
+        "signal": {
+          "description": "The terminating signal name, for example `SIGSEGV`, when the report has one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "symbolicated": {
+          "description": "Whether a symbolicated rendering is already cached next to the `.ips`.",
+          "type": "boolean"
+        },
+        "termination": {
+          "description": "The termination reason line, when present.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threads": {
+          "items": {
+            "$ref": "#/$defs/CrashThread"
+          },
+          "type": "array"
+        },
+        "timestamp": {
+          "description": "RFC 3339 UTC of the crash (the `.ips` header's `timestamp`, normalised).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "crashId",
+        "bundleId",
+        "process",
+        "timestamp",
+        "exception",
+        "symbolicated",
+        "threads",
+        "coverage"
+      ],
+      "type": "object"
+    },
     "TargetKind": {
       "description": "What a target builds.",
       "enum": [
@@ -8232,6 +9370,24 @@
         "app-extension"
       ],
       "type": "string"
+    },
+    "ThreadInfo": {
+      "description": "A thread in DAP shape (`debug.inspect what: threads`).",
+      "properties": {
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
     },
     "ToolComponent": {
       "description": "A toolchain component.",
@@ -8774,6 +9930,34 @@
     },
     "Unspecified": {
       "description": "Placeholder DTO of a method whose shape is not written yet (freeze F0): any JSON object, unknown fields\nignored. The owning area replaces its `…Params`/`…Result` aliases with real structs.",
+      "type": "object"
+    },
+    "Variable": {
+      "description": "A variable in DAP shape (`debug.inspect what: variables`, `debug.evaluate`).",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "variablesReference": {
+          "description": "Non-zero when the variable can be expanded further (a DAP `variablesReference`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
       "type": "object"
     },
     "VerifiedBundle": {
@@ -9463,11 +10647,11 @@
       "longRunning": true,
       "namespace": "crash",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/CrashFetchParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/CrashFetchResult"
       }
     },
     "crash.list": {
@@ -9476,11 +10660,11 @@
       "longRunning": false,
       "namespace": "crash",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/CrashListParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/CrashListResult"
       }
     },
     "crash.symbolicate": {
@@ -9489,11 +10673,11 @@
       "longRunning": false,
       "namespace": "crash",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/CrashSymbolicateParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/CrashSymbolicateResult"
       }
     },
     "daemon.logs.subscribe": {
@@ -9567,11 +10751,11 @@
       "longRunning": true,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugAttachParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugPrepareResult"
       }
     },
     "debug.breakpoint.remove": {
@@ -9580,11 +10764,11 @@
       "longRunning": false,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugBreakpointRemoveParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugBreakpointRemoveResult"
       }
     },
     "debug.breakpoint.set": {
@@ -9593,11 +10777,11 @@
       "longRunning": false,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugBreakpointSetParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugBreakpointSetResult"
       }
     },
     "debug.control": {
@@ -9606,11 +10790,11 @@
       "longRunning": false,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugControlParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugControlResult"
       }
     },
     "debug.evaluate": {
@@ -9619,11 +10803,11 @@
       "longRunning": false,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugEvaluateParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugEvaluateResult"
       }
     },
     "debug.inspect": {
@@ -9632,11 +10816,11 @@
       "longRunning": false,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugInspectParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugInspectResult"
       }
     },
     "debug.jitStats": {
@@ -9671,11 +10855,11 @@
       "longRunning": true,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugSymbolsFetchParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugSymbolsFetchResult"
       }
     },
     "debug.symbols.plan": {
@@ -9684,11 +10868,11 @@
       "longRunning": false,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugSymbolsPlanParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugSymbolsPlanResult"
       }
     },
     "debug.symbols.prune": {
@@ -9697,11 +10881,11 @@
       "longRunning": false,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugSymbolsPruneParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugSymbolsPruneResult"
       }
     },
     "debug.symbols.status": {
@@ -9710,11 +10894,11 @@
       "longRunning": false,
       "namespace": "debug",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugSymbolsStatusParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/DebugSymbolsStatusResult"
       }
     },
     "device.alias.set": {
@@ -10698,11 +11882,11 @@
       "longRunning": false,
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunHotReloadParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunHotReloadResult"
       }
     },
     "run.list": {
@@ -10737,11 +11921,11 @@
       "longRunning": true,
       "namespace": "run",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunRelaunchParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/RunRelaunchResult"
       }
     },
     "run.start": {

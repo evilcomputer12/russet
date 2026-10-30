@@ -168,6 +168,26 @@ pub trait DeviceServices: Send + Sync {
     async fn describe(&self, _udid: &Udid) -> Result<Option<DeviceFacts>> {
         Ok(None)
     }
+
+    /// Pulls crash reports (`.ips` bytes) off the device for `crash.fetch` (RD §13, DEV-15). The default is
+    /// unsupported; the device plane (W10) overrides it (crashreportmover flush + AFC copy). Device check DC-10.
+    async fn fetch_crash_reports(
+        &self,
+        _udid: &Udid,
+        _bundle_id: Option<&str>,
+        _since: Option<&str>,
+    ) -> Result<Vec<Vec<u8>>> {
+        Err(Error::new(codes::core::NOT_IMPLEMENTED, "fetching crash reports off the device lands with W10 (DEV-15)")
+            .with_hint("Crash reports captured on abnormal exit still reach the store; see `russet crash list`."))
+    }
+
+    /// Lists the device's symbol files and their sizes for `debug.symbols.plan`/`fetch`
+    /// (`com.apple.dt.remoteFetchSymbols`, RD §11.2, DEV-17). Unsupported by default; the device plane overrides
+    /// it. Device check DC-09.
+    async fn list_symbol_files(&self, _udid: &Udid) -> Result<Vec<crate::symbols::DeviceSymbolFile>> {
+        Err(Error::new(codes::debug::SYMBOLS_SERVICE, "the device symbol-file service is not wired yet (DEV-17)")
+            .with_hint("Device symbol fetch needs owner approval (Q13) and tier GREEN; see docs/lab/queue.md DC-09."))
+    }
 }
 
 /// The console hub of a launch as session entries: the backlog, then live lines until the process exits (the
@@ -370,9 +390,30 @@ pub struct DebugRequest {
     pub script_root: Option<PathBuf>,
 }
 
-/// `debug.attach` to a running process. W11 defines the fields.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AttachRequest {}
+/// What `debug.attach` attaches to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttachTarget {
+    /// A running process id.
+    Pid(u32),
+    /// The newest process of a bundle id (resolved by the device plane).
+    Bundle(String),
+}
+
+/// `debug.attach` to a running process (RD §4.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachRequest {
+    pub device: DeviceSelector,
+    pub target: AttachTarget,
+    pub frontend: Frontend,
+    pub lease: SessionLease,
+    /// The local build with debug info to load (its UUID must match the running image); optional.
+    pub debug_target: Option<DebugTarget>,
+    /// The resolved LLDB, for `PreparedDebug.lldb`.
+    pub lldb: Option<russet_toolchain::ToolInfo>,
+    pub platform: LldbPlatform,
+    pub init: InitSettings,
+    pub script_root: Option<PathBuf>,
+}
 
 /// Where LLDB connects to the broker.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -463,12 +504,38 @@ pub struct PreparedDebug {
     pub dap_attach_commands: Vec<String>,
 }
 
+/// How a session relaunches its app (Swift Quick Relaunch, RD §4.7): set by [`DebugService`], invoked by
+/// [`SessionHandle::relaunch`] and the DAP hub's `russet/relaunch`.
+#[async_trait]
+pub trait Relaunch: Send + Sync {
+    /// Relaunches `session`'s app in place (same session id) and returns the new pid.
+    async fn relaunch(&self, session: &SessionHandle) -> Result<u32>;
+}
+
+/// One agent breakpoint the daemon tracks so it can merge per source and remove by id (ARCHITECTURE §10.2).
+#[derive(Debug, Clone)]
+struct AgentBreakpoint {
+    session: String,
+    file: String,
+    line: u32,
+    condition: Option<String>,
+    log_message: Option<String>,
+}
+
+/// The daemon's agent-breakpoint registry (headless merge per source).
+#[derive(Debug, Default)]
+struct BreakpointStore {
+    next_id: u32,
+    items: BTreeMap<u32, AgentBreakpoint>,
+}
+
 /// The session registry (`DaemonCtx.debug`).
 pub struct DebugService {
     dev: Arc<dyn DeviceServices>,
     cfg: DebugConfig,
     sessions: Mutex<BTreeMap<String, SessionHandle>>,
     created: broadcast::Sender<SessionHandle>,
+    breakpoints: Mutex<BreakpointStore>,
 }
 
 impl std::fmt::Debug for DebugService {
@@ -484,7 +551,13 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 impl DebugService {
     pub fn new(dev: Arc<dyn DeviceServices>, cfg: DebugConfig) -> Self {
         let (created, _) = broadcast::channel(64);
-        Self { dev, cfg, sessions: Mutex::new(BTreeMap::new()), created }
+        Self {
+            dev,
+            cfg,
+            sessions: Mutex::new(BTreeMap::new()),
+            created,
+            breakpoints: Mutex::new(BreakpointStore::default()),
+        }
     }
 
     /// Sessions as they are created (`run.subscribe` without a session id).
@@ -539,7 +612,13 @@ impl DebugService {
             h.keep_alive(Box::new(channel));
         }
         h.set_state(SessionState::Running);
-        watch_exit(h.clone(), launched.exit.take(), stdio_done);
+        watch_exit(h.clone(), h.generation(), launched.exit.take(), stdio_done);
+        h.set_relauncher(Arc::new(RunRelauncher {
+            dev: self.devices(),
+            udid,
+            spec,
+            process_name: r.process_name.clone(),
+        }));
         Ok(())
     }
 
@@ -631,7 +710,7 @@ impl DebugService {
                 let endpoint = handle.endpoint().clone();
                 let url = handle.lldb_url();
                 let ends = BrokerEnds { dev: self.devices(), udid: udid.clone(), pid, handoff: opts_handoff };
-                follow_broker(h.clone(), handle.subscribe(), ends);
+                follow_broker(h.clone(), h.generation(), handle.subscribe(), ends);
                 let process = ProcessRef { dev: self.devices(), udid: udid.clone(), pid };
                 if let Err(control) = h.set_control(Control::Broker { handle, process }).await {
                     session::stop_control(control).await;
@@ -664,7 +743,7 @@ impl DebugService {
         };
         match r.attach_mode {
             // LLDB drives the process: the device's exit notice (or the end of stdout) ends the session.
-            AttachMode::LegacyAsync => watch_exit(h.clone(), launched.exit.take(), stdio_done),
+            AttachMode::LegacyAsync => watch_exit(h.clone(), h.generation(), launched.exit.take(), stdio_done),
             // The broker reports exits while it holds the process; the device's notice takes over after a detach.
             AttachMode::Broker => h.stash_exit_signals(ExitSignals { exit: launched.exit.take(), stdio_done }),
         }
@@ -708,24 +787,342 @@ impl DebugService {
         };
         let args = attach_script.as_deref().map(lldb::interactive_args).unwrap_or_default();
         h.update_facts(|f| f.lldb_url = Some(lldb_url.clone()));
+        let dap_attach_commands = lldb::dap_attach_commands(&plan);
+        // Quick Relaunch (RD §4.7): relaunch suspended and re-attach the broker on the same endpoint.
+        if r.attach_mode == AttachMode::Broker {
+            h.set_relauncher(Arc::new(DebugRelauncher {
+                dev: self.devices(),
+                udid: udid.clone(),
+                spec: spec.clone(),
+                endpoint: self.endpoint_spec(h.id()),
+                broker: self.cfg.broker.clone(),
+                handoff: self.cfg.broker.handoff_timeout,
+            }));
+        }
+        // DAP hub (frontend: dap): the daemon owns lldb-dap; the IDE and agents share it (ARCHITECTURE §10.2).
+        let dap = if r.frontend == Frontend::Dap {
+            self.start_dap_hub(h, r.lldb_dap.as_ref(), &init, &dap_attach_commands).await?
+        } else {
+            None
+        };
         h.set_state(SessionState::Ready);
         Ok(PreparedDebug {
             session: h.clone(),
             pid,
             broker: endpoint,
             lldb: LldbLaunchPlan { program, args, env, init_commands: init, attach_commands: attach },
-            dap: None,
+            dap,
             lldb_url,
             attach_script,
             attach_mode: r.attach_mode,
+            dap_attach_commands,
+        })
+    }
+
+    /// Starts the per-session DAP hub over a daemon-owned `lldb-dap`, drives a headless `initialize` + `attach`
+    /// so agents can debug without an IDE, serves the IDE socket, and stores the hub on the session. Returns the
+    /// hub endpoint. `lldb_dap` must be a resolved, `ok` tool.
+    async fn start_dap_hub(
+        &self,
+        h: &SessionHandle,
+        lldb_dap: Option<&russet_toolchain::ToolInfo>,
+        init: &[String],
+        dap_attach_commands: &[String],
+    ) -> Result<Option<DapEndpoint>> {
+        let tool = lldb_dap.filter(|t| t.ok).ok_or_else(|| {
+            errors::error(
+                codes::debug::LLDB_UNSUPPORTED,
+                "lldb-dap is required for the DAP front end but is unavailable",
+            )
+        })?;
+        let backend = dap::spawn_lldb_dap(&tool.path, &[], &tool.env)?;
+        let hooks: Arc<dyn dap::HubHooks> = Arc::new(SessionHooks { session: h.clone() });
+        let hub = Arc::new(dap::DapHub::start(backend, hooks));
+        let config = serde_json::json!({
+            "initCommands": init,
+            "attachCommands": dap_attach_commands,
+            "stopOnEntry": false,
+        });
+        hub.bootstrap_attach(config).await?;
+        let endpoint = self.dap_endpoint(h.id());
+        #[cfg(unix)]
+        hub.serve_ide(&endpoint).await?;
+        h.set_dap_hub(Arc::clone(&hub));
+        h.keep_alive(Box::new(hub));
+        Ok(Some(endpoint))
+    }
+
+    /// The DAP hub endpoint for a session (`runtime/sessions/<sid>/dap.sock`, ARCHITECTURE §10.2).
+    fn dap_endpoint(&self, sid: &SessionId) -> DapEndpoint {
+        #[cfg(unix)]
+        {
+            DapEndpoint::Unix { path: self.cfg.runtime_dir.join("sessions").join(sid.as_str()).join("dap.sock") }
+        }
+        #[cfg(not(unix))]
+        {
+            DapEndpoint::NamedPipe { name: format!("russet-dap-{}", sid.as_str()) }
+        }
+    }
+
+    /// `debug.attach`: attach the broker to an already-running process (RD §4.3). The app keeps running if the
+    /// broker's own connection drops (`QSetDetachOnError:1`).
+    pub async fn attach(&self, r: AttachRequest) -> Result<PreparedDebug> {
+        let udid = self.dev.resolve(&r.device).await?;
+        let pid = match &r.target {
+            AttachTarget::Pid(pid) => *pid,
+            AttachTarget::Bundle(b) => {
+                return Err(Error::new(
+                    codes::core::INVALID_ARGUMENT,
+                    format!("attaching by bundle id (`{b}`) needs the device process list"),
+                )
+                .with_hint("Pass the pid (`--pid N`); `russet process list` shows running processes."));
+            }
+        };
+        let bundle_id = match &r.target {
+            AttachTarget::Bundle(b) => b.clone(),
+            AttachTarget::Pid(_) => String::new(),
+        };
+        let mut run = RunRequest::new(r.device.clone(), bundle_id);
+        run.lease = r.lease;
+        let facts = SessionFacts {
+            app_uuid: match &r.debug_target {
+                Some(t) => local_uuid(Some(t.local_executable.clone())).await,
+                None => None,
+            },
+            lldb: r.lldb.as_ref().map(|t| lldb_facts(russet_protocol::debug::DebuggerFlavor::Swift, t)),
+            ..SessionFacts::default()
+        };
+        let h = self.new_session(SessionKind::Debug, &run, Some(AttachMode::Broker), facts);
+        h.set_udid(&udid.0);
+        h.set_pid(pid);
+        self.describe_device(&h, &udid).await;
+        match self.attach_inner(&h, &udid, pid, r).await {
+            Ok(p) => Ok(p),
+            Err(e) => {
+                h.end(SessionState::Failed, None);
+                h.abort().await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn attach_inner(&self, h: &SessionHandle, udid: &Udid, pid: u32, r: AttachRequest) -> Result<PreparedDebug> {
+        h.set_state(SessionState::Attaching);
+        let stream =
+            self.dev.connect_debugserver(udid).await.map_err(|e| errors::debugserver_unavailable(e.message()))?;
+        let spec_ep = self.endpoint_spec(h.id());
+        #[cfg(unix)]
+        if let EndpointSpec::Unix { path } = &spec_ep
+            && let Some(dir) = path.parent()
+            && dir == self.cfg.runtime_dir.join("sessions").join(h.id().as_str())
+        {
+            h.keep_alive(Box::new(RuntimeDirGuard(dir.to_path_buf())));
+        }
+        let mut opts = self.cfg.broker.clone();
+        opts.detach_on_error = true; // attach-to-running: keep the app alive if the broker drops.
+        let opts_handoff = opts.handoff_timeout;
+        let mut broker = Broker::connect(stream, opts).await?;
+        broker.attach(pid).await?;
+        let handle = broker.serve(spec_ep).await?;
+        let endpoint = handle.endpoint().clone();
+        let lldb_url = handle.lldb_url();
+        let ends = BrokerEnds { dev: self.devices(), udid: udid.clone(), pid, handoff: opts_handoff };
+        follow_broker(h.clone(), h.generation(), handle.subscribe(), ends);
+        let process = ProcessRef { dev: self.devices(), udid: udid.clone(), pid };
+        if let Err(control) = h.set_control(Control::Broker { handle, process }).await {
+            session::stop_control(control).await;
+            return Err(stopped_while_launching());
+        }
+        // Logs by pid, when the device plane can stream os_trace.
+        if let Ok(Some(mut rx)) = self.dev.os_log(udid, pid).await {
+            let view = h.logs();
+            let session = h.clone();
+            tokio::spawn(async move {
+                while let Some(e) = rx.recv().await {
+                    if session.is_ended() {
+                        break;
+                    }
+                    view.push(e);
+                }
+            });
+        }
+        let plan = AttachPlan {
+            platform: r.platform.clone(),
+            arch: r.debug_target.as_ref().and_then(|t| t.arch.clone()),
+            local_executable: r.debug_target.as_ref().map(|t| t.local_executable.clone()).unwrap_or_default(),
+            device_app_dir: None,
+            local_app_dir: r.debug_target.as_ref().and_then(|t| t.local_app_dir.clone()),
+            broker_url: lldb_url.clone(),
+        };
+        let mut init_settings = r.init.clone();
+        if init_settings.sdk_path.is_none() {
+            init_settings.sdk_path = r.debug_target.as_ref().and_then(|t| t.sdk_path.clone());
+        }
+        let init = lldb::init_commands(&init_settings);
+        let attach = lldb::attach_commands(&plan);
+        let attach_script = self.write_attach_script(h, &r.script_root, &init, &attach)?;
+        let (program, env) =
+            r.lldb.as_ref().map_or((PathBuf::from("lldb"), BTreeMap::new()), |t| (t.path.clone(), t.env.clone()));
+        let args = attach_script.as_deref().map(lldb::interactive_args).unwrap_or_default();
+        h.update_facts(|f| f.lldb_url = Some(lldb_url.clone()));
+        h.set_state(SessionState::Ready);
+        Ok(PreparedDebug {
+            session: h.clone(),
+            pid,
+            broker: endpoint,
+            lldb: LldbLaunchPlan { program, args, env, init_commands: init, attach_commands: attach.clone() },
+            dap: None,
+            lldb_url,
+            attach_script,
+            attach_mode: AttachMode::Broker,
             dap_attach_commands: lldb::dap_attach_commands(&plan),
         })
     }
 
-    /// `debug.attach` (W11).
-    pub async fn attach(&self, _r: AttachRequest) -> Result<PreparedDebug> {
-        Err(Error::new(codes::core::NOT_IMPLEMENTED, "attaching to a running app lands with W11")
-            .with_hint("Use `russet debug` to launch and debug the app."))
+    /// Writes `attach.lldb` (init + attach commands) under the session's script root, when one is set.
+    fn write_attach_script(
+        &self,
+        h: &SessionHandle,
+        script_root: &Option<PathBuf>,
+        init: &[String],
+        attach: &[String],
+    ) -> Result<Option<PathBuf>> {
+        let dir = match script_root {
+            Some(root) => Some(root.join(h.id().as_str())),
+            None => self.cfg.state_dir.as_ref().map(|d| d.join("sessions").join(h.id().as_str())),
+        };
+        match dir {
+            Some(dir) => {
+                let path = dir.join("attach.lldb");
+                let mut lines = init.to_vec();
+                lines.extend(attach.iter().cloned());
+                fsutil::private_dir(&dir).map_err(|e| errors::io("creating the debug script directory", e))?;
+                fsutil::atomic_write(&path, lldb::script_text(&lines).as_bytes())
+                    .map_err(|e| errors::io("writing attach.lldb", e))?;
+                Ok(Some(path))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// `debug.control`: drive execution through the session's DAP hub (agent role).
+    pub async fn control(
+        &self,
+        session_id: &str,
+        action: russet_protocol::debug::ControlAction,
+        thread_id: Option<u64>,
+        wait_for_stop_ms: Option<u64>,
+    ) -> Result<russet_protocol::debug::DebugControlResult> {
+        let mut client = self.agent_client(session_id)?;
+        dap::agent::control(&mut client, action, thread_id, wait_for_stop_ms).await
+    }
+
+    /// `debug.inspect`.
+    pub async fn inspect(
+        &self,
+        session_id: &str,
+        what: russet_protocol::debug::InspectWhat,
+        thread_id: Option<u64>,
+        frame_id: Option<u64>,
+        scope: Option<&str>,
+        depth: Option<u32>,
+    ) -> Result<russet_protocol::debug::DebugInspectResult> {
+        use russet_protocol::debug::InspectWhat;
+        let client = self.agent_client(session_id)?;
+        match what {
+            InspectWhat::Threads => dap::agent::threads(&client).await,
+            InspectWhat::Stack => dap::agent::stack(&client, thread_id, depth).await,
+            InspectWhat::Variables => dap::agent::variables(&client, frame_id, scope).await,
+        }
+    }
+
+    /// `debug.evaluate`.
+    pub async fn evaluate(
+        &self,
+        session_id: &str,
+        expression: &str,
+        frame_id: Option<u64>,
+        context: &str,
+    ) -> Result<russet_protocol::debug::DebugEvaluateResult> {
+        let client = self.agent_client(session_id)?;
+        dap::agent::evaluate(&client, expression, frame_id, context).await
+    }
+
+    /// `debug.breakpoint.set`: record the agent breakpoint and push the merged set for its source to the hub.
+    pub async fn breakpoint_set(
+        &self,
+        session_id: &str,
+        file: &str,
+        line: u32,
+        condition: Option<String>,
+        log_message: Option<String>,
+    ) -> Result<russet_protocol::debug::DebugBreakpointSetResult> {
+        let id = {
+            let mut store = lock(&self.breakpoints);
+            store.next_id += 1;
+            let id = store.next_id;
+            store.items.insert(
+                id,
+                AgentBreakpoint { session: session_id.to_owned(), file: file.to_owned(), line, condition, log_message },
+            );
+            id
+        };
+        let verified = self.push_breakpoints(session_id, file).await.unwrap_or(false);
+        Ok(russet_protocol::debug::DebugBreakpointSetResult { breakpoint_id: id, verified, pending: !verified })
+    }
+
+    /// `debug.breakpoint.remove`: drop the breakpoint and re-push its source's set.
+    pub async fn breakpoint_remove(&self, breakpoint_id: u32) -> Result<()> {
+        let removed = lock(&self.breakpoints).items.remove(&breakpoint_id);
+        if let Some(bp) = removed {
+            let _ = self.push_breakpoints(&bp.session, &bp.file).await;
+        }
+        Ok(())
+    }
+
+    /// Pushes `setBreakpoints` for one source with every current agent breakpoint in it. Returns whether the
+    /// debugger verified them. A session without a DAP hub keeps the breakpoint pending (returned as unverified).
+    async fn push_breakpoints(&self, session_id: &str, file: &str) -> Result<bool> {
+        let lines: Vec<serde_json::Value> = {
+            let store = lock(&self.breakpoints);
+            store
+                .items
+                .values()
+                .filter(|b| b.session == session_id && b.file == file)
+                .map(|b| {
+                    let mut o = serde_json::json!({ "line": b.line });
+                    if let Some(c) = &b.condition {
+                        o["condition"] = serde_json::json!(c);
+                    }
+                    if let Some(m) = &b.log_message {
+                        o["logMessage"] = serde_json::json!(m);
+                    }
+                    o
+                })
+                .collect()
+        };
+        let Some(client) = self.agent_client(session_id).ok() else { return Ok(false) };
+        let args = serde_json::json!({ "source": { "path": file }, "breakpoints": lines });
+        let body = client.request("setBreakpoints", args).await?;
+        Ok(body.get("breakpoints").and_then(|b| b.as_array()).is_some_and(|arr| {
+            arr.iter().all(|b| b.get("verified").and_then(serde_json::Value::as_bool) == Some(true))
+        }))
+    }
+
+    /// An agent DAP client for a session, or `debug.sessionNotFound` / a "no DAP hub" error.
+    fn agent_client(&self, session_id: &str) -> Result<dap::DapClient> {
+        let h = self.session_by_str(session_id).ok_or_else(|| errors::session_not_found(session_id))?;
+        let hub = h.dap_hub().ok_or_else(|| {
+            Error::new(codes::debug::SESSION_NOT_FOUND, "this session has no DAP hub")
+                .with_hint("Start it with `debug.prepare {frontend: dap}` (or attach an IDE), then drive it.")
+        })?;
+        Ok(hub.agent_client())
+    }
+
+    /// `run.relaunch` / `run.hotReload` (Swift Quick Relaunch): relaunch the session's app in place.
+    pub async fn relaunch(&self, session_id: &str) -> Result<(u32, u64)> {
+        let h = self.session_by_str(session_id).ok_or_else(|| errors::session_not_found(session_id))?;
+        h.relaunch().await
     }
 
     pub fn session(&self, id: &SessionId) -> Option<SessionHandle> {
@@ -805,46 +1202,58 @@ impl DebugService {
         launched: &mut Launched,
         process: Option<String>,
     ) -> Option<tokio::sync::oneshot::Receiver<()>> {
-        let pid = launched.pid;
-        let mut done = launched.stdio.take().map(|stdio| {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            let view = h.logs();
-            let process = process.clone();
-            tokio::spawn(async move {
-                logs::pump_stdio(view, stdio, Some(pid), process).await;
-                let _ = tx.send(());
-            });
-            rx
+        pump_output(&self.dev, h, udid, launched, process).await
+    }
+}
+
+/// Starts the stdout and os_trace pumps for a launch; returns a receiver that fires when stdout ends. Shared by
+/// the initial launch and Quick Relaunch.
+async fn pump_output(
+    dev: &Arc<dyn DeviceServices>,
+    h: &SessionHandle,
+    udid: &Udid,
+    launched: &mut Launched,
+    process: Option<String>,
+) -> Option<tokio::sync::oneshot::Receiver<()>> {
+    let pid = launched.pid;
+    let mut done = launched.stdio.take().map(|stdio| {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let view = h.logs();
+        let process = process.clone();
+        tokio::spawn(async move {
+            logs::pump_stdio(view, stdio, Some(pid), process).await;
+            let _ = tx.send(());
         });
-        if let Some(mut entries) = launched.entries.take() {
-            let (tx, rx) = tokio::sync::oneshot::channel();
+        rx
+    });
+    if let Some(mut entries) = launched.entries.take() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let view = h.logs();
+        tokio::spawn(async move {
+            while let Some(e) = entries.recv().await {
+                view.push(e);
+            }
+            let _ = tx.send(());
+        });
+        done = done.or(Some(rx));
+    }
+    match dev.os_log(udid, pid).await {
+        Ok(Some(mut rx)) => {
             let view = h.logs();
+            let session = h.clone();
             tokio::spawn(async move {
-                while let Some(e) = entries.recv().await {
+                while let Some(e) = rx.recv().await {
+                    if session.is_ended() {
+                        break;
+                    }
                     view.push(e);
                 }
-                let _ = tx.send(());
             });
-            done = done.or(Some(rx));
         }
-        match self.dev.os_log(udid, pid).await {
-            Ok(Some(mut rx)) => {
-                let view = h.logs();
-                let session = h.clone();
-                tokio::spawn(async move {
-                    while let Some(e) = rx.recv().await {
-                        if session.is_ended() {
-                            break;
-                        }
-                        view.push(e);
-                    }
-                });
-            }
-            Ok(None) => {}
-            Err(e) => tracing::warn!(error = %e, "os_trace for the session is unavailable"),
-        }
-        done
+        Ok(None) => {}
+        Err(e) => tracing::warn!(error = %e, "os_trace for the session is unavailable"),
     }
+    done
 }
 
 /// Removes a session's own runtime directory (`runtime/sessions/<sid>/`, home of the broker socket) when the
@@ -901,9 +1310,12 @@ fn stopped_while_launching() -> Error {
     Error::new(codes::core::CANCELLED, "the session was stopped while it launched")
 }
 
-/// Ends the session when the device reports the exit, or (without an exit notice) when stdout ends.
+/// Ends the session when the device reports the exit, or (without an exit notice) when stdout ends. `launch_gen` is the
+/// launch generation this watcher belongs to: once a relaunch bumps the generation, this stale watcher stands
+/// down (killing the old process must not end the relaunched session).
 fn watch_exit(
     h: SessionHandle,
+    launch_gen: u32,
     exit: Option<launch::ExitWatch>,
     stdio_done: Option<tokio::sync::oneshot::Receiver<()>>,
 ) {
@@ -911,12 +1323,18 @@ fn watch_exit(
         (Some(exit), _) => {
             tokio::spawn(async move {
                 let status = exit.await;
-                h.end_exited(status.code, status.signal);
+                if h.generation() == launch_gen {
+                    h.end_exited(status.code, status.signal);
+                }
             });
         }
         (None, Some(done)) => {
             tokio::spawn(async move {
-                if done.await.is_ok() && !h.is_ended() && h.debugger() != DebuggerState::Attached {
+                if done.await.is_ok()
+                    && h.generation() == launch_gen
+                    && !h.is_ended()
+                    && h.debugger() != DebuggerState::Attached
+                {
                     h.end_exited(None, None);
                 }
             });
@@ -933,8 +1351,9 @@ struct BrokerEnds {
     handoff: Option<Duration>,
 }
 
-/// Maps broker events onto the session.
-fn follow_broker(h: SessionHandle, mut events: broadcast::Receiver<BrokerEvent>, ends: BrokerEnds) {
+/// Maps broker events onto the session. `launch_gen` is the launch generation (see [`watch_exit`]); a stale broker's
+/// terminal events are ignored after a relaunch bumps the generation.
+fn follow_broker(h: SessionHandle, launch_gen: u32, mut events: broadcast::Receiver<BrokerEvent>, ends: BrokerEnds) {
     let BrokerEnds { dev, udid, pid, handoff } = ends;
     tokio::spawn(async move {
         loop {
@@ -943,6 +1362,9 @@ fn follow_broker(h: SessionHandle, mut events: broadcast::Receiver<BrokerEvent>,
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => return,
             };
+            if h.generation() != launch_gen {
+                return; // a newer launch owns the session now
+            }
             match e {
                 BrokerEvent::DebuggerConnected => {
                     h.set_debugger(DebuggerState::Attached);
@@ -957,7 +1379,7 @@ fn follow_broker(h: SessionHandle, mut events: broadcast::Receiver<BrokerEvent>,
                     h.set_debugger(DebuggerState::Detached);
                     h.set_state(SessionState::Running);
                     let signals = h.take_exit_signals();
-                    watch_exit(h.clone(), signals.exit, signals.stdio_done);
+                    watch_exit(h.clone(), launch_gen, signals.exit, signals.stdio_done);
                     return;
                 }
                 BrokerEvent::DebuggerLost(broker::LostPolicy::Keep) => {
@@ -983,6 +1405,100 @@ fn follow_broker(h: SessionHandle, mut events: broadcast::Receiver<BrokerEvent>,
             }
         }
     });
+}
+
+/// Swift Quick Relaunch for a `run` session: relaunch the bundle and swap the session's process in place.
+struct RunRelauncher {
+    dev: Arc<dyn DeviceServices>,
+    udid: Udid,
+    spec: LaunchSpec,
+    process_name: Option<String>,
+}
+
+#[async_trait]
+impl Relaunch for RunRelauncher {
+    async fn relaunch(&self, h: &SessionHandle) -> Result<u32> {
+        let launch_gen = h.next_generation();
+        h.set_state(SessionState::Launching);
+        let mut launched = self.dev.launch(&self.udid, &self.spec).await?;
+        let pid = launched.pid;
+        record_launch(h, &launched);
+        let process = ProcessRef { dev: Arc::clone(&self.dev), udid: self.udid.clone(), pid };
+        h.swap_process(Control::Process(process), pid, SessionState::Running).await;
+        let stdio_done = pump_output(&self.dev, h, &self.udid, &mut launched, self.process_name.clone()).await;
+        if let Some(channel) = launched.channel.take() {
+            h.keep_alive(Box::new(channel));
+        }
+        watch_exit(h.clone(), launch_gen, launched.exit.take(), stdio_done);
+        Ok(pid)
+    }
+}
+
+/// Swift Quick Relaunch for a broker `debug` session: relaunch suspended, re-attach the broker on the same
+/// endpoint, replay the cached breakpoints to the DAP hub, and swap the session's process in place.
+struct DebugRelauncher {
+    dev: Arc<dyn DeviceServices>,
+    udid: Udid,
+    spec: LaunchSpec,
+    endpoint: EndpointSpec,
+    broker: broker::BrokerOptions,
+    handoff: Option<Duration>,
+}
+
+#[async_trait]
+impl Relaunch for DebugRelauncher {
+    async fn relaunch(&self, h: &SessionHandle) -> Result<u32> {
+        let launch_gen = h.next_generation();
+        h.set_state(SessionState::Launching);
+        let mut launched = self.dev.launch(&self.udid, &self.spec).await?;
+        let pid = launched.pid;
+        record_launch(h, &launched);
+        let stream =
+            self.dev.connect_debugserver(&self.udid).await.map_err(|e| errors::debugserver_unavailable(e.message()))?;
+        let mut broker = Broker::connect(stream, self.broker.clone()).await?;
+        broker.attach(pid).await?;
+        drop(launched.channel.take());
+        let handle = broker.serve(self.endpoint.clone()).await?;
+        let ends = BrokerEnds { dev: Arc::clone(&self.dev), udid: self.udid.clone(), pid, handoff: self.handoff };
+        follow_broker(h.clone(), launch_gen, handle.subscribe(), ends);
+        let process = ProcessRef { dev: Arc::clone(&self.dev), udid: self.udid.clone(), pid };
+        h.swap_process(Control::Broker { handle, process }, pid, SessionState::Ready).await;
+        let stdio_done = pump_output(&self.dev, h, &self.udid, &mut launched, None).await;
+        h.stash_exit_signals(ExitSignals { exit: launched.exit.take(), stdio_done });
+        // Replay the cached breakpoints to the hub (RD §9.3).
+        if let Some(hub) = h.dap_hub() {
+            let cache = hub.cached_breakpoints();
+            let client = hub.agent_client();
+            for args in cache.sources.into_values() {
+                let _ = client.request("setBreakpoints", args).await;
+            }
+            if let Some(f) = cache.functions {
+                let _ = client.request("setFunctionBreakpoints", f).await;
+            }
+            if let Some(e) = cache.exceptions {
+                let _ = client.request("setExceptionBreakpoints", e).await;
+            }
+        }
+        Ok(pid)
+    }
+}
+
+/// [`dap::HubHooks`] backed by a session: `russet/relaunch` runs Quick Relaunch, `russet/deviceLogs` reads the
+/// session's merged output.
+struct SessionHooks {
+    session: SessionHandle,
+}
+
+#[async_trait]
+impl dap::HubHooks for SessionHooks {
+    async fn relaunch(&self) -> Result<u32> {
+        Ok(self.session.relaunch().await?.0)
+    }
+    fn device_logs(&self, since_ms: Option<i64>) -> Vec<serde_json::Value> {
+        let filter = russet_protocol::run::OutputFilter::default();
+        let (entries, _) = self.session.logs().query(since_ms, Some(200), &filter);
+        entries.iter().filter_map(|e| serde_json::to_value(e).ok()).collect()
+    }
 }
 
 /// Debug doctor checks: whether a broker socket can be created in the runtime directory.

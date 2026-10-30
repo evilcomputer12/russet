@@ -13,7 +13,6 @@ use russet_debug::SessionHandle;
 use russet_ipc::{RequestCtx, Router};
 use russet_protocol::run as p;
 
-use super::not_implemented;
 use crate::DaemonCtx;
 use crate::pipeline::live::pipeline_for;
 use crate::pipeline::run::TracingSink;
@@ -26,8 +25,30 @@ pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::RunSubscribe, _, _>(subscribe);
     r.request::<p::RunOutputQuery, _, _>(output_query);
     r.request::<p::RunStop, _, _>(stop);
-    r.request::<p::RunRelaunch, _, _>(not_implemented::<p::RunRelaunch>);
-    r.request::<p::RunHotReload, _, _>(not_implemented::<p::RunHotReload>);
+    r.request::<p::RunRelaunch, _, _>(relaunch);
+    r.request::<p::RunHotReload, _, _>(hot_reload);
+}
+
+async fn relaunch(cx: DaemonCtx, _rq: RequestCtx, params: p::RunRelaunchParams) -> Result<p::RunRelaunchResult> {
+    let (pid, ms) = cx.debug.get()?.relaunch(params.session_id.as_str()).await?;
+    Ok(p::RunRelaunchResult { pid, ms })
+}
+
+async fn hot_reload(cx: DaemonCtx, _rq: RequestCtx, params: p::RunHotReloadParams) -> Result<p::RunHotReloadResult> {
+    let h = cx
+        .debug
+        .get()?
+        .session(&params.session_id)
+        .ok_or_else(|| russet_debug::errors::session_not_found(params.session_id.as_str()))?;
+    // Swift sessions support only Quick Relaunch (a restart); Flutter hot reload lands with W18.
+    let full = matches!(params.kind, Some(p::HotReloadKind::Restart));
+    let r = h.hot_reload(full).await?;
+    Ok(p::RunHotReloadResult {
+        supported: r.supported,
+        kind: if full { p::HotReloadKind::Restart } else { p::HotReloadKind::Reload },
+        ms: r.ms,
+        message: r.message,
+    })
 }
 
 /// An owned session ends 2 s after its requester's connection closes (ARCHITECTURE §6.3).
