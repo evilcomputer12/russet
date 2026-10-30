@@ -133,6 +133,8 @@ pub(crate) struct Session {
     pub(crate) attach_mode: Option<AttachMode>,
     pub(crate) started_at: String,
     pub(crate) pid: AtomicU32,
+    /// Bumped by every (re)launch so a stale exit watcher of a replaced process cannot end the session.
+    generation: AtomicU32,
     state: watch::Sender<SessionState>,
     debugger: watch::Sender<DebuggerState>,
     ended: Mutex<Option<Ended>>,
@@ -146,6 +148,10 @@ pub(crate) struct Session {
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
     /// The device's exit notice and the end of stdout, held back while the broker decides how the process ended.
     exit_watch: Mutex<Option<ExitSignals>>,
+    /// The per-session DAP hub (set when a debug session has a DAP front end, ARCHITECTURE §10.2).
+    dap: Mutex<Option<Arc<crate::dap::DapHub>>>,
+    /// How to relaunch this session's app (Swift Quick Relaunch, RD §4.7); set by [`crate::DebugService`].
+    relauncher: Mutex<Option<Arc<dyn crate::Relaunch>>>,
     facts: Mutex<SessionFacts>,
     /// Held while a record is computed and written, so the last write is never an older view.
     persisting: Mutex<()>,
@@ -214,6 +220,7 @@ impl SessionHandle {
             attach_mode: init.attach_mode,
             started_at: logs::now_rfc3339(),
             pid: AtomicU32::new(0),
+            generation: AtomicU32::new(0),
             state,
             debugger,
             ended: Mutex::new(None),
@@ -225,6 +232,8 @@ impl SessionHandle {
             registry,
             keep: Mutex::new(Vec::new()),
             exit_watch: Mutex::new(None),
+            dap: Mutex::new(None),
+            relauncher: Mutex::new(None),
             facts: Mutex::new(init.facts),
             persisting: Mutex::new(()),
         };
@@ -402,13 +411,71 @@ impl SessionHandle {
         Ok(())
     }
 
-    /// `run.hotReload` is W11's (Swift Quick Relaunch) and W18's (Flutter).
+    /// `run.hotReload`: Swift Quick Relaunch (W11); Flutter hot reload lands with W18. Returns the timing.
     pub async fn hot_reload(&self, _full: bool) -> Result<HotReloadResult> {
-        Err(russet_core::Error::new(
-            russet_core::error::codes::core::NOT_IMPLEMENTED,
-            "hot reload lands with W11 (Swift Quick Relaunch) and W18 (Flutter)",
-        )
-        .with_hint("Restart the session with `russet run` for now."))
+        let start = std::time::Instant::now();
+        let (_pid, _) = self.relaunch().await?;
+        Ok(HotReloadResult {
+            supported: true,
+            kind: "restart".to_owned(),
+            ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            message: Some("Swift Quick Relaunch (restart); Flutter hot reload lands with W18".to_owned()),
+        })
+    }
+
+    /// The per-session DAP hub, when one is attached.
+    pub fn dap_hub(&self) -> Option<Arc<crate::dap::DapHub>> {
+        lock(&self.inner.dap).clone()
+    }
+
+    /// Attaches a DAP hub to this session (`debug.prepare {frontend: dap}`).
+    pub fn set_dap_hub(&self, hub: Arc<crate::dap::DapHub>) {
+        *lock(&self.inner.dap) = Some(hub);
+    }
+
+    /// Sets how this session relaunches its app (Swift Quick Relaunch).
+    pub fn set_relauncher(&self, r: Arc<dyn crate::Relaunch>) {
+        *lock(&self.inner.relauncher) = Some(r);
+    }
+
+    /// Swift Quick Relaunch: relaunch the app and return `(pid, ms)`. The session keeps its id.
+    pub async fn relaunch(&self) -> Result<(u32, u64)> {
+        if self.is_ended() {
+            return Err(crate::errors::session_not_found(self.inner.id.as_str())
+                .with_hint("This session has ended; start a new one with `russet run` or `russet debug`."));
+        }
+        let relauncher = lock(&self.inner.relauncher).clone().ok_or_else(|| {
+            russet_core::Error::new(
+                russet_core::error::codes::core::NOT_IMPLEMENTED,
+                "this session cannot be relaunched",
+            )
+            .with_hint("Relaunch is for Swift `run`/`debug` sessions; Flutter hot reload lands with W18.")
+        })?;
+        let start = std::time::Instant::now();
+        let pid = relauncher.relaunch(self).await?;
+        Ok((pid, u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)))
+    }
+
+    /// This session's launch generation. An exit watcher captures it and ends the session only while it still
+    /// matches, so a relaunch's kill of the old process cannot end the new one.
+    pub(crate) fn generation(&self) -> u32 {
+        self.inner.generation.load(Ordering::SeqCst)
+    }
+
+    /// Bumps the generation (a new launch is starting) and returns the new value.
+    pub(crate) fn next_generation(&self) -> u32 {
+        self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Replaces the session's running process (Quick Relaunch): kill the old control, install the new one, set
+    /// `pid` and the state. The generation must already have been bumped (so the old watcher stands down). The
+    /// session id and subscriptions are unchanged.
+    pub(crate) async fn swap_process(&self, control: Control, pid: u32, state: SessionState) {
+        let old = std::mem::replace(&mut *self.inner.control.lock().await, control);
+        stop_control(old).await;
+        self.inner.pid.store(pid, Ordering::SeqCst);
+        self.set_state(state);
+        self.persist();
     }
 
     /// Kills an owned session `grace` after `owner_gone` resolves (ARCHITECTURE §6.3: owner gone + 2 s). A
