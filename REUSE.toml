@@ -38,6 +38,22 @@ SPDX-FileCopyrightText = "2026 Russet contributors"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
+# W14 extension: dotfiles, media assets (SVG icons, walkthrough docs), the Info.plist/entitlement data
+# catalogs (JSON cannot carry a comment), the HelloProject test fixture (kept pristine, as a user's project
+# would be) and the shared webview stylesheet — none carry an inline header.
+path = [
+    "extension/.gitignore",
+    "extension/.vscodeignore",
+    "extension/media/**",
+    "extension/data/*.json",
+    "extension/test/fixtures/**",
+    "extension/webview/shared/theme.css",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
 # The READMEs of the permissive layer-F crates follow their crate's licence.
 path = [
     "crates/russet-plist/README.md",

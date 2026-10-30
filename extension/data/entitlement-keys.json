@@ -1,5 +1,5 @@
 {
-  "_comment": "SPDX-License-Identifier: GPL-3.0-or-later. Russet's entitlement key catalog (ide.md §5.13). Tier 0 seeds a few entries; EXT-11 fills it.",
+  "_comment": "GPL-3.0-or-later (see REUSE.toml). Russet's entitlement key catalog (ide.md §5.13). Tier 0 seeds a few entries; EXT-11 fills it.",
   "keys": [
     {
       "key": "application-identifier",

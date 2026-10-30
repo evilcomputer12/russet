@@ -1,5 +1,5 @@
 {
-  "_comment": "SPDX-License-Identifier: GPL-3.0-or-later. Russet's Info.plist key catalog (ide.md §5.12), written from Apple's public documentation. Tier 0 seeds a few entries; EXT-10 fills it to >= 60 keys.",
+  "_comment": "GPL-3.0-or-later (see REUSE.toml). Russet's Info.plist key catalog (ide.md §5.12), written from Apple's public documentation. Tier 0 seeds a few entries; EXT-10 fills it to >= 60 keys.",
   "keys": [
     {
       "key": "CFBundleIdentifier",
