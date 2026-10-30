@@ -219,10 +219,32 @@ crate::rpc_method!(
     Permission::Device, long_running
 );
 
-/// Params of `debug.attach`: `{udid?, pid?|bundleId?, frontend?, sessionLease?} → PreparedDebug`.
-pub type DebugAttachParams = Unspecified;
-/// Result of `debug.attach`.
-pub type DebugAttachResult = Unspecified;
+/// What to attach to (`debug.attach`): a running pid, or the newest process of a bundle id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugAttachParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frontend: Option<DebugFrontend>,
+    /// The local build with debug info to load, when known (its UUID must match the running image).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_lease: Option<crate::common::SessionLease>,
+}
+/// Result of `debug.attach`: the same `PreparedDebug` shape as `debug.prepare`.
+pub type DebugAttachResult = DebugPrepareResult;
 crate::rpc_method!(
     /// `debug.attach` (class `device`, long-running). W11 (Wave 2).
     DebugAttach,
@@ -231,10 +253,108 @@ crate::rpc_method!(
     Permission::Device, long_running
 );
 
-/// Params of `debug.control`: `{sessionId, action: continue|pause|step-over|step-into|step-out, threadId?, waitForStopMs?} → {state, stop?{reason, threadId, frames[]}}`.
-pub type DebugControlParams = Unspecified;
-/// Result of `debug.control`.
-pub type DebugControlResult = Unspecified;
+/// An execution-control action (`debug.control`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum ControlAction {
+    Continue,
+    Pause,
+    StepOver,
+    StepInto,
+    StepOut,
+}
+
+/// One stack frame in DAP shape (`debug.inspect what: stack`, `debug.control` stops).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct StackFrame {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub column: Option<u32>,
+    /// The frame's program counter, as a hex string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub instruction_pointer: Option<String>,
+}
+
+/// A thread in DAP shape (`debug.inspect what: threads`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadInfo {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub name: String,
+}
+
+/// A variable in DAP shape (`debug.inspect what: variables`, `debug.evaluate`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Variable {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, rename = "type")]
+    pub ty: Option<String>,
+    /// Non-zero when the variable can be expanded further (a DAP `variablesReference`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[ts(type = "number")]
+    pub variables_reference: u64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+/// Where the process stopped (`debug.control` result).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct StopInfo {
+    /// The DAP stop reason, for example `breakpoint`, `step`, `exception`, `pause`.
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub thread_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
+    pub frames: Vec<StackFrame>,
+}
+
+/// Params of `debug.control`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugControlParams {
+    pub session_id: SessionId,
+    pub action: ControlAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub thread_id: Option<u64>,
+    /// Wait up to this long for the next stop before returning (0 or omitted returns at once).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub wait_for_stop_ms: Option<u64>,
+}
+
+/// Result of `debug.control`: the resulting state, and the stop when one happened (so agents need not poll).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugControlResult {
+    /// `running` or `stopped`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stop: Option<StopInfo>,
+}
 crate::rpc_method!(
     /// `debug.control` (class `device`). W11 (Wave 2).
     DebugControl,
@@ -243,10 +363,50 @@ crate::rpc_method!(
     Permission::Device
 );
 
-/// Params of `debug.inspect`: `{sessionId, what: threads|stack|variables, threadId?, frameId?, scope?, depth?} → DAP-shaped data`.
-pub type DebugInspectParams = Unspecified;
-/// Result of `debug.inspect`.
-pub type DebugInspectResult = Unspecified;
+/// What `debug.inspect` returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum InspectWhat {
+    Threads,
+    Stack,
+    Variables,
+}
+
+/// Params of `debug.inspect`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugInspectParams {
+    pub session_id: SessionId,
+    pub what: InspectWhat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub thread_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub frame_id: Option<u64>,
+    /// The variable scope (`locals`, `globals`, …) or a DAP `variablesReference`, for `what: variables`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub depth: Option<u32>,
+}
+
+/// Result of `debug.inspect`: DAP-shaped data; the field for the requested `what` is set.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugInspectResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub threads: Option<Vec<ThreadInfo>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stack_frames: Option<Vec<StackFrame>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub variables: Option<Vec<Variable>>,
+}
 crate::rpc_method!(
     /// `debug.inspect` (class `read`). W11 (Wave 2).
     DebugInspect,
@@ -255,10 +415,41 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `debug.evaluate`: `{sessionId, expression, frameId?, context?: repl|watch} → {result, type}`.
-pub type DebugEvaluateParams = Unspecified;
+/// The expression context (`debug.evaluate`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum EvalContext {
+    #[default]
+    Repl,
+    Watch,
+}
+
+/// Params of `debug.evaluate`: `po`/`expr`, or an LLDB command prefixed with a backtick (RD §19).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugEvaluateParams {
+    pub session_id: SessionId,
+    pub expression: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub frame_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub context: Option<EvalContext>,
+}
+
 /// Result of `debug.evaluate`.
-pub type DebugEvaluateResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugEvaluateResult {
+    pub result: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, rename = "type")]
+    pub ty: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[ts(type = "number")]
+    pub variables_reference: u64,
+}
 crate::rpc_method!(
     /// `debug.evaluate` (class `device`). W11 (Wave 2).
     DebugEvaluate,
@@ -267,10 +458,33 @@ crate::rpc_method!(
     Permission::Device
 );
 
-/// Params of `debug.breakpoint.set`: `{sessionId?, file, line, condition?, logMessage?} → {breakpointId, verified, pending}`.
-pub type DebugBreakpointSetParams = Unspecified;
+/// Params of `debug.breakpoint.set`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugBreakpointSetParams {
+    /// The session; when omitted, the breakpoint is a pending source breakpoint applied to every matching session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_id: Option<SessionId>,
+    pub file: String,
+    pub line: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub condition: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub log_message: Option<String>,
+}
+
 /// Result of `debug.breakpoint.set`.
-pub type DebugBreakpointSetResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugBreakpointSetResult {
+    pub breakpoint_id: u32,
+    pub verified: bool,
+    /// Whether the breakpoint is pending a load that binds it.
+    pub pending: bool,
+}
 crate::rpc_method!(
     /// `debug.breakpoint.set` (class `device`). W11 (Wave 2).
     DebugBreakpointSet,
@@ -279,10 +493,17 @@ crate::rpc_method!(
     Permission::Device
 );
 
-/// Params of `debug.breakpoint.remove`: `{breakpointId} → {}`.
-pub type DebugBreakpointRemoveParams = Unspecified;
+/// Params of `debug.breakpoint.remove`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugBreakpointRemoveParams {
+    pub breakpoint_id: u32,
+}
+
 /// Result of `debug.breakpoint.remove`.
-pub type DebugBreakpointRemoveResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugBreakpointRemoveResult {}
 crate::rpc_method!(
     /// `debug.breakpoint.remove` (class `device`). W11 (Wave 2).
     DebugBreakpointRemove,
@@ -303,10 +524,33 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `debug.symbols.status`: `{udid?} → {build, dscUuid?, tier, bytesOnDisk}`.
-pub type DebugSymbolsStatusParams = Unspecified;
-/// Result of `debug.symbols.status`.
-pub type DebugSymbolsStatusResult = Unspecified;
+/// Params of `debug.symbols.status`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSymbolsStatusParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+}
+
+/// Result of `debug.symbols.status`: what the local symbol cache holds for this device's build.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSymbolsStatusResult {
+    /// The device's iOS build (`ProductBuildVersion`), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub build: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dsc_uuid: Option<String>,
+    /// 0 (memory index only), 1 (core) or 2 (full).
+    pub tier: u8,
+    #[ts(type = "number")]
+    pub bytes_on_disk: u64,
+    /// Whether the raw dyld shared cache is still present (it can be pruned after extraction).
+    pub raw_dsc_present: bool,
+}
 crate::rpc_method!(
     /// `debug.symbols.status` (class `read`). W11 (Wave 2).
     DebugSymbolsStatus,
@@ -315,10 +559,46 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `debug.symbols.plan`: `{udid?} → {files[], totalBytes, freeBytes, quotaBytes, ok, reason?}`.
-pub type DebugSymbolsPlanParams = Unspecified;
-/// Result of `debug.symbols.plan`.
-pub type DebugSymbolsPlanResult = Unspecified;
+/// Params of `debug.symbols.plan`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSymbolsPlanParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// The tier to plan for (defaults to `core`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tier: Option<SymbolTier>,
+}
+
+/// One file a symbol fetch would download.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanFile {
+    pub path: String,
+    #[ts(type = "number")]
+    pub size: u64,
+}
+
+/// Result of `debug.symbols.plan`: the files and sizes, with the space and quota check (RD §11.2 N3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSymbolsPlanResult {
+    pub files: Vec<PlanFile>,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    #[ts(type = "number")]
+    pub free_bytes: u64,
+    #[ts(type = "number")]
+    pub quota_bytes: u64,
+    /// Whether a fetch is allowed: free space ≥ total + 2 GiB and the quota admits it.
+    pub ok: bool,
+    /// Why not, when `ok` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason: Option<String>,
+}
 crate::rpc_method!(
     /// `debug.symbols.plan` (class `read`). W11 (Wave 2).
     DebugSymbolsPlan,
@@ -327,10 +607,37 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `debug.symbols.fetch`: `{udid?, tier: core|full, confirmBytes?} → SymbolSet`.
-pub type DebugSymbolsFetchParams = Unspecified;
-/// Result of `debug.symbols.fetch`.
-pub type DebugSymbolsFetchResult = Unspecified;
+/// Params of `debug.symbols.fetch`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSymbolsFetchParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// `core` or `full` (not `auto`/`none`).
+    pub tier: SymbolTier,
+    /// Headless and MCP callers must pass the planned total; interactive clients are asked with `ui.confirm`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub confirm_bytes: Option<u64>,
+    /// Keep the raw dyld shared cache after extraction (default: delete it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub keep_raw_dsc: Option<bool>,
+}
+
+/// Result of `debug.symbols.fetch` (`SymbolSet`): the extracted symbol set now on disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSymbolsFetchResult {
+    pub build: String,
+    pub dsc_uuid: String,
+    pub tier: u8,
+    #[ts(type = "number")]
+    pub bytes_on_disk: u64,
+    /// The sysroot LLDB loads with `--sysroot`.
+    pub path: String,
+}
 crate::rpc_method!(
     /// `debug.symbols.fetch` (class `device`, long-running). W11 (Wave 2).
     DebugSymbolsFetch,
@@ -339,10 +646,27 @@ crate::rpc_method!(
     Permission::Device, long_running
 );
 
-/// Params of `debug.symbols.prune`: `{maxBytes?, build?} → {freedBytes}`.
-pub type DebugSymbolsPruneParams = Unspecified;
+/// Params of `debug.symbols.prune`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSymbolsPruneParams {
+    /// Prune least-recently-used sets until the cache is at most this big (defaults to the quota).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub max_bytes: Option<u64>,
+    /// Prune only this build's set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub build: Option<String>,
+}
+
 /// Result of `debug.symbols.prune`.
-pub type DebugSymbolsPruneResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSymbolsPruneResult {
+    #[ts(type = "number")]
+    pub freed_bytes: u64,
+}
 crate::rpc_method!(
     /// `debug.symbols.prune` (class `system`). W11 (Wave 2).
     DebugSymbolsPrune,

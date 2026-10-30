@@ -810,6 +810,129 @@ export type ConnectionSummary = {
 id: string, kind: ClientKind, name: string, pid?: number, };
 
 /**
+ * An execution-control action (`debug.control`).
+ */
+export type ControlAction = "continue" | "pause" | "step-over" | "step-into" | "step-out";
+
+/**
+ * Params of `crash.fetch`: pull new reports off the device into the store.
+ */
+export type CrashFetchParams = { udid?: string, bundleId?: string, since?: string, };
+
+/**
+ * Result of `crash.fetch`.
+ */
+export type CrashFetchResult = { fetched: Array<CrashSummary>, };
+
+/**
+ * The rendering `crash.symbolicate` returns.
+ */
+export type CrashFormat = "json" | "text";
+
+/**
+ * One symbolicated stack frame (`SymbolicatedCrash`).
+ */
+export type CrashFrame = { 
+/**
+ * The frame index within its thread.
+ */
+index: number, 
+/**
+ * The image (binary) the frame is in, for example `RussetProbe` or `UIKitCore`.
+ */
+image: string, 
+/**
+ * The byte offset into the image.
+ */
+imageOffset: number, 
+/**
+ * The resolved symbol, when Russet could name it.
+ */
+symbol?: string, 
+/**
+ * The source file, when a dSYM resolved it.
+ */
+file?: string, 
+/**
+ * The source line, when a dSYM resolved it.
+ */
+line?: number, 
+/**
+ * Whether this frame was inlined (`symbolic` inline expansion).
+ */
+inlined?: boolean, };
+
+/**
+ * Params of `crash.list`: filter the local store.
+ */
+export type CrashListParams = { bundleId?: string, 
+/**
+ * Only crashes at or after this RFC 3339 time.
+ */
+since?: string, limit?: number, };
+
+/**
+ * Result of `crash.list`: newest first.
+ */
+export type CrashListResult = { crashes: Array<CrashSummary>, };
+
+/**
+ * One stored crash report (`crash.list`, `crash.fetch`): the fields a reader needs before opening it.
+ */
+export type CrashSummary = { 
+/**
+ * The stable id in the local store (`<timestamp>-<incident>`).
+ */
+crashId: string, bundleId: string, 
+/**
+ * The crashing process name (the executable), for example `RussetProbe`.
+ */
+process: string, 
+/**
+ * RFC 3339 UTC of the crash (the `.ips` header's `timestamp`, normalised).
+ */
+timestamp: string, 
+/**
+ * The exception type, for example `EXC_BAD_ACCESS (SIGSEGV)`.
+ */
+exception: string, 
+/**
+ * The terminating signal name, for example `SIGSEGV`, when the report has one.
+ */
+signal?: string, 
+/**
+ * Whether a symbolicated rendering is already cached next to the `.ips`.
+ */
+symbolicated: boolean, };
+
+/**
+ * Params of `crash.symbolicate`: a stored crash by id, or an `.ips` file by path.
+ */
+export type CrashSymbolicateParams = { crashId?: string, 
+/**
+ * An `.ips` file to symbolicate without storing it.
+ */
+path?: string, format?: CrashFormat, };
+
+/**
+ * Result of `crash.symbolicate`: the symbolicated crash (JSON), or a text rendering under `text`.
+ */
+export type CrashSymbolicateResult = { crash: SymbolicatedCrash, } | { crash: string, };
+
+/**
+ * One thread of a symbolicated crash.
+ */
+export type CrashThread = { index: number, 
+/**
+ * Whether this is the crashing thread.
+ */
+crashed?: boolean, 
+/**
+ * The thread name or queue label, when known.
+ */
+name?: string, frames: Array<CrashFrame>, };
+
+/**
  * Params of the `daemon.logBatch` notification (to subscribers).
  */
 export type DaemonLogBatchParams = { subscriptionId: SubscriptionId, records: Array<DaemonLogRecord>, 
@@ -985,9 +1108,88 @@ productBuild?: string,
 source: DdiOrigin, };
 
 /**
+ * What to attach to (`debug.attach`): a running pid, or the newest process of a bundle id.
+ */
+export type DebugAttachParams = { udid?: string, pid?: number, bundleId?: string, frontend?: DebugFrontend, 
+/**
+ * The local build with debug info to load, when known (its UUID must match the running image).
+ */
+project?: string, sessionLease?: SessionLease, };
+
+/**
+ * Params of `debug.breakpoint.remove`.
+ */
+export type DebugBreakpointRemoveParams = { breakpointId: number, };
+
+/**
+ * Result of `debug.breakpoint.remove`.
+ */
+export type DebugBreakpointRemoveResult = Record<symbol, never>;
+
+/**
+ * Params of `debug.breakpoint.set`.
+ */
+export type DebugBreakpointSetParams = { 
+/**
+ * The session; when omitted, the breakpoint is a pending source breakpoint applied to every matching session.
+ */
+sessionId?: SessionId, file: string, line: number, condition?: string, logMessage?: string, };
+
+/**
+ * Result of `debug.breakpoint.set`.
+ */
+export type DebugBreakpointSetResult = { breakpointId: number, verified: boolean, 
+/**
+ * Whether the breakpoint is pending a load that binds it.
+ */
+pending: boolean, };
+
+/**
+ * Params of `debug.control`.
+ */
+export type DebugControlParams = { sessionId: SessionId, action: ControlAction, threadId?: number, 
+/**
+ * Wait up to this long for the next stop before returning (0 or omitted returns at once).
+ */
+waitForStopMs?: number, };
+
+/**
+ * Result of `debug.control`: the resulting state, and the stop when one happened (so agents need not poll).
+ */
+export type DebugControlResult = { 
+/**
+ * `running` or `stopped`.
+ */
+state: string, stop?: StopInfo, };
+
+/**
+ * Params of `debug.evaluate`: `po`/`expr`, or an LLDB command prefixed with a backtick (RD §19).
+ */
+export type DebugEvaluateParams = { sessionId: SessionId, expression: string, frameId?: number, context?: EvalContext, };
+
+/**
+ * Result of `debug.evaluate`.
+ */
+export type DebugEvaluateResult = { result: string, type?: string, variablesReference?: number, };
+
+/**
  * Which debugger front end will connect (`debug.prepare {frontend}`).
  */
 export type DebugFrontend = "dap" | "lldb-cli" | "none";
+
+/**
+ * Params of `debug.inspect`.
+ */
+export type DebugInspectParams = { sessionId: SessionId, what: InspectWhat, threadId?: number, frameId?: number, 
+/**
+ * The variable scope (`locals`, `globals`, …) or a DAP `variablesReference`, for `what: variables`.
+ */
+scope?: string, depth?: number, };
+
+/**
+ * Result of `debug.inspect`: DAP-shaped data; the field for the requested `what` is set.
+ */
+export type DebugInspectResult = { threads?: Array<ThreadInfo>, stackFrames?: Array<StackFrame>, variables?: Array<Variable>, };
 
 /**
  * Params of `debug.prepare`: the `run.start` params plus the debugger options.
@@ -1063,6 +1265,94 @@ dapConfig: Record<string, unknown>, dap?: DapInfo,
  * The `attach.lldb` the daemon wrote: init plus attach commands.
  */
 attachScript?: string, attachMode: AttachMode, };
+
+/**
+ * Params of `debug.symbols.fetch`.
+ */
+export type DebugSymbolsFetchParams = { udid?: string, 
+/**
+ * `core` or `full` (not `auto`/`none`).
+ */
+tier: SymbolTier, 
+/**
+ * Headless and MCP callers must pass the planned total; interactive clients are asked with `ui.confirm`.
+ */
+confirmBytes?: number, 
+/**
+ * Keep the raw dyld shared cache after extraction (default: delete it).
+ */
+keepRawDsc?: boolean, };
+
+/**
+ * Result of `debug.symbols.fetch` (`SymbolSet`): the extracted symbol set now on disk.
+ */
+export type DebugSymbolsFetchResult = { build: string, dscUuid: string, tier: number, bytesOnDisk: number, 
+/**
+ * The sysroot LLDB loads with `--sysroot`.
+ */
+path: string, };
+
+/**
+ * Params of `debug.symbols.plan`.
+ */
+export type DebugSymbolsPlanParams = { udid?: string, 
+/**
+ * The tier to plan for (defaults to `core`).
+ */
+tier?: SymbolTier, };
+
+/**
+ * Result of `debug.symbols.plan`: the files and sizes, with the space and quota check (RD §11.2 N3).
+ */
+export type DebugSymbolsPlanResult = { files: Array<PlanFile>, totalBytes: number, freeBytes: number, quotaBytes: number, 
+/**
+ * Whether a fetch is allowed: free space ≥ total + 2 GiB and the quota admits it.
+ */
+ok: boolean, 
+/**
+ * Why not, when `ok` is false.
+ */
+reason?: string, };
+
+/**
+ * Params of `debug.symbols.prune`.
+ */
+export type DebugSymbolsPruneParams = { 
+/**
+ * Prune least-recently-used sets until the cache is at most this big (defaults to the quota).
+ */
+maxBytes?: number, 
+/**
+ * Prune only this build's set.
+ */
+build?: string, };
+
+/**
+ * Result of `debug.symbols.prune`.
+ */
+export type DebugSymbolsPruneResult = { freedBytes: number, };
+
+/**
+ * Params of `debug.symbols.status`.
+ */
+export type DebugSymbolsStatusParams = { udid?: string, };
+
+/**
+ * Result of `debug.symbols.status`: what the local symbol cache holds for this device's build.
+ */
+export type DebugSymbolsStatusResult = { 
+/**
+ * The device's iOS build (`ProductBuildVersion`), when known.
+ */
+build?: string, dscUuid?: string, 
+/**
+ * 0 (memory index only), 1 (core) or 2 (full).
+ */
+tier: number, bytesOnDisk: number, 
+/**
+ * Whether the raw dyld shared cache is still present (it can be pruned after extraction).
+ */
+rawDscPresent: boolean, };
 
 /**
  * A toolchain component, with the wire values of `toolchain.*`'s `ToolInfo.component` (ARCHITECTURE §8.1, W3).
@@ -1341,6 +1631,11 @@ export type DoctorSummary = { pass: number, warn: number, fail: number, skip: nu
 export type ErrorData = { russetCode: string, hint?: string, details?: JsonValue, retryable: boolean, docs?: string, chain: Array<string>, };
 
 /**
+ * The expression context (`debug.evaluate`).
+ */
+export type EvalContext = "repl" | "watch";
+
+/**
  * `{dev, ino, mtimeNs, size}` of the daemon's executable (Windows: volume serial and file index).
  */
 export type ExecutableId = { dev: number, ino: number, mtimeNs: number, size: number, };
@@ -1442,6 +1737,11 @@ profile: string, allow: Array<Permission>, confirm: Array<Permission>, approval:
 tierMax?: number, };
 
 /**
+ * What `run.hotReload` does.
+ */
+export type HotReloadKind = "reload" | "restart";
+
+/**
  * Params of `identity.list`.
  */
 export type IdentityListParams = { 
@@ -1476,6 +1776,11 @@ export type InitializeResult = { protocol: ProtocolVersion, server: ServerInfo,
  * `c-<n>`.
  */
 connectionId: string, grant: Grant, capabilities: ServerCapabilities, endpoints: ServerEndpoints, };
+
+/**
+ * What `debug.inspect` returns.
+ */
+export type InspectWhat = "threads" | "stack" | "variables";
 
 /**
  * When the pipeline installs (`[run] install`).
@@ -1929,6 +2234,11 @@ export type PinsInfo = { id: string,
 source: string, };
 
 /**
+ * One file a symbol fetch would download.
+ */
+export type PlanFile = { path: string, size: number, };
+
+/**
  * One account change a plan needs.
  */
 export type PlanMutation = { kind: MutationKind, 
@@ -2320,6 +2630,20 @@ state?: SessionState, code?: number, signal?: number, crashId?: string,
 error?: SessionError, };
 
 /**
+ * Params of `run.hotReload`.
+ */
+export type RunHotReloadParams = { sessionId: SessionId, kind?: HotReloadKind, };
+
+/**
+ * Result of `run.hotReload`.
+ */
+export type RunHotReloadResult = { 
+/**
+ * Whether the session supports hot reload (Swift supports only Quick Relaunch).
+ */
+supported: boolean, kind: HotReloadKind, ms: number, message?: string, };
+
+/**
  * Params of `run.list`.
  */
 export type RunListParams = Record<symbol, never>;
@@ -2368,6 +2692,16 @@ dropped: number,
  * The number of the newest entry the session holds (0 before the first): pass it as `afterSeq` to continue.
  */
 nextSeq: number, };
+
+/**
+ * Params of `run.relaunch`: Swift Quick Relaunch of a session's app (RD §4.7).
+ */
+export type RunRelaunchParams = { sessionId: SessionId, };
+
+/**
+ * Result of `run.relaunch`: the new pid and how long the relaunch took.
+ */
+export type RunRelaunchResult = { pid: number, ms: number, };
 
 /**
  * Params of `run.start`: build → provision → sign → install-if-changed → launch (ARCHITECTURE §17.1).
@@ -2909,6 +3243,15 @@ importedFrom?: string, };
 export type SigningPlan = { items: Array<SignItem>, };
 
 /**
+ * One stack frame in DAP shape (`debug.inspect what: stack`, `debug.control` stops).
+ */
+export type StackFrame = { id: number, name: string, source?: string, line?: number, column?: number, 
+/**
+ * The frame's program counter, as a hex string.
+ */
+instructionPointer?: string, };
+
+/**
  * Pipeline stages (`JobEvent` kind `stage`).
  */
 export type Stage = "resolve" | "prepare" | "compile" | "resources" | "assemble" | "lint" | "package" | "sign" | "install" | "launch" | "attach";
@@ -2917,6 +3260,15 @@ export type Stage = "resolve" | "prepare" | "compile" | "resources" | "assemble"
  * The state of a stage or task.
  */
 export type StepState = "started" | "finished" | "failed";
+
+/**
+ * Where the process stopped (`debug.control` result).
+ */
+export type StopInfo = { 
+/**
+ * The DAP stop reason, for example `breakpoint`, `step`, `exception`, `pause`.
+ */
+reason: string, threadId?: number, description?: string, frames: Array<StackFrame>, };
 
 /**
  * How `run.stop` ends a session.
@@ -2939,14 +3291,61 @@ export type SubscriptionCancelResult = Record<symbol, never>;
 export type SubscriptionId = string;
 
 /**
+ * How much of a crash Russet could symbolicate (RD §11.4).
+ */
+export type SymbolCoverage = "app" | "system" | "none";
+
+/**
  * Device-symbol tiers (W11).
  */
 export type SymbolTier = "auto" | "none" | "core" | "full";
 
 /**
+ * The symbolicated crash `crash.symbolicate` returns as JSON (RD §11.4, §13).
+ */
+export type SymbolicatedCrash = { 
+/**
+ * The termination reason line, when present.
+ */
+termination?: string, threads: Array<CrashThread>, 
+/**
+ * How far symbolication got: `app` (dSYM app frames), `system` (tier ≥ 1) or `none`.
+ */
+coverage: SymbolCoverage, 
+/**
+ * The stable id in the local store (`<timestamp>-<incident>`).
+ */
+crashId: string, bundleId: string, 
+/**
+ * The crashing process name (the executable), for example `RussetProbe`.
+ */
+process: string, 
+/**
+ * RFC 3339 UTC of the crash (the `.ips` header's `timestamp`, normalised).
+ */
+timestamp: string, 
+/**
+ * The exception type, for example `EXC_BAD_ACCESS (SIGSEGV)`.
+ */
+exception: string, 
+/**
+ * The terminating signal name, for example `SIGSEGV`, when the report has one.
+ */
+signal?: string, 
+/**
+ * Whether a symbolicated rendering is already cached next to the `.ips`.
+ */
+symbolicated: boolean, };
+
+/**
  * What a target builds.
  */
 export type TargetKind = "app" | "app-extension";
+
+/**
+ * A thread in DAP shape (`debug.inspect what: threads`).
+ */
+export type ThreadInfo = { id: number, name: string, };
 
 /**
  * A toolchain component.
@@ -3114,6 +3513,15 @@ export type UiShowMessageParams = { level: MessageLevel, message: string, action
  * ignored. The owning area replaces its `…Params`/`…Result` aliases with real structs.
  */
 export type Unspecified = Record<symbol, never>;
+
+/**
+ * A variable in DAP shape (`debug.inspect what: variables`, `debug.evaluate`).
+ */
+export type Variable = { name: string, value: string, type?: string, 
+/**
+ * Non-zero when the variable can be expanded further (a DAP `variablesReference`).
+ */
+variablesReference?: number, };
 
 /**
  * One verified bundle.
@@ -3314,23 +3722,23 @@ export interface Methods {
   "run.subscribe": { params: RunSubscribeParams; result: RunSubscribeResult };
   "run.output.query": { params: RunOutputQueryParams; result: RunOutputQueryResult };
   "run.stop": { params: RunStopParams; result: RunStopResult };
-  "run.relaunch": { params: Unspecified; result: Unspecified };
-  "run.hotReload": { params: Unspecified; result: Unspecified };
+  "run.relaunch": { params: RunRelaunchParams; result: RunRelaunchResult };
+  "run.hotReload": { params: RunHotReloadParams; result: RunHotReloadResult };
   "debug.prepare": { params: DebugPrepareParams; result: DebugPrepareResult };
-  "debug.attach": { params: Unspecified; result: Unspecified };
-  "debug.control": { params: Unspecified; result: Unspecified };
-  "debug.inspect": { params: Unspecified; result: Unspecified };
-  "debug.evaluate": { params: Unspecified; result: Unspecified };
-  "debug.breakpoint.set": { params: Unspecified; result: Unspecified };
-  "debug.breakpoint.remove": { params: Unspecified; result: Unspecified };
+  "debug.attach": { params: DebugAttachParams; result: DebugPrepareResult };
+  "debug.control": { params: DebugControlParams; result: DebugControlResult };
+  "debug.inspect": { params: DebugInspectParams; result: DebugInspectResult };
+  "debug.evaluate": { params: DebugEvaluateParams; result: DebugEvaluateResult };
+  "debug.breakpoint.set": { params: DebugBreakpointSetParams; result: DebugBreakpointSetResult };
+  "debug.breakpoint.remove": { params: DebugBreakpointRemoveParams; result: DebugBreakpointRemoveResult };
   "debug.jitStats": { params: Unspecified; result: Unspecified };
-  "debug.symbols.status": { params: Unspecified; result: Unspecified };
-  "debug.symbols.plan": { params: Unspecified; result: Unspecified };
-  "debug.symbols.fetch": { params: Unspecified; result: Unspecified };
-  "debug.symbols.prune": { params: Unspecified; result: Unspecified };
-  "crash.list": { params: Unspecified; result: Unspecified };
-  "crash.fetch": { params: Unspecified; result: Unspecified };
-  "crash.symbolicate": { params: Unspecified; result: Unspecified };
+  "debug.symbols.status": { params: DebugSymbolsStatusParams; result: DebugSymbolsStatusResult };
+  "debug.symbols.plan": { params: DebugSymbolsPlanParams; result: DebugSymbolsPlanResult };
+  "debug.symbols.fetch": { params: DebugSymbolsFetchParams; result: DebugSymbolsFetchResult };
+  "debug.symbols.prune": { params: DebugSymbolsPruneParams; result: DebugSymbolsPruneResult };
+  "crash.list": { params: CrashListParams; result: CrashListResult };
+  "crash.fetch": { params: CrashFetchParams; result: CrashFetchResult };
+  "crash.symbolicate": { params: CrashSymbolicateParams; result: CrashSymbolicateResult };
   "flutter.run": { params: Unspecified; result: Unspecified };
   "flutter.attach": { params: Unspecified; result: Unspecified };
   "flutter.device.runDebug": { params: Unspecified; result: Unspecified };

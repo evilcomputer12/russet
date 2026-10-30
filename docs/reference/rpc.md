@@ -505,8 +505,8 @@ Methods:
 | `run.subscribe` | read |  | plain | `RunSubscribeParams` | `RunSubscribeResult` |
 | `run.output.query` | read |  | plain | `RunOutputQueryParams` | `RunOutputQueryResult` |
 | `run.stop` | device |  | plain | `RunStopParams` | `RunStopResult` |
-| `run.relaunch` | device | L | plain | `Unspecified` | `Unspecified` |
-| `run.hotReload` | device |  | plain | `Unspecified` | `Unspecified` |
+| `run.relaunch` | device | L | plain | `RunRelaunchParams` | `RunRelaunchResult` |
+| `run.hotReload` | device |  | plain | `RunHotReloadParams` | `RunHotReloadResult` |
 
 Notifications:
 
@@ -524,17 +524,17 @@ Methods:
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
 | `debug.prepare` | device | L | plain | `DebugPrepareParams` | `DebugPrepareResult` |
-| `debug.attach` | device | L | plain | `Unspecified` | `Unspecified` |
-| `debug.control` | device |  | plain | `Unspecified` | `Unspecified` |
-| `debug.inspect` | read |  | plain | `Unspecified` | `Unspecified` |
-| `debug.evaluate` | device |  | plain | `Unspecified` | `Unspecified` |
-| `debug.breakpoint.set` | device |  | plain | `Unspecified` | `Unspecified` |
-| `debug.breakpoint.remove` | device |  | plain | `Unspecified` | `Unspecified` |
+| `debug.attach` | device | L | plain | `DebugAttachParams` | `DebugPrepareResult` |
+| `debug.control` | device |  | plain | `DebugControlParams` | `DebugControlResult` |
+| `debug.inspect` | read |  | plain | `DebugInspectParams` | `DebugInspectResult` |
+| `debug.evaluate` | device |  | plain | `DebugEvaluateParams` | `DebugEvaluateResult` |
+| `debug.breakpoint.set` | device |  | plain | `DebugBreakpointSetParams` | `DebugBreakpointSetResult` |
+| `debug.breakpoint.remove` | device |  | plain | `DebugBreakpointRemoveParams` | `DebugBreakpointRemoveResult` |
 | `debug.jitStats` | read |  | plain | `Unspecified` | `Unspecified` |
-| `debug.symbols.status` | read |  | plain | `Unspecified` | `Unspecified` |
-| `debug.symbols.plan` | read |  | plain | `Unspecified` | `Unspecified` |
-| `debug.symbols.fetch` | device | L | plain | `Unspecified` | `Unspecified` |
-| `debug.symbols.prune` | system |  | plain | `Unspecified` | `Unspecified` |
+| `debug.symbols.status` | read |  | plain | `DebugSymbolsStatusParams` | `DebugSymbolsStatusResult` |
+| `debug.symbols.plan` | read |  | plain | `DebugSymbolsPlanParams` | `DebugSymbolsPlanResult` |
+| `debug.symbols.fetch` | device | L | plain | `DebugSymbolsFetchParams` | `DebugSymbolsFetchResult` |
+| `debug.symbols.prune` | system |  | plain | `DebugSymbolsPruneParams` | `DebugSymbolsPruneResult` |
 
 ## `crash` (module `crash`)
 
@@ -542,9 +542,9 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `crash.list` | read |  | plain | `Unspecified` | `Unspecified` |
-| `crash.fetch` | device | L | plain | `Unspecified` | `Unspecified` |
-| `crash.symbolicate` | read |  | plain | `Unspecified` | `Unspecified` |
+| `crash.list` | read |  | plain | `CrashListParams` | `CrashListResult` |
+| `crash.fetch` | device | L | plain | `CrashFetchParams` | `CrashFetchResult` |
+| `crash.symbolicate` | read |  | plain | `CrashSymbolicateParams` | `CrashSymbolicateResult` |
 
 ## `flutter` (module `flutter_run`)
 

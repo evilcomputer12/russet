@@ -286,10 +286,21 @@ crate::rpc_method!(
     Permission::Device
 );
 
-/// Params of `run.relaunch`: `{sessionId} → {pid, ms} (Swift Quick Relaunch)`.
-pub type RunRelaunchParams = Unspecified;
-/// Result of `run.relaunch`.
-pub type RunRelaunchResult = Unspecified;
+/// Params of `run.relaunch`: Swift Quick Relaunch of a session's app (RD §4.7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RunRelaunchParams {
+    pub session_id: SessionId,
+}
+
+/// Result of `run.relaunch`: the new pid and how long the relaunch took.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RunRelaunchResult {
+    pub pid: u32,
+    #[ts(type = "number")]
+    pub ms: u64,
+}
 crate::rpc_method!(
     /// `run.relaunch` (class `device`, long-running). W11 (Wave 2).
     RunRelaunch,
@@ -298,10 +309,40 @@ crate::rpc_method!(
     Permission::Device, long_running
 );
 
-/// Params of `run.hotReload`: `{sessionId, kind?: reload|restart} → {supported, kind, ms, message?}`.
-pub type RunHotReloadParams = Unspecified;
+/// What `run.hotReload` does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum HotReloadKind {
+    /// Reload without restarting (Flutter hot reload); for Swift this maps to Quick Relaunch.
+    #[default]
+    Reload,
+    /// Restart the app (Flutter hot restart, or Swift relaunch).
+    Restart,
+}
+
+/// Params of `run.hotReload`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RunHotReloadParams {
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub kind: Option<HotReloadKind>,
+}
+
 /// Result of `run.hotReload`.
-pub type RunHotReloadResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RunHotReloadResult {
+    /// Whether the session supports hot reload (Swift supports only Quick Relaunch).
+    pub supported: bool,
+    pub kind: HotReloadKind,
+    #[ts(type = "number")]
+    pub ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub message: Option<String>,
+}
 crate::rpc_method!(
     /// `run.hotReload` (class `device`). W11 (Swift, Wave 2) / W18 (Flutter, Wave 3).
     RunHotReload,
