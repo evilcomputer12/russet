@@ -23,9 +23,14 @@ russet-core.workspace = true
 russet-device.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Elided Apple-file payloads are kept only as a length and a SHA-256 (QA §3.5.2).
+sha2.workspace = true
 tempfile.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "io-util", "net", "sync", "time", "process"] }
 toml.workspace = true
+# RDT traces are stored zstd-compressed (`*.rdt.jsonl.zst`); plain `*.rdt.jsonl` is read and written too.
+zstd.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "io-util", "net", "sync", "time"] }

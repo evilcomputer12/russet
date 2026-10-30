@@ -21,8 +21,34 @@ Scripted, replay and recording connectors, mock usbmuxd, cassettes, HTTP fakes, 
 | `fake_daemon` (`src/fake_daemon.rs`) | A tiny russet/1 peer (`initialize`, `daemon.ping`, `test.echo`, `test.slow` with progress and cancel, `test.confirm` with `ui.confirm`) to test clients and harnesses without the real daemon |
 | `node` + `node/interop/` | The Node interop harness shared with W2: stock vscode-jsonrpc 9.0.3 runs `initialize`, requests, unknown method → `-32601`, `$/progress` then cancel → `-32800`, and a `ui.confirm` answered by the client. Install once: `npm ci --prefix crates/russet-testkit/node/interop` |
 
-Replay and recording connectors, the out-of-process mock device (fake usbmuxd, lockdown with TLS), cassettes, HTTP
-fakes and RDT traces follow in W15 (QA-06 to QA-09).
+## What is here (Wave 2, W15)
+
+| Item | Use it for |
+|---|---|
+| `rdt` (`src/rdt.rs`) | The Russet Device Trace format v1 (QA §3.5.2): `Trace`, `Header`, `Record` (`conn`, `data`, `call`, `note`, `elided`). `Trace::read`/`write` pick plain `*.rdt.jsonl` or zstd `*.rdt.jsonl.zst` by extension |
+| `RecordingConnector<C>` (`src/recording.rs`) | Wraps any `ServiceConnector` and records its traffic: facade calls become `call` records, service streams are tapped (`TapStream`), and the default Apple-file services become `elided` records (a length and a SHA-256). Applies the `default-v1` redaction to call arguments and results |
+| `ReplayConnector` (`src/replay.rs`) | Serves a recorded `Trace` as a `ServiceConnector`, with no device and no sockets: discovery from the header, facade calls and streams from the records, `ReplayMode` (`Strict`/`Semantic`/`Lenient`), and `assert_consumed()` |
+| `redaction` (`src/redaction.rs`) | The `default-v1` policy (`redact_value`) and the trace lint (`lint`, QA §3.5.3), the safety net shared with `cargo xtask traces lint` |
+| `traces/<scenario>/<ios>-<build>/<product>.rdt.jsonl` | Committed replay fixtures. Stored as **plain** JSON Lines so they stay reviewable in diffs and `cargo xtask traces` (a seam crate without a zstd dependency) can lint them; lab recordings are `*.rdt.jsonl.zst` |
+
+`cargo xtask traces lint` (DC-13) runs the lint over every committed trace in CI; `traces info` summarizes one, and
+`traces diff` reports semantic drift between two. The out-of-process mock device (fake usbmuxd, lockdown with TLS),
+cassettes and HTTP fakes are the remaining QA-07/QA-09 pieces.
+
+### Record → replay, cross-platform, with no device
+
+```rust
+use russet_testkit::{RecordingConnector, ReplayConnector, ReplayMode, Scenario, ScriptedConnector};
+use russet_testkit::rdt::{Header /* … */};
+
+let scripted = ScriptedConnector::new(Scenario::default_scenario());
+let recorder = RecordingConnector::new(scripted, header);     // header carries the device identity
+// … drive russet-device's DeviceManager through `recorder`; it records every call and stream …
+recorder.write(std::path::Path::new("session.rdt.jsonl"))?;
+
+let replay = ReplayConnector::open(std::path::Path::new("session.rdt.jsonl"), ReplayMode::Semantic)?;
+// … the same DeviceManager driven through `replay` behaves identically, on Linux and Windows CI …
+```
 
 ## Writing a daemon-level test without hardware
 
