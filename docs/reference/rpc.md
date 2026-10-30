@@ -391,8 +391,8 @@ Methods:
 | `account.addAscKey` | secrets |  | plain | `AccountAddAscKeyParams` | `Account` |
 | `account.importXtool` | secrets |  | plain | `AccountImportXtoolParams` | `AccountImportXtoolResult` |
 | `account.verify` | read |  | plain | `AccountVerifyParams` | `AccountVerifyResult` |
-| `account.remove` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.setDefault` | secrets |  | plain | `Unspecified` | `Unspecified` |
+| `account.remove` | secrets |  | plain | `AccountRemoveParams` | `AccountRemoveResult` |
+| `account.setDefault` | secrets |  | plain | `AccountSetDefaultParams` | `AccountSetDefaultResult` |
 | `account.appleId.begin` | secrets |  | plain | `Unspecified` | `Unspecified` |
 | `account.appleId.requestCode` | secrets |  | plain | `Unspecified` | `Unspecified` |
 | `account.appleId.submitCode` | secrets |  | plain | `Unspecified` | `Unspecified` |
@@ -426,7 +426,7 @@ Methods:
 | `portal.bundleIds.list` | read |  | plain | `PortalListParams` | `PortalBundleIdsListResult` |
 | `portal.profiles.list` | read |  | plain | `PortalListParams` | `PortalProfilesListResult` |
 | `portal.devices.register` | account |  | plain | `Unspecified` | `Unspecified` |
-| `portal.certificates.revoke` | account-destructive |  | typed | `Unspecified` | `Unspecified` |
+| `portal.certificates.revoke` | account-destructive |  | typed | `PortalCertificatesRevokeParams` | `PortalCertificatesRevokeResult` |
 
 ## `provision` (module `provision`)
 

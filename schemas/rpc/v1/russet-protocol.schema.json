@@ -157,6 +157,45 @@
       ],
       "type": "object"
     },
+    "AccountRemoveParams": {
+      "description": "Params of `account.remove`.",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "wipeSecrets": {
+          "description": "Also delete the account's sealed App Store Connect key from the secret store.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "accountId"
+      ],
+      "type": "object"
+    },
+    "AccountRemoveResult": {
+      "description": "Result of `account.remove`.",
+      "type": "object"
+    },
+    "AccountSetDefaultParams": {
+      "description": "Params of `account.setDefault`.",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId"
+      ],
+      "type": "object"
+    },
+    "AccountSetDefaultResult": {
+      "description": "Result of `account.setDefault`.",
+      "type": "object"
+    },
     "AccountVerifyParams": {
       "description": "Params of `account.verify`.",
       "properties": {
@@ -5943,6 +5982,29 @@
       ],
       "type": "object"
     },
+    "PortalCertificatesRevokeParams": {
+      "description": "Params of `portal.certificates.revoke`: `{accountId?, certId} → {}` (typed confirmation; cli/ide only).",
+      "properties": {
+        "accountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "certId": {
+          "description": "The portal certificate id to revoke.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "certId"
+      ],
+      "type": "object"
+    },
+    "PortalCertificatesRevokeResult": {
+      "description": "Result of `portal.certificates.revoke`.",
+      "type": "object"
+    },
     "PortalDevice": {
       "description": "A registered device.",
       "properties": {
@@ -9328,11 +9390,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountRemoveParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountRemoveResult"
       }
     },
     "account.setDefault": {
@@ -9341,11 +9403,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountSetDefaultParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountSetDefaultResult"
       }
     },
     "account.verify": {
@@ -10758,11 +10820,11 @@
       "longRunning": false,
       "namespace": "portal",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalCertificatesRevokeParams"
       },
       "permission": "account-destructive",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalCertificatesRevokeResult"
       }
     },
     "portal.devices.list": {

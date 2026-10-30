@@ -62,12 +62,33 @@ pub fn command() -> Command {
                 .arg(Arg::new("from-xtool").long("from-xtool").action(ArgAction::SetTrue).required(true))
                 .arg(Arg::new("dry-run").long("dry-run").action(ArgAction::SetTrue).help("Show what would be imported")),
         )
-        .subcommand(list_only("certs", "Certificates of the team"))
+        .subcommand(
+            list_only("certs", "Certificates of the team").subcommand(
+                Command::new("revoke")
+                    .about("Revoke a certificate (typed confirmation; it invalidates profiles that use it, §6.7)")
+                    .arg(Arg::new("cert-id").value_name("CERT-ID").required(true).help("The portal certificate id"))
+                    .arg(Arg::new("account").long("account").value_name("ID").help("The account (default: the default one)")),
+            ),
+        )
         .subcommand(list_only("devices", "Registered devices (UDIDs masked)"))
         .subcommand(list_only("bundle-ids", "Registered bundle IDs"))
         .subcommand(list_only("profiles", "Provisioning profiles"))
-        .subcommand(stub("default", "Set the default account (W12)"))
-        .subcommand(stub("remove", "Remove an account (W12)"))
+        .subcommand(
+            Command::new("default")
+                .about("Set the default account")
+                .arg(Arg::new("account-id").value_name("ACCOUNT-ID").required(true)),
+        )
+        .subcommand(
+            Command::new("remove")
+                .about("Remove an account")
+                .arg(Arg::new("account-id").value_name("ACCOUNT-ID").required(true))
+                .arg(
+                    Arg::new("wipe-secrets")
+                        .long("wipe-secrets")
+                        .action(ArgAction::SetTrue)
+                        .help("Also delete the account's sealed App Store Connect key"),
+                ),
+        )
         .subcommand(stub("login", "Log in with an Apple ID (W22)"))
         .subcommand(stub("anisette", "Anisette status, fetch-libraries, reset (W22)"))
 }
@@ -102,6 +123,9 @@ pub enum AccountCall {
     Devices(pp::PortalListParams),
     BundleIds(pp::PortalListParams),
     Profiles(pp::PortalListParams),
+    SetDefault(pa::AccountSetDefaultParams),
+    Remove(pa::AccountRemoveParams),
+    RevokeCert(pp::PortalCertificatesRevokeParams),
     Later(&'static str),
 }
 
@@ -139,11 +163,23 @@ pub fn call(m: &ArgMatches) -> Result<AccountCall> {
         Some(("import", s)) => {
             AccountCall::ImportXtool(pa::AccountImportXtoolParams { dry_run: s.get_flag("dry-run").then_some(true) })
         }
-        Some(("certs", s)) => AccountCall::Certs(list_params(s)),
+        Some(("certs", s)) => match s.subcommand() {
+            Some(("revoke", r)) => AccountCall::RevokeCert(pp::PortalCertificatesRevokeParams {
+                account_id: r.get_one::<String>("account").cloned(),
+                cert_id: r.get_one::<String>("cert-id").cloned().unwrap_or_default(),
+            }),
+            _ => AccountCall::Certs(list_params(s)),
+        },
         Some(("devices", s)) => AccountCall::Devices(list_params(s)),
         Some(("bundle-ids", s)) => AccountCall::BundleIds(list_params(s)),
         Some(("profiles", s)) => AccountCall::Profiles(list_params(s)),
-        Some(("default" | "remove", _)) => AccountCall::Later("W12"),
+        Some(("default", s)) => AccountCall::SetDefault(pa::AccountSetDefaultParams {
+            account_id: s.get_one::<String>("account-id").cloned().unwrap_or_default(),
+        }),
+        Some(("remove", s)) => AccountCall::Remove(pa::AccountRemoveParams {
+            account_id: s.get_one::<String>("account-id").cloned().unwrap_or_default(),
+            wipe_secrets: s.get_flag("wipe-secrets").then_some(true),
+        }),
         Some(("login" | "anisette", _)) => AccountCall::Later("W22"),
         _ => {
             return Err(Error::new(codes::core::INVALID_ARGUMENT, "no account subcommand")
@@ -199,6 +235,9 @@ pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
         AccountCall::Devices(p) => json(&cx.peer.call::<pp::PortalDevicesList>(p).await?)?,
         AccountCall::BundleIds(p) => json(&cx.peer.call::<pp::PortalBundleIdsList>(p).await?)?,
         AccountCall::Profiles(p) => json(&cx.peer.call::<pp::PortalProfilesList>(p).await?)?,
+        AccountCall::SetDefault(p) => json(&cx.peer.call::<pa::AccountSetDefault>(p).await?)?,
+        AccountCall::Remove(p) => json(&cx.peer.call::<pa::AccountRemove>(p).await?)?,
+        AccountCall::RevokeCert(p) => json(&cx.peer.call::<pp::PortalCertificatesRevoke>(p).await?)?,
         AccountCall::Later(card) => {
             return Err(Error::new(codes::core::NOT_IMPLEMENTED, format!("this account command arrives with {card}"))
                 .with_hint("Wave 1 has list, verify, add-key, import --from-xtool and the read-only listings."));
@@ -260,7 +299,17 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert_eq!(parse(&["login", "--apple-id", "x"]).unwrap(), AccountCall::Later("W22"));
-        assert_eq!(parse(&["default", "asc:K"]).unwrap(), AccountCall::Later("W12"));
+        assert_eq!(
+            parse(&["default", "asc:K"]).unwrap(),
+            AccountCall::SetDefault(pa::AccountSetDefaultParams { account_id: "asc:K".into() })
+        );
+        assert!(
+            matches!(parse(&["remove", "asc:K", "--wipe-secrets"]).unwrap(), AccountCall::Remove(p) if p.wipe_secrets == Some(true))
+        );
+        match parse(&["certs", "revoke", "CERT1", "--account", "asc:K"]).unwrap() {
+            AccountCall::RevokeCert(p) => assert_eq!(p.cert_id, "CERT1"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

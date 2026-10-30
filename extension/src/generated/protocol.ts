@@ -74,6 +74,30 @@ export type AccountListResult = { accounts: Array<Account>,
 default?: string, };
 
 /**
+ * Params of `account.remove`.
+ */
+export type AccountRemoveParams = { accountId: string, 
+/**
+ * Also delete the account's sealed App Store Connect key from the secret store.
+ */
+wipeSecrets?: boolean, };
+
+/**
+ * Result of `account.remove`.
+ */
+export type AccountRemoveResult = Record<symbol, never>;
+
+/**
+ * Params of `account.setDefault`.
+ */
+export type AccountSetDefaultParams = { accountId: string, };
+
+/**
+ * Result of `account.setDefault`.
+ */
+export type AccountSetDefaultResult = Record<symbol, never>;
+
+/**
  * Params of `account.verify`.
  */
 export type AccountVerifyParams = { 
@@ -2047,6 +2071,20 @@ localIdentity: boolean, };
 export type PortalCertificatesListResult = { certificates: Array<PortalCertificate>, };
 
 /**
+ * Params of `portal.certificates.revoke`: `{accountId?, certId} → {}` (typed confirmation; cli/ide only).
+ */
+export type PortalCertificatesRevokeParams = { accountId?: string, 
+/**
+ * The portal certificate id to revoke.
+ */
+certId: string, };
+
+/**
+ * Result of `portal.certificates.revoke`.
+ */
+export type PortalCertificatesRevokeResult = Record<symbol, never>;
+
+/**
  * A registered device.
  */
 export type PortalDevice = { id: string, 
@@ -3361,8 +3399,8 @@ export interface Methods {
   "account.addAscKey": { params: AccountAddAscKeyParams; result: Account };
   "account.importXtool": { params: AccountImportXtoolParams; result: AccountImportXtoolResult };
   "account.verify": { params: AccountVerifyParams; result: AccountVerifyResult };
-  "account.remove": { params: Unspecified; result: Unspecified };
-  "account.setDefault": { params: Unspecified; result: Unspecified };
+  "account.remove": { params: AccountRemoveParams; result: AccountRemoveResult };
+  "account.setDefault": { params: AccountSetDefaultParams; result: AccountSetDefaultResult };
   "account.appleId.begin": { params: Unspecified; result: Unspecified };
   "account.appleId.requestCode": { params: Unspecified; result: Unspecified };
   "account.appleId.submitCode": { params: Unspecified; result: Unspecified };
@@ -3376,7 +3414,7 @@ export interface Methods {
   "portal.bundleIds.list": { params: PortalListParams; result: PortalBundleIdsListResult };
   "portal.profiles.list": { params: PortalListParams; result: PortalProfilesListResult };
   "portal.devices.register": { params: Unspecified; result: Unspecified };
-  "portal.certificates.revoke": { params: Unspecified; result: Unspecified };
+  "portal.certificates.revoke": { params: PortalCertificatesRevokeParams; result: PortalCertificatesRevokeResult };
   "provision.plan": { params: ProvisionPlanParams; result: ProvisionPlanResult };
   "provision.apply": { params: ProvisionApplyParams; result: ProvisionApplyResult };
   "provision.capabilities": { params: ProvisionCapabilitiesParams; result: ProvisionCapabilitiesResult };

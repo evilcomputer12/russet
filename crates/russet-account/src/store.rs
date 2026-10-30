@@ -443,6 +443,33 @@ impl AccountStore {
         Ok(())
     }
 
+    /// Removes an account from `accounts.toml` (`account.remove`). With `wipe_secrets`, its sealed App Store
+    /// Connect key is deleted too; the default is cleared when the removed account was the default.
+    pub async fn remove(&mut self, id: &AccountId, wipe_secrets: bool) -> Result<()> {
+        let Some(pos) = self.file.accounts.iter().position(|e| e.id == id.0) else {
+            return Err(no_account(Some(id)));
+        };
+        let entry = self.file.accounts.remove(pos);
+        if self.file.default.as_deref() == Some(id.0.as_str()) {
+            self.file.default = (self.file.accounts.len() == 1).then(|| self.file.accounts[0].id.clone());
+        }
+        self.save()?;
+        if wipe_secrets && let Some(key_id) = &entry.key_id {
+            let secret = SecretId { kind: SecretKind::AscKey, name: key_id.clone() };
+            self.secrets.delete(&secret).await?;
+        }
+        Ok(())
+    }
+
+    /// Makes `id` the default account (`account.setDefault`).
+    pub fn set_default(&mut self, id: &AccountId) -> Result<()> {
+        if !self.file.accounts.iter().any(|e| e.id == id.0) {
+            return Err(no_account(Some(id)));
+        }
+        self.file.default = Some(id.0.clone());
+        self.save()
+    }
+
     async fn seal_key(&self, key_id: &str, label: &str, pem: &[u8]) -> Result<()> {
         let id = SecretId { kind: SecretKind::AscKey, name: key_id.to_owned() };
         self.secrets.put(&id, label, SecretBytes::new(pem.to_vec())).await.map(|_| ())
