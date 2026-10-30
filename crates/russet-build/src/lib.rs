@@ -51,6 +51,7 @@ pub mod metadata;
 pub mod platform;
 pub mod report;
 pub mod resources;
+pub mod scaffold;
 pub mod stack;
 
 pub use camino::{Utf8Path, Utf8PathBuf};

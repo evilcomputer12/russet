@@ -12,7 +12,7 @@
 
 use std::process::ExitCode;
 
-use clap::{Arg, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_protocol::project as p;
@@ -40,7 +40,59 @@ pub fn command() -> Command {
                         .help("debug (default), release, profile or a named profile"),
                 ),
         )
-        .subcommand(super::stub("init", "Create a project (W16)"))
+        .subcommand(
+            Command::new("init")
+                .about("Create a new app project from a template")
+                .arg(Arg::new("name").value_name("NAME").required(true).help("The app's display name"))
+                .arg(Arg::new("dir").long("dir").value_name("DIR").help("Target directory (default: ./<name>)"))
+                .arg(
+                    Arg::new("stack")
+                        .long("stack")
+                        .value_name("STACK")
+                        .default_value("swiftpm")
+                        .value_parser(["swiftpm", "flutter", "xcode", "react-native", "maui"])
+                        .help("The project stack (only swiftpm is supported today)"),
+                )
+                .arg(
+                    Arg::new("bundle-id")
+                        .long("bundle-id")
+                        .value_name("ID")
+                        .help("Bundle identifier (default: com.example.<name>)"),
+                )
+                .arg(
+                    Arg::new("force")
+                        .long("force")
+                        .action(ArgAction::SetTrue)
+                        .help("Write into the directory even if it already has files"),
+                ),
+        )
+}
+
+/// Maps the `--stack` string (already restricted by the value parser) to the wire enum.
+fn parse_stack(s: &str) -> Result<p::ProjectStack> {
+    Ok(match s {
+        "swiftpm" => p::ProjectStack::Swiftpm,
+        "flutter" => p::ProjectStack::Flutter,
+        "xcode" => p::ProjectStack::Xcode,
+        "react-native" => p::ProjectStack::ReactNative,
+        "maui" => p::ProjectStack::Maui,
+        other => {
+            return Err(Error::new(codes::build::SCAFFOLD_STACK_UNSUPPORTED, format!("unknown stack {other:?}")));
+        }
+    })
+}
+
+/// Resolves a user path to an absolute string against the current directory.
+fn absolutize(d: &str) -> Result<String> {
+    let p = std::path::Path::new(d);
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| Error::new(codes::core::INTERNAL, format!("cannot read the current directory: {e}")))?
+            .join(p)
+    };
+    Ok(abs.to_string_lossy().into_owned())
 }
 
 fn to_json<T: serde::Serialize>(v: &T) -> Result<serde_json::Value> {
@@ -50,19 +102,36 @@ fn to_json<T: serde::Serialize>(v: &T) -> Result<serde_json::Value> {
 /// Runs this area's command; `m` is the root matches, so `m.subcommand()` names the command.
 pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
     let Some(("project", pm)) = m.subcommand() else { return super::not_implemented(m) };
-    let project = project_dir(cx)?;
     let value = match pm.subcommand() {
         Some(("detect", _)) => {
-            to_json(&cx.peer.call::<p::ProjectDetect>(p::ProjectDetectParams { dir: project }).await?)?
+            to_json(&cx.peer.call::<p::ProjectDetect>(p::ProjectDetectParams { dir: project_dir(cx)? }).await?)?
         }
-        Some(("info", _)) => to_json(&cx.peer.call::<p::ProjectInfo>(p::ProjectInfoParams { project }).await?)?,
+        Some(("info", _)) => {
+            to_json(&cx.peer.call::<p::ProjectInfo>(p::ProjectInfoParams { project: project_dir(cx)? }).await?)?
+        }
         Some(("info-plist", sub)) => {
             let params = p::ProjectInfoPlistParams {
-                project,
+                project: project_dir(cx)?,
                 target: sub.get_one::<String>("target").cloned(),
                 configuration: sub.get_one::<String>("configuration").cloned(),
             };
             to_json(&cx.peer.call::<p::ProjectInfoPlist>(params).await?)?
+        }
+        Some(("init", sub)) => {
+            let name = sub.get_one::<String>("name").cloned().unwrap_or_default();
+            let stack = parse_stack(sub.get_one::<String>("stack").map(String::as_str).unwrap_or("swiftpm"))?;
+            let dir = match sub.get_one::<String>("dir") {
+                Some(d) => absolutize(d)?,
+                None => absolutize(&name)?,
+            };
+            let params = p::ProjectInitParams {
+                dir,
+                stack,
+                name,
+                bundle_id: sub.get_one::<String>("bundle-id").cloned(),
+                force: sub.get_flag("force"),
+            };
+            to_json(&cx.peer.call::<p::ProjectInit>(params).await?)?
         }
         _ => return super::not_implemented(m),
     };

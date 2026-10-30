@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 {{DISPLAY_NAME}} authors
+#
+# Russet project file (ARCHITECTURE §14.2). A gitignored russet.local.toml next to it may override
+# [app] bundle-id and [signing] bundle-id-policy for your personal team.
+schema = 1
+
+[project]
+name = "{{NAME}}"
+stack = "swiftpm"
+
+[app]
+bundle-id = "{{BUNDLE_ID}}"
+display-name = "{{DISPLAY_NAME}}"
+version = "1.0.0"
+build-number = "1"
+deployment-target = "17.0"
+devices = ["iphone", "ipad"]
+
+[build.swiftpm]
+product = "{{NAME}}"

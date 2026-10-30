@@ -2729,6 +2729,52 @@ name: string, targets: Array<ProjectTarget>,
 configurations: Array<string>, defaultTarget?: string, };
 
 /**
+ * Params of `project.init`: create a new app project from a 0BSD template.
+ */
+export type ProjectInitParams = { 
+/**
+ * The directory to create the project in (created if missing); absolute.
+ */
+dir: string, 
+/**
+ * Which template to use.
+ */
+stack: ProjectStack, 
+/**
+ * The app's human-readable name (e.g. `My Great App`).
+ */
+name: string, 
+/**
+ * The bundle identifier; defaulted from the name (`com.example.<name>`) when omitted.
+ */
+bundleId?: string, 
+/**
+ * Write into the directory even if it already has files.
+ */
+force: boolean, };
+
+/**
+ * Result of `project.init`: the created project and the files written.
+ */
+export type ProjectInitResult = { 
+/**
+ * The absolute project root.
+ */
+root: string, stack: ProjectStack, 
+/**
+ * `[project] name` (the Swift package/module name derived from the app name).
+ */
+name: string, 
+/**
+ * The bundle identifier used.
+ */
+bundleId: string, 
+/**
+ * Files written, relative to the root, in sorted order.
+ */
+files: Array<string>, };
+
+/**
  * A project's stack (`[project] stack`).
  */
 export type ProjectStack = "swiftpm" | "flutter" | "xcode" | "react-native" | "maui";
@@ -3930,7 +3976,7 @@ export interface Methods {
   "location.clear": { params: Unspecified; result: Unspecified };
   "project.detect": { params: ProjectDetectParams; result: ProjectDetectResult };
   "project.info": { params: ProjectInfoParams; result: ProjectInfoResult };
-  "project.init": { params: Unspecified; result: Unspecified };
+  "project.init": { params: ProjectInitParams; result: ProjectInitResult };
   "project.infoPlist": { params: ProjectInfoPlistParams; result: ProjectInfoPlistResult };
   "build.start": { params: BuildStartParams; result: BuildOutput };
   "build.plan": { params: BuildStartParams; result: BuildPlanResult };

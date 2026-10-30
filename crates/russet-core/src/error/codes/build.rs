@@ -27,6 +27,12 @@ pub const LINT_FAILED: ErrorCode = ErrorCode::new(4006, "build.lintFailed", 7);
 pub const PACKAGE_FAILED: ErrorCode = ErrorCode::new(4007, "build.packageFailed", 7);
 /// 4008 `build.resourceUnsupported`: A resource type is not supported.
 pub const RESOURCE_UNSUPPORTED: ErrorCode = ErrorCode::new(4008, "build.resourceUnsupported", 7);
+/// 4009 `build.scaffoldTargetNotEmpty`: The target directory already has files (pass `--force` to write anyway).
+pub const SCAFFOLD_TARGET_NOT_EMPTY: ErrorCode = ErrorCode::new(4009, "build.scaffoldTargetNotEmpty", 7);
+/// 4010 `build.scaffoldStackUnsupported`: No project template exists for this stack yet.
+pub const SCAFFOLD_STACK_UNSUPPORTED: ErrorCode = ErrorCode::new(4010, "build.scaffoldStackUnsupported", 7);
+/// 4011 `build.scaffoldNameInvalid`: The app name has no letters or digits to form a package name.
+pub const SCAFFOLD_NAME_INVALID: ErrorCode = ErrorCode::new(4011, "build.scaffoldNameInvalid", 7);
 
 /// Every code of this family, in number order.
 pub const ALL: &[ErrorCode] = &[
@@ -39,4 +45,7 @@ pub const ALL: &[ErrorCode] = &[
     LINT_FAILED,
     PACKAGE_FAILED,
     RESOURCE_UNSUPPORTED,
+    SCAFFOLD_TARGET_NOT_EMPTY,
+    SCAFFOLD_STACK_UNSUPPORTED,
+    SCAFFOLD_NAME_INVALID,
 ];

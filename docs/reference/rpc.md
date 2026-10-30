@@ -336,7 +336,7 @@ Methods:
 |---|---|---|---|---|---|
 | `project.detect` | read |  | plain | `ProjectDetectParams` | `ProjectDetectResult` |
 | `project.info` | read |  | plain | `ProjectInfoParams` | `ProjectInfoResult` |
-| `project.init` | project |  | plain | `Unspecified` | `Unspecified` |
+| `project.init` | project |  | plain | `ProjectInitParams` | `ProjectInitResult` |
 | `project.infoPlist` | read |  | plain | `ProjectInfoPlistParams` | `ProjectInfoPlistResult` |
 
 ## `build` (module `build`)

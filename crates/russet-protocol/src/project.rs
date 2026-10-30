@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
+use crate::{MethodInfo, NotificationInfo, RpcMethod};
 
 /// A project's stack (`[project] stack`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -103,10 +103,39 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `project.init`: `{dir, stack, name, bundleId} → {files[]}`.
-pub type ProjectInitParams = Unspecified;
-/// Result of `project.init`.
-pub type ProjectInitResult = Unspecified;
+/// Params of `project.init`: create a new app project from a 0BSD template.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInitParams {
+    /// The directory to create the project in (created if missing); absolute.
+    pub dir: String,
+    /// Which template to use.
+    pub stack: ProjectStack,
+    /// The app's human-readable name (e.g. `My Great App`).
+    pub name: String,
+    /// The bundle identifier; defaulted from the name (`com.example.<name>`) when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bundle_id: Option<String>,
+    /// Write into the directory even if it already has files.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Result of `project.init`: the created project and the files written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInitResult {
+    /// The absolute project root.
+    pub root: String,
+    pub stack: ProjectStack,
+    /// `[project] name` (the Swift package/module name derived from the app name).
+    pub name: String,
+    /// The bundle identifier used.
+    pub bundle_id: String,
+    /// Files written, relative to the root, in sorted order.
+    pub files: Vec<String>,
+}
 crate::rpc_method!(
     /// `project.init` (class `project`). W16 (Wave 2).
     ProjectInit,

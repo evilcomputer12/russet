@@ -203,6 +203,12 @@
         "category": "Russet"
       },
       {
+        "command": "russet.project.new",
+        "title": "New Project…",
+        "category": "Russet",
+        "icon": "$(new-folder)"
+      },
+      {
         "command": "russet.account.addAscKey",
         "title": "Add App Store Connect API Key…",
         "category": "Russet"
@@ -465,6 +471,11 @@
           "command": "russet.devices.refresh",
           "when": "view == russet.devices",
           "group": "navigation@9"
+        },
+        {
+          "command": "russet.project.new",
+          "when": "view == russet.project",
+          "group": "navigation@1"
         },
         {
           "command": "russet.signing.refresh",

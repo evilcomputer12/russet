@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: 0BSD
+// SPDX-FileCopyrightText: 2026 {{DISPLAY_NAME}} authors
+
+import SwiftUI
+
+struct ContentView: View {
+    @State private var count = 0
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "swift")
+                .font(.system(size: 48))
+                .foregroundStyle(.tint)
+            Text("Hello from {{DISPLAY_NAME}}")
+                .font(.title2)
+            Button("Tapped \(count) \(count == 1 ? "time" : "times")") {
+                count += 1
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+    }
+}
+
+#Preview {
+    ContentView()
+}

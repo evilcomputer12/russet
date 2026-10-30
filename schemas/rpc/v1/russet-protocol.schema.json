@@ -7633,6 +7633,76 @@
       ],
       "type": "object"
     },
+    "ProjectInitParams": {
+      "description": "Params of `project.init`: create a new app project from a 0BSD template.",
+      "properties": {
+        "bundleId": {
+          "description": "The bundle identifier; defaulted from the name (`com.example.<name>`) when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dir": {
+          "description": "The directory to create the project in (created if missing); absolute.",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "description": "Write into the directory even if it already has files.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "The app's human-readable name (e.g. `My Great App`).",
+          "type": "string"
+        },
+        "stack": {
+          "$ref": "#/$defs/ProjectStack",
+          "description": "Which template to use."
+        }
+      },
+      "required": [
+        "dir",
+        "stack",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ProjectInitResult": {
+      "description": "Result of `project.init`: the created project and the files written.",
+      "properties": {
+        "bundleId": {
+          "description": "The bundle identifier used.",
+          "type": "string"
+        },
+        "files": {
+          "description": "Files written, relative to the root, in sorted order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "`[project] name` (the Swift package/module name derived from the app name).",
+          "type": "string"
+        },
+        "root": {
+          "description": "The absolute project root.",
+          "type": "string"
+        },
+        "stack": {
+          "$ref": "#/$defs/ProjectStack"
+        }
+      },
+      "required": [
+        "root",
+        "stack",
+        "name",
+        "bundleId",
+        "files"
+      ],
+      "type": "object"
+    },
     "ProjectStack": {
       "description": "A project's stack (`[project] stack`).",
       "enum": [
@@ -12429,11 +12499,11 @@
       "longRunning": false,
       "namespace": "project",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProjectInitParams"
       },
       "permission": "project",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProjectInitResult"
       }
     },
     "provision.apply": {

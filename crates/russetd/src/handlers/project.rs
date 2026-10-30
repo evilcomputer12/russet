@@ -13,14 +13,13 @@ use russet_ipc::{RequestCtx, Router};
 use russet_protocol::project::{self as p, TargetKind};
 
 use super::build::{account_xtool_prefix, builder, stack_dto, wire_path, with_account_policy};
-use super::not_implemented;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
     r.request::<p::ProjectDetect, _, _>(project_detect);
     r.request::<p::ProjectInfo, _, _>(project_info);
-    r.request::<p::ProjectInit, _, _>(not_implemented::<p::ProjectInit>);
+    r.request::<p::ProjectInit, _, _>(project_init);
     r.request::<p::ProjectInfoPlist, _, _>(project_info_plist);
 }
 
@@ -65,6 +64,34 @@ async fn project_detect(cx: DaemonCtx, _rq: RequestCtx, p: p::ProjectDetectParam
 async fn project_info(cx: DaemonCtx, _rq: RequestCtx, p: p::ProjectInfoParams) -> Result<p::ProjectInfoResult> {
     let info = builder(&cx)?.detect(&wire_path(&p.project, "project")?).await?;
     Ok(info_dto(&info))
+}
+
+/// `p::ProjectStack` -> the build plane's `Stack`.
+fn stack_from_dto(s: p::ProjectStack) -> russet_build::Stack {
+    match s {
+        p::ProjectStack::Swiftpm => russet_build::Stack::Swiftpm,
+        p::ProjectStack::Flutter => russet_build::Stack::Flutter,
+        p::ProjectStack::Xcode => russet_build::Stack::Xcode,
+        p::ProjectStack::ReactNative => russet_build::Stack::ReactNative,
+        p::ProjectStack::Maui => russet_build::Stack::Maui,
+    }
+}
+
+async fn project_init(_cx: DaemonCtx, _rq: RequestCtx, params: p::ProjectInitParams) -> Result<p::ProjectInitResult> {
+    let out = russet_build::scaffold::scaffold(russet_build::scaffold::ScaffoldRequest {
+        dir: wire_path(&params.dir, "dir")?,
+        stack: stack_from_dto(params.stack),
+        name: params.name,
+        bundle_id: params.bundle_id,
+        force: params.force,
+    })?;
+    Ok(p::ProjectInitResult {
+        root: out.root.to_string(),
+        stack: params.stack,
+        name: out.package,
+        bundle_id: out.bundle_id,
+        files: out.files,
+    })
 }
 
 async fn project_info_plist(

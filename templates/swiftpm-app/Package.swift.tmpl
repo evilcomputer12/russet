@@ -1,0 +1,18 @@
+// swift-tools-version: 6.0
+// SPDX-License-Identifier: 0BSD
+// SPDX-FileCopyrightText: 2026 {{DISPLAY_NAME}} authors
+
+import PackageDescription
+
+let package = Package(
+    name: "{{NAME}}",
+    platforms: [
+        .iOS(.v17)
+    ],
+    products: [
+        .library(name: "{{NAME}}", targets: ["{{NAME}}"])
+    ],
+    targets: [
+        .target(name: "{{NAME}}")
+    ]
+)

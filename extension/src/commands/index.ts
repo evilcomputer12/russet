@@ -113,6 +113,51 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   });
   reg("russet.importXcode", () => soon("Import Xcode"));
 
+  // --- Project --------------------------------------------------------------
+  reg("russet.project.new", async () => {
+    const name = await vscode.window.showInputBox({
+      prompt: "New app name",
+      placeHolder: "My Great App",
+      validateInput: (v) => (v.trim().length === 0 ? "Enter a name" : undefined),
+    });
+    if (!name) {
+      return;
+    }
+    const picked = await vscode.window.showOpenDialog({
+      canSelectFolders: true,
+      canSelectFiles: false,
+      canSelectMany: false,
+      openLabel: "Create here",
+      title: `Choose where to create "${name.trim()}"`,
+    });
+    if (!picked || picked.length === 0) {
+      return;
+    }
+    const root = vscode.Uri.joinPath(picked[0], name.trim());
+    try {
+      const res = (await svc.client.call("project.init" as never, {
+        dir: root.fsPath,
+        stack: "swiftpm",
+        name: name.trim(),
+        force: false,
+      } as never)) as { root: string; files: string[] };
+      const open = await vscode.window.showInformationMessage(
+        `Created ${name.trim()} (${res.files.length} files).`,
+        "Open",
+        "Open in New Window",
+      );
+      if (open === "Open") {
+        await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(res.root));
+      } else if (open === "Open in New Window") {
+        await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(res.root), {
+          forceNewWindow: true,
+        });
+      }
+    } catch (err) {
+      await showDaemonError(err, `Could not create ${name.trim()}`);
+    }
+  });
+
   // --- Accounts / signing ---------------------------------------------------
   reg("russet.account.addAscKey", addAscKey);
   reg("russet.account.signInAppleId", () => soon("Sign in with Apple ID"));
