@@ -2187,6 +2187,149 @@ tools: Array<string>, uuid?: string, rpaths: Array<string>, dylibs: Array<string
 export type ManagedComponent = "python-shared" | "darwin-tools" | "swift" | "llvm" | "flutter" | "xtool";
 
 /**
+ * One planned change to a client's config file (ARCHITECTURE §11.7; `russet-agent-config::Change`).
+ */
+export type McpChange = { 
+/**
+ * The file the change writes.
+ */
+path?: string, 
+/**
+ * The client's own `mcp add` command, for reference.
+ */
+viaCli?: Array<string>, 
+/**
+ * The file's content before the change (`None` when it did not exist).
+ */
+before?: string, 
+/**
+ * The file's content after the change.
+ */
+after: string, };
+
+/**
+ * One agent client's registration state (ARCHITECTURE §8.6, §11.7).
+ */
+export type McpClientStatus = { 
+/**
+ * The client id (`claude-code`, `codex`, …).
+ */
+id: string, 
+/**
+ * Whether Russet is registered with this client (user scope).
+ */
+registered: boolean, 
+/**
+ * Whether the client appears installed.
+ */
+installed: boolean, 
+/**
+ * The scope the registration was found in, if any.
+ */
+scope?: McpScope, 
+/**
+ * The file inspected, if any.
+ */
+path?: string, };
+
+/**
+ * The HTTP endpoint summary (W20; present only when enabled).
+ */
+export type McpHttpInfo = { url: string, enabled: boolean, listeners: Array<string>, };
+
+/**
+ * Params of `mcp.install`: `{client, scope?: user|project, project?, dryRun?, tierMax?}`.
+ */
+export type McpInstallParams = { 
+/**
+ * The client id to register (`claude-code`, `codex`, `gemini`, `vscode`).
+ */
+client: string, 
+/**
+ * `user` (default) or `project`.
+ */
+scope?: McpScope, 
+/**
+ * The project directory for `project` scope (defaults to the client's workspace).
+ */
+project?: string, 
+/**
+ * Plan only; do not write (default false).
+ */
+dryRun?: boolean, 
+/**
+ * The client's tier ceiling to record in policy (ARCHITECTURE §11.3); not written by W13.
+ */
+tierMax?: number, };
+
+/**
+ * Result of `mcp.install` / `mcp.uninstall`.
+ */
+export type McpInstallResult = { 
+/**
+ * The changes made (or that would be made with `dryRun`); empty when already in the target state.
+ */
+changes: Array<McpChange>, 
+/**
+ * Whether the changes were written (`false` for a dry run or when nothing changed).
+ */
+applied: boolean, };
+
+/**
+ * The registration scope of an agent client (ARCHITECTURE §11.7).
+ */
+export type McpScope = "user" | "project";
+
+/**
+ * Params of `mcp.status`: `{}`.
+ */
+export type McpStatusParams = Record<symbol, never>;
+
+/**
+ * Result of `mcp.status`.
+ */
+export type McpStatusResult = { stdio: McpStdioInfo, http?: McpHttpInfo, clients: Array<McpClientStatus>, };
+
+/**
+ * How the stdio bridge is launched (`russet mcp serve`).
+ */
+export type McpStdioInfo = { command: string, args: Array<string>, };
+
+/**
+ * Params of the `mcp.toolCall` notification: `{client, tool, tier, argsSummary, outcome, durationMs}; to ide`.
+ */
+export type McpToolCallParams = { 
+/**
+ * The MCP client id that made the call (the trusted `--client` identity).
+ */
+client: string, 
+/**
+ * The tool name (ARCHITECTURE §11.4).
+ */
+tool: string, 
+/**
+ * The tool's tier (0–3).
+ */
+tier: number, 
+/**
+ * A redacted one-line summary of the arguments (no secrets or full UDIDs).
+ */
+argsSummary: string, 
+/**
+ * `ok`, `error` or `approvalRequired`.
+ */
+outcome: string, 
+/**
+ * How long the call took.
+ */
+durationMs: number, };
+
+/**
+ * Params of `mcp.uninstall`: `{client, scope?: user|project, project?, dryRun?}`.
+ */
+export type McpUninstallParams = { client: string, scope?: McpScope, project?: string, dryRun?: boolean, };
+
+/**
  * Message levels.
  */
 export type MessageLevel = "info" | "warning" | "error";
@@ -3745,9 +3888,9 @@ export interface Methods {
   "flutter.device.forward": { params: Unspecified; result: Unspecified };
   "test.list": { params: Unspecified; result: Unspecified };
   "test.run": { params: Unspecified; result: Unspecified };
-  "mcp.status": { params: Unspecified; result: Unspecified };
-  "mcp.install": { params: Unspecified; result: Unspecified };
-  "mcp.uninstall": { params: Unspecified; result: Unspecified };
+  "mcp.status": { params: McpStatusParams; result: McpStatusResult };
+  "mcp.install": { params: McpInstallParams; result: McpInstallResult };
+  "mcp.uninstall": { params: McpUninstallParams; result: McpInstallResult };
   "mcp.http.set": { params: Unspecified; result: Unspecified };
   "mcp.policy.get": { params: Unspecified; result: Unspecified };
   "mcp.policy.set": { params: Unspecified; result: Unspecified };
@@ -3775,7 +3918,7 @@ export interface Notifications {
   "run.output": RunOutputParams;
   "run.exited": RunExitedParams;
   "run.jit": Unspecified;
-  "mcp.toolCall": Unspecified;
+  "mcp.toolCall": McpToolCallParams;
 }
 
 /** Every request the daemon sends to clients (`ui.*`, `ide.*`). */

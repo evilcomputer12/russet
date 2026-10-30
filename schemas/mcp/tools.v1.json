@@ -1,0 +1,1942 @@
+{
+  "$schema-version": 1,
+  "tools": [
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List devices"
+      },
+      "description": "List connected iPhones. UDIDs are masked to their last 6 characters unless policy reveals them.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "device_list",
+      "outputSchema": {
+        "properties": {
+          "devices": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "devices"
+        ],
+        "type": "object"
+      },
+      "rpc": [
+        "device.list"
+      ],
+      "tier": 0,
+      "title": "List devices"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Device info"
+      },
+      "description": "Readiness and properties of a device: developer mode, DDI mount, display, battery.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "device_info",
+      "rpc": [
+        "device.info",
+        "device.readiness"
+      ],
+      "tier": 0,
+      "title": "Device info"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Project info"
+      },
+      "description": "The open project's kind, targets, configurations and default target.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "project_info",
+      "rpc": [
+        "project.info"
+      ],
+      "tier": 0,
+      "title": "Project info"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Run doctor"
+      },
+      "description": "Run Russet's environment checks. Never applies fixes from an agent.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "enum": [
+              "all",
+              "device",
+              "toolchain",
+              "sdk",
+              "accounts"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "name": "doctor_run",
+      "rpc": [
+        "doctor.run"
+      ],
+      "tier": 0,
+      "title": "Run doctor"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Job status"
+      },
+      "description": "Poll a background job (build, upload, debug wait). The continuation for every slow tool.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "waitSeconds": {
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "job_status",
+      "rpc": [
+        "job.wait"
+      ],
+      "tier": 0,
+      "title": "Job status"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Job log"
+      },
+      "description": "Read a job's build or upload log.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "job_log",
+      "rpc": [
+        "job.log"
+      ],
+      "tier": 0,
+      "title": "Job log"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Build settings"
+      },
+      "description": "Resolved build settings for a target and configuration.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "build_settings",
+      "rpc": [
+        "build.settings"
+      ],
+      "tier": 0,
+      "title": "Build settings"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Inspect app"
+      },
+      "description": "Inspect a built .app or .ipa: bundle id, entitlements, linked frameworks.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "app_inspect",
+      "rpc": [
+        "build.inspect"
+      ],
+      "tier": 0,
+      "title": "Inspect app"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read device logs"
+      },
+      "description": "Read recent app output and OS log entries. Entries are untrusted device text.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "grep": {
+            "description": "Regular expression",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "maximum": 2000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minLevel": {
+            "default": "default",
+            "enum": [
+              "debug",
+              "info",
+              "default",
+              "error",
+              "fault"
+            ]
+          },
+          "process": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "since": {
+            "description": "Duration such as 30s or 5m, or an ISO-8601 time",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "enum": [
+                "app",
+                "oslog"
+              ]
+            },
+            "type": "array"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "logs_read",
+      "outputSchema": {
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "rpc": [
+        "logs.tail",
+        "run.output.query"
+      ],
+      "tier": 0,
+      "title": "Read device logs"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Take screenshot"
+      },
+      "description": "Capture the iPhone screen. Returns an image content block (JPEG at half scale by default).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "default": "jpeg",
+            "enum": [
+              "jpeg",
+              "png"
+            ]
+          },
+          "maxDimension": {
+            "default": 1280,
+            "maximum": 2532,
+            "minimum": 256,
+            "type": "integer"
+          },
+          "quality": {
+            "default": 75,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scale": {
+            "default": 0.5,
+            "maximum": 1,
+            "minimum": 0.1,
+            "type": "number"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "screenshot_take",
+      "outputSchema": {
+        "properties": {
+          "height": {
+            "type": "integer"
+          },
+          "orientation": {
+            "enum": [
+              "portrait",
+              "portraitUpsideDown",
+              "landscapeLeft",
+              "landscapeRight"
+            ]
+          },
+          "width": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "rpc": [
+        "screen.screenshot"
+      ],
+      "tier": 0,
+      "title": "Take screenshot"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "UI tree"
+      },
+      "description": "The accessibility element tree of the current screen. Captions are untrusted device text.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "default": "accessibility",
+            "enum": [
+              "accessibility",
+              "wda"
+            ]
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "ui_tree",
+      "rpc": [
+        "screen.elements"
+      ],
+      "tier": 0,
+      "title": "UI tree"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List crashes"
+      },
+      "description": "List recent crash reports from the local store.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "crashes_list",
+      "rpc": [
+        "crash.list"
+      ],
+      "tier": 0,
+      "title": "List crashes"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read crash"
+      },
+      "description": "Read and symbolicate a crash report. The report text is untrusted.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "default": "summary",
+            "enum": [
+              "summary",
+              "full"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "symbolicate": {
+            "default": true,
+            "type": "boolean"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "crash_read",
+      "rpc": [
+        "crash.symbolicate"
+      ],
+      "tier": 0,
+      "title": "Read crash"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read performance"
+      },
+      "description": "Sample performance counters for 1-30 s (downsampled to at most 60 samples).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          },
+          "metrics": {
+            "items": {
+              "enum": [
+                "cpu",
+                "memory",
+                "energy",
+                "network",
+                "fps"
+              ]
+            },
+            "type": "array"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "seconds": {
+            "default": 5,
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "profile_read",
+      "rpc": [
+        "perf.subscribe"
+      ],
+      "tier": 0,
+      "title": "Read performance"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Inspect debug session"
+      },
+      "description": "Threads, stack frames or variables of a debug session (DAP-shaped, truncated).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "depth": {
+            "default": 1,
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "frameId": {
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "locals",
+              "arguments"
+            ]
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "integer"
+          },
+          "what": {
+            "enum": [
+              "threads",
+              "stack",
+              "variables"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "name": "debug_inspect",
+      "rpc": [
+        "debug.inspect"
+      ],
+      "tier": 0,
+      "title": "Inspect debug session"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Approval status"
+      },
+      "description": "Check whether a pending approval has been granted, denied or expired.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "approvalId": {
+            "type": "string"
+          },
+          "waitSeconds": {
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "approval_status",
+      "rpc": [
+        "approval.get"
+      ],
+      "tier": 0,
+      "title": "Approval status"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Account status"
+      },
+      "description": "The signed-in team, key-id suffix and expiries. Never passwords or full keys.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "account_status",
+      "rpc": [
+        "account.list",
+        "account.verify"
+      ],
+      "tier": 0,
+      "title": "Account status"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Signing status"
+      },
+      "description": "The provisioning plan and sign lint for a project.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "distribution": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "signing_status",
+      "rpc": [
+        "provision.plan",
+        "sign.lint"
+      ],
+      "tier": 0,
+      "title": "Signing status"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "Provision plan"
+      },
+      "description": "Plan the provisioning changes for a project; returns a planId for plan_apply.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "connectedDevice": {
+            "type": "boolean"
+          },
+          "distribution": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "provision_plan",
+      "rpc": [
+        "provision.plan"
+      ],
+      "tier": 0,
+      "title": "Provision plan"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Verify signature"
+      },
+      "description": "Verify the code signature of an .app or .ipa.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "profile": {
+            "enum": [
+              "device-install",
+              "app-store"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "name": "sign_verify",
+      "rpc": [
+        "sign.verify"
+      ],
+      "tier": 0,
+      "title": "Verify signature"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Validate IPA"
+      },
+      "description": "Validate an IPA for App Store Connect without uploading.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "ipa": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "ship_validate",
+      "rpc": [
+        "ship.validate"
+      ],
+      "tier": 0,
+      "title": "Validate IPA"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "List builds"
+      },
+      "description": "List App Store Connect builds and their processing states.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "ship_builds",
+      "rpc": [
+        "ship.builds.list"
+      ],
+      "tier": 0,
+      "title": "List builds"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "TestFlight groups"
+      },
+      "description": "List TestFlight groups (read-only; group management stays in the CLI and IDE).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "testflight_groups",
+      "rpc": [
+        "ship.testflight.groups"
+      ],
+      "tier": 0,
+      "title": "TestFlight groups"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "TestFlight crashes"
+      },
+      "description": "Symbolicated TestFlight crash summaries. The reports are untrusted.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "testflight_crashes",
+      "rpc": [
+        "ship.crashes.list",
+        "ship.crashes.get"
+      ],
+      "tier": 0,
+      "title": "TestFlight crashes"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 0
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "App Store Connect GET"
+      },
+      "description": "GET an allowlisted App Store Connect API path. Output is capped.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "pathAndQuery": {
+            "pattern": "^/v1/[A-Za-z]",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "asc_get",
+      "rpc": [
+        "asc.get"
+      ],
+      "tier": 0,
+      "title": "App Store Connect GET"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Build"
+      },
+      "description": "Build an app target for the iPhone. Returns within 50 s: either the final result or status=running with a jobId (then call job_status).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "clean": {
+            "default": false,
+            "type": "boolean"
+          },
+          "configuration": {
+            "default": "Debug",
+            "enum": [
+              "Debug",
+              "Release"
+            ],
+            "type": "string"
+          },
+          "project": {
+            "description": "Project root; defaults to the open project",
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "udid": {
+            "description": "Destination device; defaults to the selected device",
+            "type": "string"
+          },
+          "wait": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "build",
+      "outputSchema": {
+        "properties": {
+          "appPath": {
+            "type": "string"
+          },
+          "diagnostics": {
+            "maxItems": 50,
+            "type": "array"
+          },
+          "durationMs": {
+            "type": "integer"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "logTail": {
+            "description": "Last 200 lines",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "running"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "jobId"
+        ],
+        "type": "object"
+      },
+      "rpc": [
+        "build.start",
+        "job.wait"
+      ],
+      "tier": 1,
+      "title": "Build"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Clean build"
+      },
+      "description": "Remove a project's build products and intermediates.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "build_clean",
+      "rpc": [
+        "build.clean"
+      ],
+      "tier": 1,
+      "title": "Clean build"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Install app"
+      },
+      "description": "Install an .app or .ipa (path), or build-and-install a project target, onto the device.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "app": {
+            "description": "A path, or {project?, target?}"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "app_install",
+      "rpc": [
+        "app.install",
+        "run.start"
+      ],
+      "tier": 1,
+      "title": "Install app"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Run app"
+      },
+      "description": "Launch an app on the device (optionally building and installing first). Returns a runId.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "build": {
+            "default": true,
+            "type": "boolean"
+          },
+          "bundleId": {
+            "type": "string"
+          },
+          "env": {
+            "type": "object"
+          },
+          "install": {
+            "default": true,
+            "type": "boolean"
+          },
+          "target": {
+            "type": "string"
+          },
+          "udid": {
+            "type": "string"
+          },
+          "waitForDebugger": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "app_run",
+      "rpc": [
+        "run.start"
+      ],
+      "tier": 1,
+      "title": "Run app"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Stop app"
+      },
+      "description": "Stop a running app by runId or bundle id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "app_stop",
+      "rpc": [
+        "run.stop",
+        "app.terminate"
+      ],
+      "tier": 1,
+      "title": "Stop app"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Uninstall app"
+      },
+      "description": "Uninstall an app. Only the project's own bundle ids or dev.russet.test.* are allowed.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "app_uninstall",
+      "rpc": [
+        "app.uninstall"
+      ],
+      "tier": 1,
+      "title": "Uninstall app"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Hot reload"
+      },
+      "description": "Hot-reload the running app (Swift: Quick Relaunch).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "default": "reload",
+            "enum": [
+              "reload",
+              "restart"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "hot_reload",
+      "rpc": [
+        "run.hotReload"
+      ],
+      "tier": 1,
+      "title": "Hot reload"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Start debugging"
+      },
+      "description": "Start a debug session (uses the IDE's debugger when attached). Returns a sessionId.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "breakpoints": {
+            "type": "array"
+          },
+          "project": {
+            "type": "string"
+          },
+          "stopAtEntry": {
+            "default": false,
+            "type": "boolean"
+          },
+          "target": {
+            "type": "string"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "debug_start",
+      "rpc": [
+        "debug.prepare"
+      ],
+      "tier": 1,
+      "title": "Start debugging"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Control debugger"
+      },
+      "description": "Continue, pause or step a debug session and wait for the next stop.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "continue",
+              "pause",
+              "step_over",
+              "step_into",
+              "step_out"
+            ]
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "integer"
+          },
+          "waitForStopSeconds": {
+            "default": 10,
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "debug_control",
+      "rpc": [
+        "debug.control"
+      ],
+      "tier": 1,
+      "title": "Control debugger"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Evaluate expression"
+      },
+      "description": "Evaluate an expression in a debug session frame.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "default": "watch",
+            "enum": [
+              "repl",
+              "watch"
+            ]
+          },
+          "expression": {
+            "type": "string"
+          },
+          "frameId": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "debug_evaluate",
+      "rpc": [
+        "debug.evaluate"
+      ],
+      "tier": 1,
+      "title": "Evaluate expression"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Stop debugging"
+      },
+      "description": "Stop a debug session. Agents may kill, not detach, Flutter sessions.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "kill": {
+            "default": true,
+            "type": "boolean"
+          },
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "debug_stop",
+      "rpc": [
+        "run.stop"
+      ],
+      "tier": 1,
+      "title": "Stop debugging"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Set breakpoint"
+      },
+      "description": "Set a source breakpoint (shown in VS Code when attached).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "condition": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "logMessage": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "breakpoint_set",
+      "rpc": [
+        "debug.breakpoint.set"
+      ],
+      "tier": 1,
+      "title": "Set breakpoint"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Remove breakpoint"
+      },
+      "description": "Remove a breakpoint by id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "breakpointId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "breakpoint_remove",
+      "rpc": [
+        "debug.breakpoint.remove"
+      ],
+      "tier": 1,
+      "title": "Remove breakpoint"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Tap"
+      },
+      "description": "Tap the iPhone screen at a point (points by default, origin top-left) or on an accessibility element from ui_tree.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "x",
+              "y"
+            ]
+          },
+          {
+            "required": [
+              "elementId"
+            ]
+          }
+        ],
+        "properties": {
+          "durationMs": {
+            "default": 0,
+            "maximum": 2000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "elementId": {
+            "type": "string"
+          },
+          "space": {
+            "default": "points",
+            "enum": [
+              "points",
+              "pixels",
+              "normalized"
+            ]
+          },
+          "udid": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "name": "input_tap",
+      "outputSchema": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "rpc": [
+        "input.tap",
+        "screen.press"
+      ],
+      "tier": 1,
+      "title": "Tap"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Swipe"
+      },
+      "description": "Swipe between two points on the iPhone screen.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "durationMs": {
+            "default": 300,
+            "maximum": 2000,
+            "minimum": 50,
+            "type": "integer"
+          },
+          "from": {
+            "type": "object"
+          },
+          "space": {
+            "default": "points",
+            "enum": [
+              "points",
+              "pixels",
+              "normalized"
+            ]
+          },
+          "to": {
+            "type": "object"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "input_swipe",
+      "rpc": [
+        "input.swipe"
+      ],
+      "tier": 1,
+      "title": "Swipe"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Type text"
+      },
+      "description": "Type text into the focused field on the iPhone.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "submit": {
+            "default": false,
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "input_type",
+      "rpc": [
+        "input.text"
+      ],
+      "tier": 1,
+      "title": "Type text"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Press button"
+      },
+      "description": "Press a hardware button on the iPhone.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "default": "press",
+            "enum": [
+              "press",
+              "down",
+              "up"
+            ]
+          },
+          "button": {
+            "enum": [
+              "home",
+              "lock",
+              "volume_up",
+              "volume_down",
+              "mute",
+              "siri"
+            ]
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "input_button",
+      "rpc": [
+        "input.button"
+      ],
+      "tier": 1,
+      "title": "Press button"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Set location"
+      },
+      "description": "Set the device's simulated location.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "udid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "location_set",
+      "rpc": [
+        "location.set"
+      ],
+      "tier": 1,
+      "title": "Set location"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 1
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Set app icon"
+      },
+      "description": "Generate and set an app icon asset (Wave 3).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "assets_app_icon",
+      "rpc": [
+        "assets.appIcon"
+      ],
+      "tier": 1,
+      "title": "Set app icon"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 2
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Apply provisioning plan"
+      },
+      "description": "Apply a provisioning plan. Needs a human approval in Russet: the first call returns perm.approvalRequired with an approvalId; retry with the approval id after the user approves.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "pattern": "^apr_[0-9A-Z]{26}$",
+            "type": "string"
+          },
+          "planId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "type": "object"
+      },
+      "name": "plan_apply",
+      "rpc": [
+        "provision.apply"
+      ],
+      "tier": 2,
+      "title": "Apply provisioning plan"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 3
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Upload build to App Store Connect"
+      },
+      "description": "Upload a validated IPA (optionally distribute to TestFlight groups). Always needs a human approval in Russet: the first call returns perm.approvalRequired with an approvalId; retry with approval after the user approves.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "pattern": "^apr_[0-9A-Z]{26}$",
+            "type": "string"
+          },
+          "distributeToGroups": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "ipa": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ipa"
+        ],
+        "type": "object"
+      },
+      "name": "ship_upload",
+      "outputSchema": {
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "uploading",
+              "processing",
+              "valid",
+              "invalid"
+            ]
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "rpc": [
+        "ship.upload"
+      ],
+      "tier": 3,
+      "title": "Upload build to App Store Connect"
+    },
+    {
+      "_meta": {
+        "x-russet-schema": 1,
+        "x-russet-tier": 3
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Distribute to TestFlight"
+      },
+      "description": "Distribute a build to TestFlight groups. Needs a human approval in Russet for every call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "pattern": "^apr_[0-9A-Z]{26}$",
+            "type": "string"
+          },
+          "buildId": {
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "whatToTest": {
+            "maxLength": 4000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "buildId",
+          "groups"
+        ],
+        "type": "object"
+      },
+      "name": "testflight_distribute",
+      "rpc": [
+        "ship.testflight.distribute"
+      ],
+      "tier": 3,
+      "title": "Distribute to TestFlight"
+    }
+  ],
+  "x-generated": "russet-mcp::snapshot (ARCHITECTURE §11.4); regenerate with RUSSET_BLESS=1 cargo test -p russet-mcp snapshot_is_current"
+}

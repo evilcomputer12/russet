@@ -29,6 +29,7 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
 | DC-02 | W5 | passed (W9, 2026-10-11): [results](results/2026-10-11-DC-02.md) | `3ad83bd` |
 | DC-03 | W6 | passed (W9, 2026-10-11): [results](results/2026-10-11-DC-03.md) | `3ad83bd` |
 | DC-05 | W9 | passed 3/3 (W9, 2026-10-11): [results](results/2026-10-11-DC-05.md) | `3ad83bd` |
+| DC-12 | W13 | queued: E2E-13 MCP agent loop with Claude Code 2.1.296 | the W13 tip on `ws/w13-mcp` |
 
 ---
 
@@ -163,3 +164,39 @@ request as W4 filed it.
   nonce read, not rolled; nothing installed): the 27A266a DDI fits this device. The identity's `Cryptex1,Version`
   is a placeholder (`39.999.999.0.0,0`); the mount record takes the version cryptexd reports after the install.
   W4 did not mount or replace the DDI on the rig (no reboot, no `--force`); 27A5228h is still mounted.
+
+## DC-12: E2E-13 MCP agent loop with Claude Code (W13)
+
+- **Context:** W13 lands the MCP server v1 (`russet-mcp`), the agent registration (`russet-agent-config`,
+  MCP-04 partial: claude-code, codex, gemini, vscode) and the `russet mcp` CLI. The tool catalog, registration
+  and `mcp.*` handlers are verified in CI (lane D) by `russet-mcp`, `russet-agent-config` and
+  `crates/russetd/tests/mcp_handlers.rs`; the snapshot `schemas/mcp/tools.v1.json` equals ARCHITECTURE §11.4.
+  This check is the part that needs the rig and a real agent: the end-to-end agent-driven loop.
+- **Check** (on the rig, with the paired iPhone 12 / iOS 27 and a built RussetProbe):
+
+  ```sh
+  # 1. Register the Russet MCP server with Claude Code (user scope → the stable shim).
+  russet mcp install --client claude-code
+  russet mcp status --json      # claude-code: registered=true
+
+  # 2. In Claude Code 2.1.296, drive the agent loop against the rig and confirm each tool:
+  #    device_list → build → app_run → screenshot_take → logs_read → input_tap
+  #    (the MCP tools namespace under mcp__russet__*).
+
+  # 3. Confirm the tier-3 approval gate: ask the agent to call ship_upload.
+  ```
+
+- **Expected:**
+  - `device_list` returns the rig (UDID masked to the last 6 characters);
+  - `build` returns `status: succeeded` within 50 s or `status: running` with a `jobId` that `job_status`
+    then resolves;
+  - `app_run` launches RussetProbe and returns a `runId`;
+  - `screenshot_take` returns a JPEG image content block;
+  - `logs_read` returns entries wrapped in `<untrusted source="device">…</untrusted>`;
+  - `input_tap` taps and returns `{ok: true}`;
+  - `ship_upload` (tier 3) returns `perm.approvalRequired` (1204) with `data.details.approvalId` and is
+    **not** performed without a human approval;
+  - the daemon writes one audit line per MCP call to `state/audit.jsonl` (ARCHITECTURE §11.3), none carrying
+    key material, GS tokens, raw profiles or full UDIDs.
+- **Redaction:** the results file must not contain the UDID, device name, team id or Apple id; mask the UDID to
+  its last 6 characters as the tool does.
