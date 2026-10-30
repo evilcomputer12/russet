@@ -115,6 +115,8 @@ jobs:
           esac
           if [ "$base" != HEAD ]; then range=(--changed-since "$base"); fi
           cargo xtask ci --profile pr --require-tools --guard-base "$base" "${range[@]}"
+      - name: Lint device traces (redaction safety net, QA §3.5.3, DC-13)
+        run: cargo xtask traces lint
       - name: zizmor online audits (impostor commits, known-vulnerable actions)
         env:
           GH_TOKEN: ${{ github.token }}
