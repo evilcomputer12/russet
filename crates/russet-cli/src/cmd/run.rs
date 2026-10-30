@@ -24,8 +24,9 @@ use russet_core::error::{Error, codes};
 use russet_core::ids::SessionId;
 use russet_protocol::common::{SessionLease, SessionState, SessionSummary};
 use russet_protocol::run::{
-    InstallMode, LaunchMode, RunList, RunListParams, RunOutputQuery, RunOutputQueryParams, RunStart,
-    RunStartBackground, RunStartParams, RunStop, RunStopParams, SessionError, StopMode,
+    HotReloadKind, InstallMode, LaunchMode, RunHotReload, RunHotReloadParams, RunList, RunListParams, RunOutputQuery,
+    RunOutputQueryParams, RunRelaunch, RunRelaunchParams, RunStart, RunStartBackground, RunStartParams, RunStop,
+    RunStopParams, SessionError, StopMode,
 };
 
 use crate::CliCtx;
@@ -48,8 +49,18 @@ pub fn command() -> Command {
                         .help("Every live session"),
                 )
                 .arg(Arg::new("detach").long("detach").action(ArgAction::SetTrue).help("Leave the apps running")),
-            super::stub("relaunch", "Quick Relaunch a Swift session"),
-            super::stub("reload", "Hot reload a session [--restart]"),
+            Command::new("relaunch")
+                .about("Quick Relaunch a Swift session (same session id, a new pid)")
+                .arg(Arg::new("session").value_name("SESSION").help("A session id (defaults to the only live one)")),
+            Command::new("reload")
+                .about("Hot reload a session; --restart restarts it")
+                .arg(Arg::new("session").value_name("SESSION").help("A session id (defaults to the only live one)"))
+                .arg(
+                    Arg::new("restart")
+                        .long("restart")
+                        .action(ArgAction::SetTrue)
+                        .help("Restart (hot restart) instead of reload"),
+                ),
         ],
     )
 }
@@ -107,8 +118,42 @@ pub async fn run(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
         Some(("run", sub)) => run_app(sub, cx).await,
         Some(("sessions", _)) => sessions(cx).await,
         Some(("stop", sub)) => stop(sub, cx).await,
+        Some(("relaunch", sub)) => relaunch(sub, cx).await,
+        Some(("reload", sub)) => reload(sub, cx).await,
         _ => super::not_implemented(m),
     }
+}
+
+/// The session id to act on: the given one, or the single live session.
+async fn pick_session(m: &ArgMatches, cx: &CliCtx) -> Result<SessionId> {
+    if let Some(id) = m.get_one::<String>("session") {
+        return serde_json::from_value(serde_json::Value::String(id.clone()))
+            .map_err(|e| Error::new(codes::core::INVALID_ARGUMENT, format!("bad session id: {e}")));
+    }
+    let list = cx.peer.call::<RunList>(RunListParams {}).await?;
+    let live: Vec<SessionSummary> = list.sessions.into_iter().filter(|s| s.ended_at.is_none()).collect();
+    match live.as_slice() {
+        [one] => Ok(one.session_id.clone()),
+        [] => Err(Error::new(codes::debug::SESSION_NOT_FOUND, "no live session")
+            .with_hint("Start one with `russet run` or `russet debug`.")),
+        _ => Err(Error::new(codes::core::INVALID_ARGUMENT, "more than one live session")
+            .with_hint("Name the session; list them with `russet sessions`.")),
+    }
+}
+
+async fn relaunch(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
+    let session_id = pick_session(m, cx).await?;
+    let r = cx.peer.call::<RunRelaunch>(RunRelaunchParams { session_id }).await?;
+    cx.reporter.result(&json(&r)?);
+    Ok(ExitCode::SUCCESS)
+}
+
+async fn reload(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
+    let session_id = pick_session(m, cx).await?;
+    let kind = if m.get_flag("restart") { Some(HotReloadKind::Restart) } else { Some(HotReloadKind::Reload) };
+    let r = cx.peer.call::<RunHotReload>(RunHotReloadParams { session_id, kind }).await?;
+    cx.reporter.result(&json(&r)?);
+    Ok(ExitCode::SUCCESS)
 }
 
 /// The project root: `--project`, else the current directory (absolute; ARCHITECTURE §7.3).

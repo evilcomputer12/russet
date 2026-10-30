@@ -32,7 +32,8 @@ use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_protocol::common::{AttachMode, LogLevel, LogSource, SessionLease, SessionState};
 use russet_protocol::debug::{
-    DebugFrontend, DebugPrepare, DebugPrepareParams, DebugPrepareResult, DebuggerFlavor, JitPolicy, SymbolTier,
+    DebugAttach, DebugAttachParams, DebugFrontend, DebugPrepare, DebugPrepareParams, DebugPrepareResult,
+    DebuggerFlavor, JitPolicy, SymbolTier,
 };
 use russet_protocol::run::{
     OutputFilter, RunList, RunListParams, RunOutputQuery, RunOutputQueryParams, RunStop, RunStopParams, StopMode,
@@ -304,22 +305,36 @@ pub async fn run_interactive(cmd: &mut tokio::process::Command) -> std::io::Resu
 }
 
 async fn debug(m: &ArgMatches, cx: &CliCtx) -> Result<ExitCode> {
-    if m.get_flag("attach") {
-        return Err(Error::new(codes::core::NOT_IMPLEMENTED, "`russet debug --attach` lands with W11 (debug.attach)")
-            .with_hint("Launch and debug the app with `russet debug`."));
-    }
-    let project = project_dir(cx)?;
     let detach = m.get_flag("detach");
     let lease = if detach { SessionLease::Detached } else { SessionLease::Owned };
-    let params = prepare_params(m, &project, cx.global.device.clone(), lease)?;
-    let stop_on_entry = params.stop_on_entry.unwrap_or(false);
+    let attaching = m.get_flag("attach");
+    // Attaching to a running app needs no project; launching does.
+    let project = if attaching {
+        project_dir(cx).unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
+    } else {
+        project_dir(cx)?
+    };
+    let (prepared, stop_on_entry) = if attaching {
+        let params = DebugAttachParams {
+            udid: cx.global.device.clone(),
+            pid: m.get_one::<String>("pid").and_then(|p| p.parse::<u32>().ok()),
+            bundle_id: m.get_one::<String>("bundle").cloned(),
+            frontend: Some(DebugFrontend::LldbCli),
+            project: project_dir(cx).ok().map(|p| p.to_string_lossy().into_owned()),
+            session_lease: Some(lease),
+        };
+        (cx.peer.call::<DebugAttach>(params).await?, m.get_flag("stop-on-entry"))
+    } else {
+        let params = prepare_params(m, &project, cx.global.device.clone(), lease)?;
+        let soe = params.stop_on_entry.unwrap_or(false);
+        (cx.peer.call::<DebugPrepare>(params).await?, soe)
+    };
     let bps = breakpoints(m)?;
     let batch = m.get_flag("batch").then(|| BatchSpec {
         commands: m.get_many::<String>("command").into_iter().flatten().cloned().collect(),
         end: if detach { BatchEnd::Detach } else { BatchEnd::Kill },
     });
     let limits = batch_limits(m);
-    let prepared = cx.peer.call::<DebugPrepare>(params).await?;
     let script = session_script(&prepared, &bps, stop_on_entry, batch.as_ref());
     let path = script_path(&prepared, &project);
     if let Some(dir) = path.parent() {
