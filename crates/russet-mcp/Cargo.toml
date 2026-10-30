@@ -17,7 +17,12 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server", "elicitation"] }
+russet-agent-config.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
 russet-ipc.workspace = true
 russet-protocol.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
