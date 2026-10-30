@@ -455,7 +455,7 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `asc.get` | read |  | plain | `Unspecified` | `Unspecified` |
+| `asc.get` | read |  | plain | `AscGetParams` | `AscGetResult` |
 
 ## `ship` (module `ship`)
 
@@ -463,8 +463,8 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `ship.archive` | build | L | plain | `Unspecified` | `Unspecified` |
-| `ship.ipa` | build |  | plain | `Unspecified` | `Unspecified` |
+| `ship.archive` | build | L | plain | `ShipArchiveParams` | `ShipArchiveResult` |
+| `ship.ipa` | build |  | plain | `ShipIpaParams` | `ShipIpaResult` |
 | `ship.stamp.plan` | read |  | plain | `Unspecified` | `Unspecified` |
 | `ship.stamp.apply` | project |  | plain | `Unspecified` | `Unspecified` |
 | `ship.validate` | read |  | plain | `Unspecified` | `Unspecified` |

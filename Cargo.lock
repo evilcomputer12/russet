@@ -5712,6 +5712,8 @@ dependencies = [
 name = "russet-ship"
 version = "0.1.0"
 dependencies = [
+ "camino",
+ "plist",
  "russet-account",
  "russet-asc",
  "russet-build",
@@ -5719,6 +5721,8 @@ dependencies = [
  "russet-doctor",
  "russet-ipa",
  "russet-sign",
+ "sha2 0.11.0",
+ "tempfile",
 ]
 
 [[package]]

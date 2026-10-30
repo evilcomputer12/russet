@@ -338,6 +338,24 @@ export type ApprovalSubject = { "kind": "method", method: string, paramsDigest: 
 export type ArtifactKind = "app" | "ipa" | "dsym" | "archive" | "report";
 
 /**
+ * Params of `asc.get`: `{pathAndQuery, accountId?} → {status, body} (allowlisted GET; request-scoped token)`.
+ */
+export type AscGetParams = { 
+/**
+ * An allowlisted `/v1/...` path and query (SIGN §11). Encoded dots, slashes and backslashes are refused.
+ */
+pathAndQuery: string, 
+/**
+ * Omitted: the default account.
+ */
+accountId?: string, };
+
+/**
+ * Result of `asc.get`: the HTTP status and the parsed JSON body.
+ */
+export type AscGetResult = { status: number, body: JsonValue, };
+
+/**
  * How LLDB reaches the app (ARCHITECTURE §10.3).
  */
 export type AttachMode = "broker" | "legacy-async";
@@ -2682,6 +2700,55 @@ exit?: SessionExit, };
 export type Severity = "error" | "warning" | "note";
 
 /**
+ * Params of `ship.archive`: `{project, configuration?, method} → Archive`.
+ */
+export type ShipArchiveParams = { 
+/**
+ * The project directory (absolute).
+ */
+project: string, 
+/**
+ * The build configuration (`Debug`, `Release`); the archive defaults to `Release`.
+ */
+configuration?: string, 
+/**
+ * `development`, `ad-hoc`, `app-store-connect` or `enterprise` (SIGN §9.2).
+ */
+method: string, };
+
+/**
+ * Result of `ship.archive` (the `.xcarchive`, SIGN §9.1). `digest` is a SHA-256 over the whole archive tree, the
+ * reproducibility fingerprint.
+ */
+export type ShipArchiveResult = { path: string, 
+/**
+ * The archived app, relative to the archive root (`Products/Applications/<App>.app`).
+ */
+appPath: string, bundleId: string, shortVersion: string, buildVersion: string, dsyms: Array<string>, digest: string, };
+
+/**
+ * Params of `ship.ipa`: `{archivePath, method, out?} → IpaInfo`.
+ */
+export type ShipIpaParams = { 
+/**
+ * An `.xcarchive` directory or a built `.app` directory (absolute).
+ */
+archivePath: string, 
+/**
+ * `development` stores entries for fast installs; the store methods deflate (SIGN §9.3).
+ */
+method: string, 
+/**
+ * Where to write the IPA (absolute); defaults to `<archive stem>.ipa` beside the input.
+ */
+out?: string, };
+
+/**
+ * Result of `ship.ipa` (the store/development IPA, SIGN §9.3).
+ */
+export type ShipIpaResult = { path: string, size: number, sha256: string, bundleId: string, shortVersion: string, buildVersion: string, };
+
+/**
  * Why the daemon stops (`daemon.shutdown`, `daemon.shuttingDown`).
  */
 export type ShutdownReason = "idle" | "request" | "upgrade" | "signal";
@@ -3278,9 +3345,9 @@ export interface Methods {
   "sign.verify": { params: SignPathParams; result: SignVerifyResult };
   "sign.lint": { params: SignPathParams; result: SignLintResult };
   "sign.inspect": { params: SignPathParams; result: SignInspectResult };
-  "asc.get": { params: Unspecified; result: Unspecified };
-  "ship.archive": { params: Unspecified; result: Unspecified };
-  "ship.ipa": { params: Unspecified; result: Unspecified };
+  "asc.get": { params: AscGetParams; result: AscGetResult };
+  "ship.archive": { params: ShipArchiveParams; result: ShipArchiveResult };
+  "ship.ipa": { params: ShipIpaParams; result: ShipIpaResult };
   "ship.stamp.plan": { params: Unspecified; result: Unspecified };
   "ship.stamp.apply": { params: Unspecified; result: Unspecified };
   "ship.validate": { params: Unspecified; result: Unspecified };

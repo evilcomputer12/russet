@@ -7,12 +7,39 @@
 //! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
 //! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
 use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
 
 /// Params of `ship.archive`: `{project, configuration?, method} → Archive`.
-pub type ShipArchiveParams = Unspecified;
-/// Result of `ship.archive`.
-pub type ShipArchiveResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShipArchiveParams {
+    /// The project directory (absolute).
+    pub project: String,
+    /// The build configuration (`Debug`, `Release`); the archive defaults to `Release`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub configuration: Option<String>,
+    /// `development`, `ad-hoc`, `app-store-connect` or `enterprise` (SIGN §9.2).
+    pub method: String,
+}
+/// Result of `ship.archive` (the `.xcarchive`, SIGN §9.1). `digest` is a SHA-256 over the whole archive tree, the
+/// reproducibility fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShipArchiveResult {
+    pub path: String,
+    /// The archived app, relative to the archive root (`Products/Applications/<App>.app`).
+    pub app_path: String,
+    pub bundle_id: String,
+    pub short_version: String,
+    pub build_version: String,
+    pub dsyms: Vec<String>,
+    pub digest: String,
+}
 crate::rpc_method!(
     /// `ship.archive` (class `build`, long-running). W12 (Wave 2).
     ShipArchive,
@@ -21,10 +48,30 @@ crate::rpc_method!(
     Permission::Build, long_running
 );
 
-/// Params of `ship.ipa`: `{archivePath, method} → IpaInfo`.
-pub type ShipIpaParams = Unspecified;
-/// Result of `ship.ipa`.
-pub type ShipIpaResult = Unspecified;
+/// Params of `ship.ipa`: `{archivePath, method, out?} → IpaInfo`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShipIpaParams {
+    /// An `.xcarchive` directory or a built `.app` directory (absolute).
+    pub archive_path: String,
+    /// `development` stores entries for fast installs; the store methods deflate (SIGN §9.3).
+    pub method: String,
+    /// Where to write the IPA (absolute); defaults to `<archive stem>.ipa` beside the input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub out: Option<String>,
+}
+/// Result of `ship.ipa` (the store/development IPA, SIGN §9.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShipIpaResult {
+    pub path: String,
+    pub size: u64,
+    pub sha256: String,
+    pub bundle_id: String,
+    pub short_version: String,
+    pub build_version: String,
+}
 crate::rpc_method!(
     /// `ship.ipa` (class `build`). W12 (Wave 2).
     ShipIpa,

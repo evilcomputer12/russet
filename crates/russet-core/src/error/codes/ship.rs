@@ -31,6 +31,10 @@ pub const REVIEW_SUBMIT_FAILED: ErrorCode = ErrorCode::new(7008, "ship.reviewSub
 pub const CI_CLOUD_SIGNING_FORBIDDEN: ErrorCode = ErrorCode::new(7009, "ship.ciCloudSigningForbidden", 10);
 /// 7010 `ship.ciRunnerUnavailable`: The pinned runner label or Xcode version is missing from the image.
 pub const CI_RUNNER_UNAVAILABLE: ErrorCode = ErrorCode::new(7010, "ship.ciRunnerUnavailable", 10);
+/// 7011 `ship.archiveFailed`: The archive (or its dSYM generation) could not be created.
+pub const ARCHIVE_FAILED: ErrorCode = ErrorCode::new(7011, "ship.archiveFailed", 10);
+/// 7012 `ship.ipaInvalid`: The input to the IPA writer is not a usable `.app` or `.xcarchive`.
+pub const IPA_INVALID: ErrorCode = ErrorCode::new(7012, "ship.ipaInvalid", 10);
 
 /// Every code of this family, in number order.
 pub const ALL: &[ErrorCode] = &[
@@ -45,4 +49,6 @@ pub const ALL: &[ErrorCode] = &[
     REVIEW_SUBMIT_FAILED,
     CI_CLOUD_SIGNING_FORBIDDEN,
     CI_RUNNER_UNAVAILABLE,
+    ARCHIVE_FAILED,
+    IPA_INVALID,
 ];
