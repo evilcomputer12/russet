@@ -17,4 +17,5 @@ workspace = true
 [dependencies]
 jsonc-parser = { workspace = true, features = ["cst"] }
 russet-core.workspace = true
+serde_json.workspace = true
 toml_edit.workspace = true
