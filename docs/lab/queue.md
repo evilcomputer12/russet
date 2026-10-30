@@ -30,6 +30,7 @@ cargo build -p russet-device --example devlab && L="$CARGO_TARGET_DIR/debug/exam
 | DC-03 | W6 | passed (W9, 2026-10-11): [results](results/2026-10-11-DC-03.md) | `3ad83bd` |
 | DC-05 | W9 | passed 3/3 (W9, 2026-10-11): [results](results/2026-10-11-DC-05.md) | `3ad83bd` |
 | DC-12 | W13 | queued: E2E-13 MCP agent loop with Claude Code 2.1.296 | the W13 tip on `ws/w13-mcp` |
+| DC-08 | W12 | queued | `ed779a5` |
 
 ---
 
@@ -200,3 +201,30 @@ request as W4 filed it.
     key material, GS tokens, raw profiles or full UDIDs.
 - **Redaction:** the results file must not contain the UDID, device name, team id or Apple id; mask the UDID to
   its last 6 characters as the tool does.
+
+## DC-08: exact-ID provisioning apply and idempotency (W12)
+
+- **Check** (PLAN §5.3 acceptance; approved by decisions.md 2026-10-11): on the owner's team, provision and
+  install RussetProbe under the one bundle ID decisions.md allows — `com.evilcomputer12.russet.hello` unless the
+  owner names another (RussetProbe maps onto it through the owner's `russet.local.toml`).
+- **Preconditions:** a team key imported into lane A's home (`russet account import --from-xtool --yes`, or
+  `russet account add-key …`) that can read and create certificates, bundle IDs and profiles; a usable
+  development certificate already on the team (acceptance #1 reuses it — this check does **not** create a
+  certificate); the rig connected and its UDID known.
+- **Commands** (lane A env above):
+
+  ```sh
+  cd <RussetProbe project>
+  russet provision --distribution development --dry-run --json   # expect only RegisterBundleId + CreateProfile
+  russet provision --distribution development --json             # apply (approve the plan when prompted)
+  russet run --json                                              # build, sign with the cached profile, install, launch
+  russet provision --distribution development --dry-run --json   # second run: expect 0 mutations (E2E-12)
+  ```
+
+- **Expected:**
+  - the first dry run lists **only** `RegisterBundleId` and `CreateProfile`, reusing the existing certificate
+    (no `CreateCertificate`, no `RevokeCertificate`, no `DeleteProfile`);
+  - apply creates the bundle ID and the `Russet Development …` profile and nothing else; RussetProbe installs and
+    launches under the **exact** bundle ID;
+  - the second dry run plans **0 mutations** (idempotent); nothing was revoked or deleted on the team.
+- **Redaction:** results name no team ID, UDID, Apple ID or certificate subject; the bundle ID may be shown.

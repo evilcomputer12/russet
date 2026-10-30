@@ -215,6 +215,11 @@ impl AccountStore {
         client_for(key.clone(), &self.asc_base, self.limiter(&key.key_id))
     }
 
+    /// A bearer-token client of `key` for the writes an approved plan performs (W12), sharing the key's limiter.
+    pub(crate) fn mut_client(&self, key: &AscKey) -> Result<AscClient> {
+        mut_client_for(key.clone(), &self.asc_base, self.limiter(&key.key_id))
+    }
+
     /// Points the App Store Connect client at `base` (`Endpoints.asc`; fakes in tests).
     pub fn with_asc_base(mut self, base: Url) -> Self {
         self.asc_base = base;
@@ -405,7 +410,7 @@ impl AccountStore {
             Error::new(codes::account::NO_ACCOUNT, format!("the team of {id} is unknown"))
                 .with_hint("Re-add the key (`russet account add-key …`) or import xtool's identity so Russet can discover the team; `russet account verify` shows what the key can read.")
         })?;
-        Ok(Arc::new(AscPortal::new(self.client(&key)?, team_id, key_is_individual(&account))))
+        Ok(Arc::new(AscPortal::new(self.client(&key)?, self.mut_client(&key)?, team_id, key_is_individual(&account))))
     }
 
     /// The account's App Store Connect key, unsealed (in-process only).
@@ -436,6 +441,33 @@ impl AccountStore {
             self.save()?;
         }
         Ok(())
+    }
+
+    /// Removes an account from `accounts.toml` (`account.remove`). With `wipe_secrets`, its sealed App Store
+    /// Connect key is deleted too; the default is cleared when the removed account was the default.
+    pub async fn remove(&mut self, id: &AccountId, wipe_secrets: bool) -> Result<()> {
+        let Some(pos) = self.file.accounts.iter().position(|e| e.id == id.0) else {
+            return Err(no_account(Some(id)));
+        };
+        let entry = self.file.accounts.remove(pos);
+        if self.file.default.as_deref() == Some(id.0.as_str()) {
+            self.file.default = (self.file.accounts.len() == 1).then(|| self.file.accounts[0].id.clone());
+        }
+        self.save()?;
+        if wipe_secrets && let Some(key_id) = &entry.key_id {
+            let secret = SecretId { kind: SecretKind::AscKey, name: key_id.clone() };
+            self.secrets.delete(&secret).await?;
+        }
+        Ok(())
+    }
+
+    /// Makes `id` the default account (`account.setDefault`).
+    pub fn set_default(&mut self, id: &AccountId) -> Result<()> {
+        if !self.file.accounts.iter().any(|e| e.id == id.0) {
+            return Err(no_account(Some(id)));
+        }
+        self.file.default = Some(id.0.clone());
+        self.save()
     }
 
     async fn seal_key(&self, key_id: &str, label: &str, pem: &[u8]) -> Result<()> {
@@ -486,6 +518,12 @@ pub(crate) fn no_account(id: Option<&AccountId>) -> Error {
 /// A GET-only client with per-request scopes (Wave 1) that shares `limiter` with the key's other clients.
 pub(crate) fn client_for(key: AscKey, base: &Url, limiter: Arc<RateLimiter>) -> Result<AscClient> {
     let auth = JwtAuth::per_request(base.clone(), Arc::new(TokenFactory::new(key)));
+    AscClient::with_limiter(Arc::new(auth), RetryPolicy::default(), limiter)
+}
+
+/// A bearer-token (mutation-capable) client, for the writes an approved plan performs (W12).
+pub(crate) fn mut_client_for(key: AscKey, base: &Url, limiter: Arc<RateLimiter>) -> Result<AscClient> {
+    let auth = JwtAuth::bearer(base.clone(), Arc::new(TokenFactory::new(key)));
     AscClient::with_limiter(Arc::new(auth), RetryPolicy::default(), limiter)
 }
 

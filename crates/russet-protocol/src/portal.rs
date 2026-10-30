@@ -189,10 +189,20 @@ crate::rpc_method!(
     Permission::Account
 );
 
-/// Params of `portal.certificates.revoke`: `{accountId?, certId} → {} (typed confirmation; cli/ide only)`.
-pub type PortalCertificatesRevokeParams = Unspecified;
+/// Params of `portal.certificates.revoke`: `{accountId?, certId} → {}` (typed confirmation; cli/ide only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalCertificatesRevokeParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account_id: Option<String>,
+    /// The portal certificate id to revoke.
+    pub cert_id: String,
+}
 /// Result of `portal.certificates.revoke`.
-pub type PortalCertificatesRevokeResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalCertificatesRevokeResult {}
 crate::rpc_method!(
     /// `portal.certificates.revoke` (class `account-destructive`, typed confirmation). W12 (Wave 2).
     PortalCertificatesRevoke,

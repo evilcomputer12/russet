@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::sign::Distribution;
-use crate::{MethodInfo, NotificationInfo, RpcMethod, Unspecified};
+use crate::{MethodInfo, NotificationInfo, RpcMethod};
 
 /// Params of `provision.plan`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -142,10 +142,37 @@ crate::rpc_method!(
     Permission::Account, long_running
 );
 
-/// Params of `provision.capabilities`: `{accountId?} → {capabilities[{id, title, entitlements, freeTeam, needsPortalStep, docs}]}`.
-pub type ProvisionCapabilitiesParams = Unspecified;
+/// Params of `provision.capabilities`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvisionCapabilitiesParams {
+    /// Omitted: the default account (reserved; the map is the same for every paid team).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account_id: Option<String>,
+}
+/// One capability the developer portal manages (SIGN §6.5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Capability {
+    /// The App Store Connect `capabilityType`.
+    pub id: String,
+    pub title: String,
+    /// The entitlement keys that request it.
+    pub entitlements: Vec<String>,
+    /// Whether free (personal) teams can use it.
+    pub free_team: bool,
+    /// Whether part of it needs a manual step in the developer portal (app groups, iCloud containers).
+    pub needs_portal_step: bool,
+    /// Apple's capabilities documentation.
+    pub docs: String,
+}
 /// Result of `provision.capabilities`.
-pub type ProvisionCapabilitiesResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvisionCapabilitiesResult {
+    pub capabilities: Vec<Capability>,
+}
 crate::rpc_method!(
     /// `provision.capabilities` (class `read`). W12 (Wave 2).
     ProvisionCapabilities,

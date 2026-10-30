@@ -170,10 +170,20 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `account.remove`: `{accountId, wipeSecrets?} → {}`.
-pub type AccountRemoveParams = Unspecified;
+/// Params of `account.remove`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRemoveParams {
+    pub account_id: String,
+    /// Also delete the account's sealed App Store Connect key from the secret store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wipe_secrets: Option<bool>,
+}
 /// Result of `account.remove`.
-pub type AccountRemoveResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRemoveResult {}
 crate::rpc_method!(
     /// `account.remove` (class `secrets`). W12 (Wave 2).
     AccountRemove,
@@ -182,10 +192,16 @@ crate::rpc_method!(
     Permission::Secrets
 );
 
-/// Params of `account.setDefault`: `{accountId} → {}`.
-pub type AccountSetDefaultParams = Unspecified;
+/// Params of `account.setDefault`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSetDefaultParams {
+    pub account_id: String,
+}
 /// Result of `account.setDefault`.
-pub type AccountSetDefaultResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSetDefaultResult {}
 crate::rpc_method!(
     /// `account.setDefault` (class `secrets`). W12 (Wave 2).
     AccountSetDefault,

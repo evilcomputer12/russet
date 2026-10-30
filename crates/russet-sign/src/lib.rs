@@ -42,8 +42,8 @@ mod verify;
 
 pub use bundle::{AppBundle, BundleKind, CodeItem};
 pub use entitlements::{
-    CapabilityInfo, Distribution, EntitlementsError, EntitlementsResolver, MergeNote, MergePolicy,
-    ResolvedEntitlements, allowed_value, capability_for_entitlement,
+    CapabilityInfo, CapabilityRow, Distribution, EntitlementsError, EntitlementsResolver, MergeNote, MergePolicy,
+    ResolvedEntitlements, all_capabilities, allowed_value, capability_for_entitlement,
 };
 pub use fixes::{FixRecord, PreSignFixes};
 pub use identity::{CertificateInfo, CertificateKind, InMemoryIdentity, certificate_info};

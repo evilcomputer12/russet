@@ -383,9 +383,9 @@ async fn handlers_list_portal_records_with_the_reveal_gate_and_never_name_the_te
     let text = serde_json::to_string(&plan).unwrap();
     assert!(!text.contains(UDID), "{text}");
     wire.push(("plan", text));
-    let err = provision::apply(&svc, pv::ProvisionApplyParams { plan_id: plan.plan_id.clone(), approval: None })
-        .await
-        .unwrap_err();
+    // A mutating plan is refused without an approval (the handler's approval wiring is covered in
+    // russet-account and the approval tests; here we check the domain refusal leaks no team).
+    let err = svc.apply_plan(&plan.plan_id, &russet_account::ApprovalRef::default()).await.unwrap_err();
     assert_eq!(err.code(), codes::perm::APPROVAL_REQUIRED);
     wire.push(("apply", format!("{} {}", err.message(), serde_json::to_string(&err.to_data()).unwrap())));
 

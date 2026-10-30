@@ -2389,3 +2389,36 @@ the contract points among these are listed as contract change requests for the l
   `account.keyInvalid` (5109) and `account.noAccount` (5110), each with a hint.
 - **Doctor**: `account.configured`, `account.identity`, `account.xtool-files` (files only) and `asc.reachable`
   (`--online`; the root from `RUSSET_ENDPOINTS_FILE`, skipped under `RUSSET_OFFLINE=1` for a non-loopback root).
+
+## 24. Wave-2 implementation notes (W12)
+
+Where the Wave-2 code (W12: SA-06…SA-08, SA-10 subsets) differs from the sections above. ARCHITECTURE.md stays
+binding.
+
+- **`provision.apply` mutations** (§6.4): after re-planning for staleness, the mutations run in dependency order
+  — register devices, register bundle IDs, enable capabilities (additive only), delete stale Russet-named
+  profiles, then create the profiles bound to the plan's certificate and (development/ad hoc) every enabled
+  mobile device — and each chosen profile, reused or created, is downloaded and cached. **Certificate creation
+  (the CSR flow, §6.6) is not wired yet**: a plan whose only path forward is `CreateCertificate` is refused with
+  a hint to import or reuse a certificate. So apply covers the acceptance-#1/DC-08 case (an existing certificate,
+  only `RegisterBundleId` + `CreateProfile`).
+- **Approvals** (§6.4, ARCHITECTURE §11.3): a mutating `provision.apply` needs a human approval. For an `mcp`
+  connection the permission engine already requires and validates a tier-2 method approval before the handler
+  runs; for `cli`/`ide` the handler creates and validates a plan-bound approval (`ApprovalSubject::Plan`, checked
+  against the plan id and digest and the caller), so a forged `approval` string cannot trigger the mutations.
+- **`russet-asc` writes** (§5.2, §5.3): the Wave-1 client stays GET-only with per-request scopes; an approved
+  plan uses a second **bearer-token** client (App Store Connect refuses non-GET under a scoped token). `post_json`
+  and `delete` send JSON:API bodies and are not retried on a transport error or 5xx (mutations are not
+  idempotent); a 429 is retried. `AscPortal` holds both clients.
+- **`asc.get`** (§11): `AccountService::asc_get` runs the client's allowlisted `raw_get` with a request-scoped
+  token and returns `{status, body}`; the allowlist and path normalization are the client's.
+- **`russet-ship`** (§9.1, §9.3, §9.10): the crate uses `russet_core::Result` with the `ship.*` error codes
+  (`ship.archiveFailed`, `ship.ipaInvalid`) rather than a separate `ShipError`. `Archive` carries a `digest`, a
+  SHA-256 over the whole `.xcarchive` tree (sorted), which is the reproducibility fingerprint (the acceptance:
+  identical across two runs); the archive is named `<name>.xcarchive`. `IpaInfo` omits `md5` (W23's upload adds
+  it when it needs the `Content-MD5`); the IPA is written through the deterministic `russet-ipa` writer. The
+  `ship.archive` handler builds the project through the shared `build.start` entry point, then lays out the
+  archive under `<project>/.russet/archives` with the `SOURCE_DATE_EPOCH` timestamp.
+- **Still open for later cards:** `identity.importP12`/`exportP12` (need the interactive password reverse-prompt),
+  `portal.devices.register` (its standalone `ProvisionPlan` return overlaps apply), the `account.event`
+  notification emitter, and certificate creation (the CSR flow).

@@ -275,6 +275,18 @@ impl AccountService {
         }
     }
 
+    /// `asc.get`: an allowlisted App Store Connect GET with a request-scoped token (SIGN §11). Returns the HTTP
+    /// status and the JSON body; the allowlist and path normalization are checked by the client.
+    pub async fn asc_get(&self, account: Option<&AccountId>, path_and_query: &str) -> Result<(u16, serde_json::Value)> {
+        let client = {
+            let store = self.accounts.read().await;
+            let acc = store.resolve(account)?;
+            let key = store.asc_key(&acc).await?;
+            store.client(&key)?
+        };
+        client.raw_get(path_and_query).await
+    }
+
     /// `provision.apply`.
     pub async fn apply_plan(&self, plan_id: &str, approval: &ApprovalRef) -> Result<ProvisionOutcome> {
         let plan = self.plan(plan_id)?;

@@ -411,43 +411,130 @@ pub struct CapabilityInfo {
     pub needs_portal_step: bool,
 }
 
+const fn cap(capability: &'static str, free_team: bool, needs_portal_step: bool) -> CapabilityInfo {
+    CapabilityInfo { capability, free_team, needs_portal_step }
+}
+
+/// The entitlement → capability map (SIGN §6.5), in the doc's order. Several entitlement keys can map to one
+/// capability (e.g. the four iCloud keys → `ICLOUD`).
+static CAPABILITY_TABLE: &[(&str, CapabilityInfo)] = &[
+    ("com.apple.security.application-groups", cap("APP_GROUPS", true, true)),
+    ("aps-environment", cap("PUSH_NOTIFICATIONS", false, false)),
+    ("com.apple.developer.associated-domains", cap("ASSOCIATED_DOMAINS", false, false)),
+    ("com.apple.developer.icloud-container-identifiers", cap("ICLOUD", false, true)),
+    ("com.apple.developer.icloud-services", cap("ICLOUD", false, true)),
+    ("com.apple.developer.ubiquity-container-identifiers", cap("ICLOUD", false, true)),
+    ("com.apple.developer.ubiquity-kvstore-identifier", cap("ICLOUD", false, false)),
+    ("com.apple.developer.in-app-payments", cap("APPLE_PAY", false, false)),
+    ("com.apple.developer.healthkit", cap("HEALTHKIT", true, false)),
+    ("com.apple.developer.healthkit.access", cap("HEALTHKIT", true, false)),
+    ("com.apple.developer.homekit", cap("HOMEKIT", true, false)),
+    ("com.apple.developer.networking.networkextension", cap("NETWORK_EXTENSIONS", false, false)),
+    ("com.apple.developer.networking.vpn.api", cap("PERSONAL_VPN", false, false)),
+    ("com.apple.developer.networking.wifi-info", cap("ACCESS_WIFI_INFORMATION", false, false)),
+    ("com.apple.developer.networking.HotspotConfiguration", cap("HOT_SPOT", false, false)),
+    ("com.apple.developer.networking.multipath", cap("MULTIPATH", false, false)),
+    ("com.apple.developer.nfc.readersession.formats", cap("NFC_TAG_READING", false, false)),
+    ("com.apple.developer.siri", cap("SIRIKIT", false, false)),
+    ("com.apple.developer.applesignin", cap("APPLE_ID_AUTH", false, false)),
+    ("com.apple.developer.game-center", cap("GAME_CENTER", false, false)),
+    ("com.apple.developer.default-data-protection", cap("DATA_PROTECTION", true, false)),
+    ("com.apple.external-accessory.wireless-configuration", cap("WIRELESS_ACCESSORY_CONFIGURATION", true, false)),
+    ("inter-app-audio", cap("INTER_APP_AUDIO", true, false)),
+    ("com.apple.developer.ClassKit-environment", cap("CLASSKIT", false, false)),
+    (
+        "com.apple.developer.authentication-services.autofill-credential-provider",
+        cap("AUTOFILL_CREDENTIAL_PROVIDER", false, false),
+    ),
+    ("com.apple.developer.pass-type-identifiers", cap("WALLET", false, false)),
+    ("com.apple.developer.coremedia.hls.low-latency", cap("COREMEDIA_HLS_LOW_LATENCY", false, false)),
+];
+
 /// The capability an entitlement needs, when the portal manages it (SIGN §6.5). Keys such as
 /// `keychain-access-groups` and `get-task-allow` need none.
 pub fn capability_for_entitlement(key: &str) -> Option<&'static CapabilityInfo> {
-    const fn cap(capability: &'static str, free_team: bool, needs_portal_step: bool) -> CapabilityInfo {
-        CapabilityInfo { capability, free_team, needs_portal_step }
+    CAPABILITY_TABLE.iter().find(|(k, _)| *k == key).map(|(_, c)| c)
+}
+
+/// One capability the portal manages, with every entitlement key that maps to it (`provision.capabilities`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityRow {
+    /// The App Store Connect `capabilityType` (`PUSH_NOTIFICATIONS`, …).
+    pub id: &'static str,
+    /// A human title derived from `id` (`Push Notifications`).
+    pub title: String,
+    /// The entitlement keys that request it.
+    pub entitlements: Vec<&'static str>,
+    pub free_team: bool,
+    pub needs_portal_step: bool,
+}
+
+/// Every capability of the map (SIGN §6.5), grouped by capability type and in the map's order
+/// (`provision.capabilities`).
+pub fn all_capabilities() -> Vec<CapabilityRow> {
+    let mut rows: Vec<CapabilityRow> = Vec::new();
+    for (key, info) in CAPABILITY_TABLE {
+        if let Some(row) = rows.iter_mut().find(|r| r.id == info.capability) {
+            row.entitlements.push(key);
+            row.free_team &= info.free_team;
+            row.needs_portal_step |= info.needs_portal_step;
+        } else {
+            rows.push(CapabilityRow {
+                id: info.capability,
+                title: titlecase(info.capability),
+                entitlements: vec![key],
+                free_team: info.free_team,
+                needs_portal_step: info.needs_portal_step,
+            });
+        }
     }
-    static TABLE: &[(&str, CapabilityInfo)] = &[
-        ("com.apple.security.application-groups", cap("APP_GROUPS", true, true)),
-        ("aps-environment", cap("PUSH_NOTIFICATIONS", false, false)),
-        ("com.apple.developer.associated-domains", cap("ASSOCIATED_DOMAINS", false, false)),
-        ("com.apple.developer.icloud-container-identifiers", cap("ICLOUD", false, true)),
-        ("com.apple.developer.icloud-services", cap("ICLOUD", false, true)),
-        ("com.apple.developer.ubiquity-container-identifiers", cap("ICLOUD", false, true)),
-        ("com.apple.developer.ubiquity-kvstore-identifier", cap("ICLOUD", false, false)),
-        ("com.apple.developer.in-app-payments", cap("APPLE_PAY", false, false)),
-        ("com.apple.developer.healthkit", cap("HEALTHKIT", true, false)),
-        ("com.apple.developer.healthkit.access", cap("HEALTHKIT", true, false)),
-        ("com.apple.developer.homekit", cap("HOMEKIT", true, false)),
-        ("com.apple.developer.networking.networkextension", cap("NETWORK_EXTENSIONS", false, false)),
-        ("com.apple.developer.networking.vpn.api", cap("PERSONAL_VPN", false, false)),
-        ("com.apple.developer.networking.wifi-info", cap("ACCESS_WIFI_INFORMATION", false, false)),
-        ("com.apple.developer.networking.HotspotConfiguration", cap("HOT_SPOT", false, false)),
-        ("com.apple.developer.networking.multipath", cap("MULTIPATH", false, false)),
-        ("com.apple.developer.nfc.readersession.formats", cap("NFC_TAG_READING", false, false)),
-        ("com.apple.developer.siri", cap("SIRIKIT", false, false)),
-        ("com.apple.developer.applesignin", cap("APPLE_ID_AUTH", false, false)),
-        ("com.apple.developer.game-center", cap("GAME_CENTER", false, false)),
-        ("com.apple.developer.default-data-protection", cap("DATA_PROTECTION", true, false)),
-        ("com.apple.external-accessory.wireless-configuration", cap("WIRELESS_ACCESSORY_CONFIGURATION", true, false)),
-        ("inter-app-audio", cap("INTER_APP_AUDIO", true, false)),
-        ("com.apple.developer.ClassKit-environment", cap("CLASSKIT", false, false)),
-        (
-            "com.apple.developer.authentication-services.autofill-credential-provider",
-            cap("AUTOFILL_CREDENTIAL_PROVIDER", false, false),
-        ),
-        ("com.apple.developer.pass-type-identifiers", cap("WALLET", false, false)),
-        ("com.apple.developer.coremedia.hls.low-latency", cap("COREMEDIA_HLS_LOW_LATENCY", false, false)),
-    ];
-    TABLE.iter().find(|(k, _)| *k == key).map(|(_, c)| c)
+    rows
+}
+
+/// `PUSH_NOTIFICATIONS` → `Push Notifications`; keeps `iCloud` and `NFC` readable.
+fn titlecase(id: &str) -> String {
+    match id {
+        "ICLOUD" => return "iCloud".to_owned(),
+        "NFC_TAG_READING" => return "NFC Tag Reading".to_owned(),
+        "APPLE_ID_AUTH" => return "Sign in with Apple".to_owned(),
+        "HLS" => return "HLS".to_owned(),
+        _ => {}
+    }
+    id.split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(first) => first.to_uppercase().chain(c.flat_map(char::to_lowercase)).collect::<String>(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    #[test]
+    fn all_capabilities_group_entitlements_by_type() {
+        let rows = all_capabilities();
+        // ICLOUD groups its four entitlement keys into one capability.
+        let icloud = rows.iter().find(|r| r.id == "ICLOUD").expect("ICLOUD");
+        assert_eq!(icloud.entitlements.len(), 4);
+        assert!(!icloud.free_team);
+        assert!(icloud.needs_portal_step);
+        assert_eq!(icloud.title, "iCloud");
+        // A free-team capability with a readable title.
+        let push = rows.iter().find(|r| r.id == "PUSH_NOTIFICATIONS").expect("push");
+        assert_eq!(push.title, "Push Notifications");
+        assert!(!push.free_team);
+        assert!(rows.iter().any(|r| r.id == "HEALTHKIT" && r.free_team));
+        // Every row's entitlement keys map back to it.
+        for row in &rows {
+            for key in &row.entitlements {
+                assert_eq!(capability_for_entitlement(key).map(|c| c.capability), Some(row.id));
+            }
+        }
+    }
 }

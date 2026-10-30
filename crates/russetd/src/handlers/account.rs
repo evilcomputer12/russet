@@ -42,8 +42,14 @@ pub fn register(r: &mut Router<DaemonCtx>) {
         let svc = accounts_of(&cx)?;
         redacted(Some(&svc), verify(&svc, params).await).await
     });
-    r.request::<p::AccountRemove, _, _>(not_implemented::<p::AccountRemove>);
-    r.request::<p::AccountSetDefault, _, _>(not_implemented::<p::AccountSetDefault>);
+    r.request::<p::AccountRemove, _, _>(|cx: DaemonCtx, _rq, params: p::AccountRemoveParams| async move {
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), remove(&svc, params).await).await
+    });
+    r.request::<p::AccountSetDefault, _, _>(|cx: DaemonCtx, _rq, params: p::AccountSetDefaultParams| async move {
+        let svc = accounts_of(&cx)?;
+        redacted(Some(&svc), set_default(&svc, params).await).await
+    });
     r.request::<p::AccountAppleIdBegin, _, _>(not_implemented::<p::AccountAppleIdBegin>);
     r.request::<p::AccountAppleIdRequestCode, _, _>(not_implemented::<p::AccountAppleIdRequestCode>);
     r.request::<p::AccountAppleIdSubmitCode, _, _>(not_implemented::<p::AccountAppleIdSubmitCode>);
@@ -127,6 +133,21 @@ pub async fn import_xtool(
         warnings: imp.warnings,
         dry_run: imp.dry_run,
     })
+}
+
+/// `account.remove`.
+pub async fn remove(svc: &AccountService, params: p::AccountRemoveParams) -> Result<p::AccountRemoveResult> {
+    svc.accounts().write().await.remove(&AccountId(params.account_id), params.wipe_secrets.unwrap_or(false)).await?;
+    Ok(p::AccountRemoveResult {})
+}
+
+/// `account.setDefault`.
+pub async fn set_default(
+    svc: &AccountService,
+    params: p::AccountSetDefaultParams,
+) -> Result<p::AccountSetDefaultResult> {
+    svc.accounts().write().await.set_default(&AccountId(params.account_id))?;
+    Ok(p::AccountSetDefaultResult {})
 }
 
 /// `account.verify`.

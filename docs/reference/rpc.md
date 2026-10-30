@@ -391,8 +391,8 @@ Methods:
 | `account.addAscKey` | secrets |  | plain | `AccountAddAscKeyParams` | `Account` |
 | `account.importXtool` | secrets |  | plain | `AccountImportXtoolParams` | `AccountImportXtoolResult` |
 | `account.verify` | read |  | plain | `AccountVerifyParams` | `AccountVerifyResult` |
-| `account.remove` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.setDefault` | secrets |  | plain | `Unspecified` | `Unspecified` |
+| `account.remove` | secrets |  | plain | `AccountRemoveParams` | `AccountRemoveResult` |
+| `account.setDefault` | secrets |  | plain | `AccountSetDefaultParams` | `AccountSetDefaultResult` |
 | `account.appleId.begin` | secrets |  | plain | `Unspecified` | `Unspecified` |
 | `account.appleId.requestCode` | secrets |  | plain | `Unspecified` | `Unspecified` |
 | `account.appleId.submitCode` | secrets |  | plain | `Unspecified` | `Unspecified` |
@@ -426,7 +426,7 @@ Methods:
 | `portal.bundleIds.list` | read |  | plain | `PortalListParams` | `PortalBundleIdsListResult` |
 | `portal.profiles.list` | read |  | plain | `PortalListParams` | `PortalProfilesListResult` |
 | `portal.devices.register` | account |  | plain | `Unspecified` | `Unspecified` |
-| `portal.certificates.revoke` | account-destructive |  | typed | `Unspecified` | `Unspecified` |
+| `portal.certificates.revoke` | account-destructive |  | typed | `PortalCertificatesRevokeParams` | `PortalCertificatesRevokeResult` |
 
 ## `provision` (module `provision`)
 
@@ -436,7 +436,7 @@ Methods:
 |---|---|---|---|---|---|
 | `provision.plan` | read |  | plain | `ProvisionPlanParams` | `ProvisionPlanResult` |
 | `provision.apply` | account | L | plain | `ProvisionApplyParams` | `ProvisionApplyResult` |
-| `provision.capabilities` | read |  | plain | `Unspecified` | `Unspecified` |
+| `provision.capabilities` | read |  | plain | `ProvisionCapabilitiesParams` | `ProvisionCapabilitiesResult` |
 
 ## `sign` (module `sign`)
 
@@ -455,7 +455,7 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `asc.get` | read |  | plain | `Unspecified` | `Unspecified` |
+| `asc.get` | read |  | plain | `AscGetParams` | `AscGetResult` |
 
 ## `ship` (module `ship`)
 
@@ -463,8 +463,8 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `ship.archive` | build | L | plain | `Unspecified` | `Unspecified` |
-| `ship.ipa` | build |  | plain | `Unspecified` | `Unspecified` |
+| `ship.archive` | build | L | plain | `ShipArchiveParams` | `ShipArchiveResult` |
+| `ship.ipa` | build |  | plain | `ShipIpaParams` | `ShipIpaResult` |
 | `ship.stamp.plan` | read |  | plain | `Unspecified` | `Unspecified` |
 | `ship.stamp.apply` | project |  | plain | `Unspecified` | `Unspecified` |
 | `ship.validate` | read |  | plain | `Unspecified` | `Unspecified` |

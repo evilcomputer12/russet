@@ -157,6 +157,45 @@
       ],
       "type": "object"
     },
+    "AccountRemoveParams": {
+      "description": "Params of `account.remove`.",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "wipeSecrets": {
+          "description": "Also delete the account's sealed App Store Connect key from the secret store.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "accountId"
+      ],
+      "type": "object"
+    },
+    "AccountRemoveResult": {
+      "description": "Result of `account.remove`.",
+      "type": "object"
+    },
+    "AccountSetDefaultParams": {
+      "description": "Params of `account.setDefault`.",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId"
+      ],
+      "type": "object"
+    },
+    "AccountSetDefaultResult": {
+      "description": "Result of `account.setDefault`.",
+      "type": "object"
+    },
     "AccountVerifyParams": {
       "description": "Params of `account.verify`.",
       "properties": {
@@ -884,6 +923,43 @@
       ],
       "type": "string"
     },
+    "AscGetParams": {
+      "description": "Params of `asc.get`: `{pathAndQuery, accountId?} → {status, body} (allowlisted GET; request-scoped token)`.",
+      "properties": {
+        "accountId": {
+          "description": "Omitted: the default account.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pathAndQuery": {
+          "description": "An allowlisted `/v1/...` path and query (SIGN §11). Encoded dots, slashes and backslashes are refused.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pathAndQuery"
+      ],
+      "type": "object"
+    },
+    "AscGetResult": {
+      "description": "Result of `asc.get`: the HTTP status and the parsed JSON body.",
+      "properties": {
+        "body": true,
+        "status": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "status",
+        "body"
+      ],
+      "type": "object"
+    },
     "AttachMode": {
       "description": "How LLDB reaches the app (ARCHITECTURE §10.3).",
       "enum": [
@@ -1598,6 +1674,46 @@
       },
       "required": [
         "id"
+      ],
+      "type": "object"
+    },
+    "Capability": {
+      "description": "One capability the developer portal manages (SIGN §6.5).",
+      "properties": {
+        "docs": {
+          "description": "Apple's capabilities documentation.",
+          "type": "string"
+        },
+        "entitlements": {
+          "description": "The entitlement keys that request it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "freeTeam": {
+          "description": "Whether free (personal) teams can use it.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "The App Store Connect `capabilityType`.",
+          "type": "string"
+        },
+        "needsPortalStep": {
+          "description": "Whether part of it needs a manual step in the developer portal (app groups, iCloud containers).",
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "entitlements",
+        "freeTeam",
+        "needsPortalStep",
+        "docs"
       ],
       "type": "object"
     },
@@ -7065,6 +7181,29 @@
       ],
       "type": "object"
     },
+    "PortalCertificatesRevokeParams": {
+      "description": "Params of `portal.certificates.revoke`: `{accountId?, certId} → {}` (typed confirmation; cli/ide only).",
+      "properties": {
+        "accountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "certId": {
+          "description": "The portal certificate id to revoke.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "certId"
+      ],
+      "type": "object"
+    },
+    "PortalCertificatesRevokeResult": {
+      "description": "Result of `portal.certificates.revoke`.",
+      "type": "object"
+    },
     "PortalDevice": {
       "description": "A registered device.",
       "properties": {
@@ -7625,6 +7764,34 @@
       },
       "required": [
         "bundles"
+      ],
+      "type": "object"
+    },
+    "ProvisionCapabilitiesParams": {
+      "description": "Params of `provision.capabilities`.",
+      "properties": {
+        "accountId": {
+          "description": "Omitted: the default account (reserved; the map is the same for every paid team).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ProvisionCapabilitiesResult": {
+      "description": "Result of `provision.capabilities`.",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "capabilities"
       ],
       "type": "object"
     },
@@ -8877,6 +9044,130 @@
         "note"
       ],
       "type": "string"
+    },
+    "ShipArchiveParams": {
+      "description": "Params of `ship.archive`: `{project, configuration?, method} → Archive`.",
+      "properties": {
+        "configuration": {
+          "description": "The build configuration (`Debug`, `Release`); the archive defaults to `Release`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "description": "`development`, `ad-hoc`, `app-store-connect` or `enterprise` (SIGN §9.2).",
+          "type": "string"
+        },
+        "project": {
+          "description": "The project directory (absolute).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "method"
+      ],
+      "type": "object"
+    },
+    "ShipArchiveResult": {
+      "description": "Result of `ship.archive` (the `.xcarchive`, SIGN §9.1). `digest` is a SHA-256 over the whole archive tree, the\nreproducibility fingerprint.",
+      "properties": {
+        "appPath": {
+          "description": "The archived app, relative to the archive root (`Products/Applications/<App>.app`).",
+          "type": "string"
+        },
+        "buildVersion": {
+          "type": "string"
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "dsyms": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": "string"
+        },
+        "shortVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "appPath",
+        "bundleId",
+        "shortVersion",
+        "buildVersion",
+        "dsyms",
+        "digest"
+      ],
+      "type": "object"
+    },
+    "ShipIpaParams": {
+      "description": "Params of `ship.ipa`: `{archivePath, method, out?} → IpaInfo`.",
+      "properties": {
+        "archivePath": {
+          "description": "An `.xcarchive` directory or a built `.app` directory (absolute).",
+          "type": "string"
+        },
+        "method": {
+          "description": "`development` stores entries for fast installs; the store methods deflate (SIGN §9.3).",
+          "type": "string"
+        },
+        "out": {
+          "description": "Where to write the IPA (absolute); defaults to `<archive stem>.ipa` beside the input.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "archivePath",
+        "method"
+      ],
+      "type": "object"
+    },
+    "ShipIpaResult": {
+      "description": "Result of `ship.ipa` (the store/development IPA, SIGN §9.3).",
+      "properties": {
+        "buildVersion": {
+          "type": "string"
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "shortVersion": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "sha256",
+        "bundleId",
+        "shortVersion",
+        "buildVersion"
+      ],
+      "type": "object"
     },
     "ShutdownReason": {
       "description": "Why the daemon stops (`daemon.shutdown`, `daemon.shuttingDown`).",
@@ -10591,11 +10882,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountRemoveParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountRemoveResult"
       }
     },
     "account.setDefault": {
@@ -10604,11 +10895,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountSetDefaultParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountSetDefaultResult"
       }
     },
     "account.verify": {
@@ -10760,11 +11051,11 @@
       "longRunning": false,
       "namespace": "asc",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AscGetParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AscGetResult"
       }
     },
     "assets.appIcon": {
@@ -12021,11 +12312,11 @@
       "longRunning": false,
       "namespace": "portal",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalCertificatesRevokeParams"
       },
       "permission": "account-destructive",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/PortalCertificatesRevokeResult"
       }
     },
     "portal.devices.list": {
@@ -12164,11 +12455,11 @@
       "longRunning": false,
       "namespace": "provision",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProvisionCapabilitiesParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ProvisionCapabilitiesResult"
       }
     },
     "provision.plan": {
@@ -12463,11 +12754,11 @@
       "longRunning": true,
       "namespace": "ship",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ShipArchiveParams"
       },
       "permission": "build",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ShipArchiveResult"
       }
     },
     "ship.builds.list": {
@@ -12580,11 +12871,11 @@
       "longRunning": false,
       "namespace": "ship",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ShipIpaParams"
       },
       "permission": "build",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ShipIpaResult"
       }
     },
     "ship.metadata.apply": {

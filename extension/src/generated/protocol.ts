@@ -74,6 +74,30 @@ export type AccountListResult = { accounts: Array<Account>,
 default?: string, };
 
 /**
+ * Params of `account.remove`.
+ */
+export type AccountRemoveParams = { accountId: string, 
+/**
+ * Also delete the account's sealed App Store Connect key from the secret store.
+ */
+wipeSecrets?: boolean, };
+
+/**
+ * Result of `account.remove`.
+ */
+export type AccountRemoveResult = Record<symbol, never>;
+
+/**
+ * Params of `account.setDefault`.
+ */
+export type AccountSetDefaultParams = { accountId: string, };
+
+/**
+ * Result of `account.setDefault`.
+ */
+export type AccountSetDefaultResult = Record<symbol, never>;
+
+/**
  * Params of `account.verify`.
  */
 export type AccountVerifyParams = { 
@@ -338,6 +362,24 @@ export type ApprovalSubject = { "kind": "method", method: string, paramsDigest: 
 export type ArtifactKind = "app" | "ipa" | "dsym" | "archive" | "report";
 
 /**
+ * Params of `asc.get`: `{pathAndQuery, accountId?} → {status, body} (allowlisted GET; request-scoped token)`.
+ */
+export type AscGetParams = { 
+/**
+ * An allowlisted `/v1/...` path and query (SIGN §11). Encoded dots, slashes and backslashes are refused.
+ */
+pathAndQuery: string, 
+/**
+ * Omitted: the default account.
+ */
+accountId?: string, };
+
+/**
+ * Result of `asc.get`: the HTTP status and the parsed JSON body.
+ */
+export type AscGetResult = { status: number, body: JsonValue, };
+
+/**
  * How LLDB reaches the app (ARCHITECTURE §10.3).
  */
 export type AttachMode = "broker" | "legacy-async";
@@ -587,6 +629,31 @@ profilePath: string, };
  * Params of the LSP built-in notification `$/cancelRequest` (ARCHITECTURE §7.6).
  */
 export type CancelParams = { id: RequestIdValue, };
+
+/**
+ * One capability the developer portal manages (SIGN §6.5).
+ */
+export type Capability = { 
+/**
+ * The App Store Connect `capabilityType`.
+ */
+id: string, title: string, 
+/**
+ * The entitlement keys that request it.
+ */
+entitlements: Array<string>, 
+/**
+ * Whether free (personal) teams can use it.
+ */
+freeTeam: boolean, 
+/**
+ * Whether part of it needs a manual step in the developer portal (app groups, iCloud containers).
+ */
+needsPortalStep: boolean, 
+/**
+ * Apple's capabilities documentation.
+ */
+docs: string, };
 
 /**
  * A certificate kind.
@@ -2457,6 +2524,20 @@ localIdentity: boolean, };
 export type PortalCertificatesListResult = { certificates: Array<PortalCertificate>, };
 
 /**
+ * Params of `portal.certificates.revoke`: `{accountId?, certId} → {}` (typed confirmation; cli/ide only).
+ */
+export type PortalCertificatesRevokeParams = { accountId?: string, 
+/**
+ * The portal certificate id to revoke.
+ */
+certId: string, };
+
+/**
+ * Result of `portal.certificates.revoke`.
+ */
+export type PortalCertificatesRevokeResult = Record<symbol, never>;
+
+/**
  * A registered device.
  */
 export type PortalDevice = { id: string, 
@@ -2697,6 +2778,20 @@ export type ProvisionApplyResult = {
  * The identity that signs: its `identity.list` id (the certificate serial).
  */
 identityId?: string, bundles: Array<BundleProvision>, };
+
+/**
+ * Params of `provision.capabilities`.
+ */
+export type ProvisionCapabilitiesParams = { 
+/**
+ * Omitted: the default account (reserved; the map is the same for every paid team).
+ */
+accountId?: string, };
+
+/**
+ * Result of `provision.capabilities`.
+ */
+export type ProvisionCapabilitiesResult = { capabilities: Array<Capability>, };
 
 /**
  * Params of `provision.plan`.
@@ -3157,6 +3252,55 @@ exit?: SessionExit, };
  * Diagnostic severities.
  */
 export type Severity = "error" | "warning" | "note";
+
+/**
+ * Params of `ship.archive`: `{project, configuration?, method} → Archive`.
+ */
+export type ShipArchiveParams = { 
+/**
+ * The project directory (absolute).
+ */
+project: string, 
+/**
+ * The build configuration (`Debug`, `Release`); the archive defaults to `Release`.
+ */
+configuration?: string, 
+/**
+ * `development`, `ad-hoc`, `app-store-connect` or `enterprise` (SIGN §9.2).
+ */
+method: string, };
+
+/**
+ * Result of `ship.archive` (the `.xcarchive`, SIGN §9.1). `digest` is a SHA-256 over the whole archive tree, the
+ * reproducibility fingerprint.
+ */
+export type ShipArchiveResult = { path: string, 
+/**
+ * The archived app, relative to the archive root (`Products/Applications/<App>.app`).
+ */
+appPath: string, bundleId: string, shortVersion: string, buildVersion: string, dsyms: Array<string>, digest: string, };
+
+/**
+ * Params of `ship.ipa`: `{archivePath, method, out?} → IpaInfo`.
+ */
+export type ShipIpaParams = { 
+/**
+ * An `.xcarchive` directory or a built `.app` directory (absolute).
+ */
+archivePath: string, 
+/**
+ * `development` stores entries for fast installs; the store methods deflate (SIGN §9.3).
+ */
+method: string, 
+/**
+ * Where to write the IPA (absolute); defaults to `<archive stem>.ipa` beside the input.
+ */
+out?: string, };
+
+/**
+ * Result of `ship.ipa` (the store/development IPA, SIGN §9.3).
+ */
+export type ShipIpaResult = { path: string, size: number, sha256: string, bundleId: string, shortVersion: string, buildVersion: string, };
 
 /**
  * Why the daemon stops (`daemon.shutdown`, `daemon.shuttingDown`).
@@ -3806,8 +3950,8 @@ export interface Methods {
   "account.addAscKey": { params: AccountAddAscKeyParams; result: Account };
   "account.importXtool": { params: AccountImportXtoolParams; result: AccountImportXtoolResult };
   "account.verify": { params: AccountVerifyParams; result: AccountVerifyResult };
-  "account.remove": { params: Unspecified; result: Unspecified };
-  "account.setDefault": { params: Unspecified; result: Unspecified };
+  "account.remove": { params: AccountRemoveParams; result: AccountRemoveResult };
+  "account.setDefault": { params: AccountSetDefaultParams; result: AccountSetDefaultResult };
   "account.appleId.begin": { params: Unspecified; result: Unspecified };
   "account.appleId.requestCode": { params: Unspecified; result: Unspecified };
   "account.appleId.submitCode": { params: Unspecified; result: Unspecified };
@@ -3821,17 +3965,17 @@ export interface Methods {
   "portal.bundleIds.list": { params: PortalListParams; result: PortalBundleIdsListResult };
   "portal.profiles.list": { params: PortalListParams; result: PortalProfilesListResult };
   "portal.devices.register": { params: Unspecified; result: Unspecified };
-  "portal.certificates.revoke": { params: Unspecified; result: Unspecified };
+  "portal.certificates.revoke": { params: PortalCertificatesRevokeParams; result: PortalCertificatesRevokeResult };
   "provision.plan": { params: ProvisionPlanParams; result: ProvisionPlanResult };
   "provision.apply": { params: ProvisionApplyParams; result: ProvisionApplyResult };
-  "provision.capabilities": { params: Unspecified; result: Unspecified };
+  "provision.capabilities": { params: ProvisionCapabilitiesParams; result: ProvisionCapabilitiesResult };
   "sign.run": { params: SignRunParams; result: SignRunResult };
   "sign.verify": { params: SignPathParams; result: SignVerifyResult };
   "sign.lint": { params: SignPathParams; result: SignLintResult };
   "sign.inspect": { params: SignPathParams; result: SignInspectResult };
-  "asc.get": { params: Unspecified; result: Unspecified };
-  "ship.archive": { params: Unspecified; result: Unspecified };
-  "ship.ipa": { params: Unspecified; result: Unspecified };
+  "asc.get": { params: AscGetParams; result: AscGetResult };
+  "ship.archive": { params: ShipArchiveParams; result: ShipArchiveResult };
+  "ship.ipa": { params: ShipIpaParams; result: ShipIpaResult };
   "ship.stamp.plan": { params: Unspecified; result: Unspecified };
   "ship.stamp.apply": { params: Unspecified; result: Unspecified };
   "ship.validate": { params: Unspecified; result: Unspecified };

@@ -22,3 +22,9 @@ russet-core.workspace = true
 russet-doctor.workspace = true
 russet-ipa.workspace = true
 russet-sign.workspace = true
+camino.workspace = true
+plist.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

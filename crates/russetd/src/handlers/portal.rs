@@ -40,7 +40,23 @@ pub fn register(r: &mut Router<DaemonCtx>) {
         redacted(Some(&svc), profiles(&svc, params).await).await
     });
     r.request::<p::PortalDevicesRegister, _, _>(not_implemented::<p::PortalDevicesRegister>);
-    r.request::<p::PortalCertificatesRevoke, _, _>(not_implemented::<p::PortalCertificatesRevoke>);
+    r.request::<p::PortalCertificatesRevoke, _, _>(
+        |cx: DaemonCtx, _rq, params: p::PortalCertificatesRevokeParams| async move {
+            let svc = accounts_of(&cx)?;
+            redacted(Some(&svc), revoke_certificate(&svc, params).await).await
+        },
+    );
+}
+
+/// `portal.certificates.revoke`: revokes a certificate by its portal id (§6.7). The typed confirmation is
+/// enforced by the permission engine (`Confirm::Typed`, cli/ide only) before the handler runs.
+pub async fn revoke_certificate(
+    svc: &AccountService,
+    params: p::PortalCertificatesRevokeParams,
+) -> Result<p::PortalCertificatesRevokeResult> {
+    let portal = portal(svc, params.account_id).await?;
+    portal.revoke_certificate(&params.cert_id, &russet_account::ApprovalRef::default()).await?;
+    Ok(p::PortalCertificatesRevokeResult {})
 }
 
 /// Whether a listing may show UDIDs, device names and certificate display names: only an `ide` connection that
