@@ -1,0 +1,19 @@
+{
+  "_comment": "SPDX-License-Identifier: GPL-3.0-or-later. Russet's entitlement key catalog (ide.md §5.13). Tier 0 seeds a few entries; EXT-11 fills it.",
+  "keys": [
+    {
+      "key": "application-identifier",
+      "type": "string",
+      "title": "Application identifier",
+      "description": "The app ID (team ID + bundle ID) the app is entitled to use.",
+      "docs": "https://developer.apple.com/documentation/bundleresources/entitlements"
+    },
+    {
+      "key": "get-task-allow",
+      "type": "boolean",
+      "title": "Allow debugging",
+      "description": "Lets a debugger attach to the app; true for development builds only.",
+      "docs": "https://developer.apple.com/documentation/bundleresources/entitlements"
+    }
+  ]
+}

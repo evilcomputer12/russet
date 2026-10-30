@@ -1,0 +1,26 @@
+{
+  "_comment": "SPDX-License-Identifier: GPL-3.0-or-later. Russet's Info.plist key catalog (ide.md §5.12), written from Apple's public documentation. Tier 0 seeds a few entries; EXT-10 fills it to >= 60 keys.",
+  "keys": [
+    {
+      "key": "CFBundleIdentifier",
+      "type": "string",
+      "title": "Bundle identifier",
+      "description": "A unique identifier for the app in reverse-DNS form.",
+      "docs": "https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleidentifier"
+    },
+    {
+      "key": "CFBundleShortVersionString",
+      "type": "string",
+      "title": "Bundle version string (short)",
+      "description": "The release version number, shown to users.",
+      "docs": "https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleshortversionstring"
+    },
+    {
+      "key": "UILaunchScreen",
+      "type": "dictionary",
+      "title": "Launch screen",
+      "description": "The launch screen the system displays while the app starts.",
+      "docs": "https://developer.apple.com/documentation/bundleresources/information-property-list/uilaunchscreen"
+    }
+  ]
+}

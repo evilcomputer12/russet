@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+node_modules/
+dist/
+dist-test/
+out/
+.vscode-test/
+.dev-profile/
+*.vsix

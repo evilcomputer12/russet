@@ -1,0 +1,1141 @@
+{
+  "name": "russet",
+  "publisher": "russet",
+  "displayName": "Russet",
+  "description": "Build, run and debug iOS apps on your iPhone from Linux and Windows, with the virtual iPhone embedded.",
+  "version": "0.6.0",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/evilcomputer12/russet"
+  },
+  "engines": {
+    "vscode": "^1.135.0",
+    "node": ">=20"
+  },
+  "categories": [
+    "Debuggers",
+    "Programming Languages",
+    "Testing",
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Build, run, debug and agent tools are disabled until the workspace is trusted (Package.swift plugins and build scripts execute code)."
+    },
+    "virtualWorkspaces": false
+  },
+  "main": "./dist/extension.js",
+  "l10n": "./l10n",
+  "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:**/Package.swift",
+    "workspaceContains:**/xtool.yml",
+    "workspaceContains:**/pubspec.yaml",
+    "workspaceContains:**/*.xcodeproj/project.pbxproj",
+    "workspaceContains:**/russet.toml",
+    "onDebugResolve:russet",
+    "onWebviewPanel:russet.mirror",
+    "onWebviewPanel:russet.console"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "russet",
+          "title": "Russet",
+          "icon": "media/russet.svg"
+        }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "russet-aux",
+          "title": "iPhone & Agents",
+          "icon": "media/russet.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "russet-panel",
+          "title": "Device Console",
+          "icon": "media/console.svg"
+        }
+      ]
+    },
+    "views": {
+      "russet": [
+        {
+          "id": "russet.devices",
+          "name": "Devices"
+        },
+        {
+          "id": "russet.project",
+          "name": "Project"
+        },
+        {
+          "id": "russet.runConfigs",
+          "name": "Run Configurations"
+        },
+        {
+          "id": "russet.signing",
+          "name": "Signing"
+        },
+        {
+          "id": "russet.agentActivity",
+          "name": "Agent Activity",
+          "visibility": "collapsed"
+        }
+      ],
+      "russet-aux": [
+        {
+          "type": "webview",
+          "id": "russet.mirror",
+          "name": "iPhone"
+        },
+        {
+          "type": "webview",
+          "id": "russet.agents",
+          "name": "Agents",
+          "when": "russet.featureAgents"
+        }
+      ],
+      "russet-panel": [
+        {
+          "type": "webview",
+          "id": "russet.console",
+          "name": "Console"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "russet.devices",
+        "when": "russet.daemonConnected && !russet.hasDevice",
+        "contents": "Connect an iPhone with a USB cable and tap Trust.\n[Run Doctor](command:russet.doctor)\n[Setup Guide](command:russet.openSetup)"
+      },
+      {
+        "view": "russet.devices",
+        "when": "!russet.daemonConnected",
+        "contents": "Russet's background service is not running.\n[Start Russet Daemon](command:russet.daemon.start)"
+      },
+      {
+        "view": "russet.project",
+        "when": "russet.daemonConnected && !russet.projectKind",
+        "contents": "Open a Swift, Flutter or Xcode project to get started.\n[Open Setup Guide](command:russet.openSetup)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "russet.run",
+        "title": "Run on iPhone",
+        "category": "Russet",
+        "icon": "$(run)"
+      },
+      {
+        "command": "russet.debug",
+        "title": "Debug on iPhone",
+        "category": "Russet",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "russet.stop",
+        "title": "Stop",
+        "category": "Russet",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "russet.hotReload",
+        "title": "Hot Reload",
+        "category": "Russet",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "russet.hotRestart",
+        "title": "Hot Restart",
+        "category": "Russet",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "russet.build",
+        "title": "Build",
+        "category": "Russet",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "russet.clean",
+        "title": "Clean Build Folder",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.selectDevice",
+        "title": "Select Run Destination",
+        "category": "Russet",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "russet.selectTarget",
+        "title": "Select Target",
+        "category": "Russet",
+        "icon": "$(target)"
+      },
+      {
+        "command": "russet.selectConfiguration",
+        "title": "Select Configuration",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.doctor",
+        "title": "Run Doctor",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.openSetup",
+        "title": "Open Setup Guide",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.importXcode",
+        "title": "Import Xcode (.xip or Xcode.app)…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.account.addAscKey",
+        "title": "Add App Store Connect API Key…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.account.signInAppleId",
+        "title": "Sign in with Apple ID…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.account.signOut",
+        "title": "Sign Out",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.device.pair",
+        "title": "Pair…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.device.mountDdi",
+        "title": "Mount Developer Disk Image",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.device.revealDeveloperMode",
+        "title": "Reveal Developer Mode",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.device.copyUdid",
+        "title": "Copy UDID",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.device.installApp",
+        "title": "Install .ipa/.app…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.device.setRunDestination",
+        "title": "Set as Run Destination",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.openConsole",
+        "title": "Console",
+        "category": "Russet",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "russet.openMirror",
+        "title": "Mirror Screen",
+        "category": "Russet",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "russet.takeScreenshot",
+        "title": "Take Screenshot",
+        "category": "Russet",
+        "icon": "$(device-camera)"
+      },
+      {
+        "command": "russet.openInfoPlist",
+        "title": "Open Info.plist",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.openEntitlements",
+        "title": "Open Entitlements",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.openCapabilities",
+        "title": "Signing & Capabilities…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.openAssetCatalog",
+        "title": "Open Asset Catalog",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.newAppIcon",
+        "title": "New App Icon…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.openPublishing",
+        "title": "Publishing…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.ship.upload",
+        "title": "Upload to TestFlight…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.openProfiler",
+        "title": "Profiler",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.openCrashes",
+        "title": "Crash Reports",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.agents.open",
+        "title": "Agents",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.agents.newSession",
+        "title": "New Agent Session",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.agents.install",
+        "title": "Install Agent…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.agents.quickAsk",
+        "title": "Ask Local Model…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.mcp.register",
+        "title": "Register Russet MCP with…",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.mcp.status",
+        "title": "MCP Status",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.mcp.copyConfig",
+        "title": "Copy MCP Config",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.mcp.toggleHttp",
+        "title": "Toggle MCP HTTP Endpoint",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.daemon.start",
+        "title": "Start Russet Daemon",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.daemon.restart",
+        "title": "Restart Russet Daemon",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.daemon.showLog",
+        "title": "Show Daemon Log",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.shell.install",
+        "title": "Install `russet` Shell Command",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.devices.refresh",
+        "title": "Refresh Devices",
+        "category": "Russet",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "russet.signing.refresh",
+        "title": "Refresh Signing",
+        "category": "Russet",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "russet.signing.fix",
+        "title": "Fix Signing",
+        "category": "Russet"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "russet.device.setRunDestination",
+          "when": "false"
+        },
+        {
+          "command": "russet.device.pair",
+          "when": "russet.hasDevice"
+        },
+        {
+          "command": "russet.device.mountDdi",
+          "when": "russet.hasDevice"
+        },
+        {
+          "command": "russet.device.revealDeveloperMode",
+          "when": "russet.hasDevice"
+        },
+        {
+          "command": "russet.device.copyUdid",
+          "when": "russet.hasDevice"
+        },
+        {
+          "command": "russet.hotReload",
+          "when": "russet.canHotReload"
+        },
+        {
+          "command": "russet.hotRestart",
+          "when": "russet.isRunning"
+        },
+        {
+          "command": "russet.stop",
+          "when": "russet.isRunning"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "russet.run",
+          "group": "russet@1",
+          "when": "russet.projectKind && !russet.isRunning"
+        },
+        {
+          "command": "russet.debug",
+          "group": "russet@2",
+          "when": "russet.projectKind"
+        },
+        {
+          "command": "russet.hotReload",
+          "group": "russet@3",
+          "when": "russet.canHotReload"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "russet.run",
+          "when": "view == russet.devices",
+          "group": "navigation@1"
+        },
+        {
+          "command": "russet.debug",
+          "when": "view == russet.devices",
+          "group": "navigation@2"
+        },
+        {
+          "command": "russet.stop",
+          "when": "view == russet.devices && russet.isRunning",
+          "group": "navigation@3"
+        },
+        {
+          "command": "russet.hotReload",
+          "when": "view == russet.devices && russet.canHotReload",
+          "group": "navigation@4"
+        },
+        {
+          "command": "russet.devices.refresh",
+          "when": "view == russet.devices",
+          "group": "navigation@9"
+        },
+        {
+          "command": "russet.signing.refresh",
+          "when": "view == russet.signing",
+          "group": "navigation@1"
+        }
+      ],
+      "russet/titleBar": [
+        {
+          "command": "russet.run",
+          "group": "navigation@1"
+        },
+        {
+          "command": "russet.stop",
+          "group": "navigation@2"
+        },
+        {
+          "command": "russet.hotReload",
+          "group": "navigation@3"
+        },
+        {
+          "command": "russet.selectTarget",
+          "group": "navigation@4"
+        },
+        {
+          "command": "russet.selectDevice",
+          "group": "navigation@5"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "russet.device.setRunDestination",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "1_run@1"
+        },
+        {
+          "command": "russet.device.pair",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "2_setup@1"
+        },
+        {
+          "command": "russet.device.mountDdi",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "2_setup@2"
+        },
+        {
+          "command": "russet.device.revealDeveloperMode",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "2_setup@3"
+        },
+        {
+          "command": "russet.openConsole",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "3_view@1"
+        },
+        {
+          "command": "russet.openMirror",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "3_view@2"
+        },
+        {
+          "command": "russet.takeScreenshot",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "3_view@3"
+        },
+        {
+          "command": "russet.device.installApp",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "4_apps@1"
+        },
+        {
+          "command": "russet.device.copyUdid",
+          "when": "view == russet.devices && viewItem == russet.device",
+          "group": "9_clipboard@1"
+        },
+        {
+          "command": "russet.run",
+          "when": "view == russet.runConfigs && viewItem == russet.runConfig",
+          "group": "inline@1"
+        },
+        {
+          "command": "russet.debug",
+          "when": "view == russet.runConfigs && viewItem == russet.runConfig",
+          "group": "inline@2"
+        },
+        {
+          "command": "russet.signing.fix",
+          "when": "view == russet.signing && viewItem == russet.signingProblem",
+          "group": "inline@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "russet.openAssetCatalog",
+          "when": "explorerResourceIsFolder && resourceExtname == .xcassets"
+        },
+        {
+          "command": "russet.openCapabilities",
+          "when": "resourceExtname == .entitlements"
+        }
+      ]
+    },
+    "debuggers": [
+      {
+        "type": "russet",
+        "label": "Russet: iPhone",
+        "languages": [
+          "swift",
+          "objective-c",
+          "c",
+          "cpp"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "target"
+            ],
+            "properties": {
+              "target": {
+                "type": "string",
+                "description": "The product, scheme or target to build and launch."
+              },
+              "device": {
+                "type": "string",
+                "default": "auto",
+                "description": "A UDID or `auto` to use the selected run destination."
+              },
+              "configuration": {
+                "type": "string",
+                "enum": [
+                  "Debug",
+                  "Release"
+                ],
+                "default": "Debug"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "env": {
+                "type": "object",
+                "default": {},
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "stopAtEntry": {
+                "type": "boolean",
+                "default": false
+              },
+              "build": {
+                "type": "boolean",
+                "default": true,
+                "description": "Build before launching."
+              }
+            }
+          },
+          "attach": {
+            "required": [
+              "bundleId"
+            ],
+            "properties": {
+              "bundleId": {
+                "type": "string",
+                "description": "The bundle identifier of the installed app to attach to."
+              },
+              "device": {
+                "type": "string",
+                "default": "auto"
+              },
+              "program": {
+                "type": "string",
+                "description": "The local .app or executable for source mapping."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "russet",
+            "request": "launch",
+            "name": "Run on iPhone",
+            "target": "${workspaceFolderBasename}",
+            "device": "auto",
+            "configuration": "Debug",
+            "args": [],
+            "env": {},
+            "stopAtEntry": false,
+            "build": true
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Russet: Launch on iPhone",
+            "description": "Build, install and debug on a connected iPhone.",
+            "body": {
+              "type": "russet",
+              "request": "launch",
+              "name": "Run on iPhone",
+              "target": "^\"${1:MyApp}\"",
+              "device": "auto",
+              "configuration": "Debug",
+              "stopAtEntry": false,
+              "build": true
+            }
+          },
+          {
+            "label": "Russet: Attach on iPhone",
+            "description": "Attach to an app already installed on a connected iPhone.",
+            "body": {
+              "type": "russet",
+              "request": "attach",
+              "name": "Attach on iPhone",
+              "bundleId": "^\"${1:com.example.MyApp}\"",
+              "device": "auto"
+            }
+          }
+        ]
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "swift"
+      },
+      {
+        "language": "objective-c"
+      },
+      {
+        "language": "c"
+      },
+      {
+        "language": "cpp"
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "russet",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "build",
+              "run",
+              "test",
+              "clean",
+              "archive"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "configuration": {
+            "type": "string",
+            "enum": [
+              "Debug",
+              "Release"
+            ]
+          },
+          "device": {
+            "type": "string"
+          }
+        }
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "russet.plist",
+        "displayName": "Property List",
+        "priority": "default",
+        "selector": [
+          {
+            "filenamePattern": "**/Info.plist"
+          }
+        ]
+      },
+      {
+        "viewType": "russet.plistGeneric",
+        "displayName": "Property List",
+        "priority": "option",
+        "selector": [
+          {
+            "filenamePattern": "*.plist"
+          }
+        ]
+      },
+      {
+        "viewType": "russet.entitlements",
+        "displayName": "Entitlements",
+        "priority": "default",
+        "selector": [
+          {
+            "filenamePattern": "*.entitlements"
+          }
+        ]
+      },
+      {
+        "viewType": "russet.assetCatalog",
+        "displayName": "Asset Catalog",
+        "priority": "default",
+        "selector": [
+          {
+            "filenamePattern": "**/*.xcassets/Contents.json"
+          }
+        ]
+      },
+      {
+        "viewType": "russet.crashReport",
+        "displayName": "Crash Report",
+        "priority": "default",
+        "selector": [
+          {
+            "filenamePattern": "*.ips"
+          },
+          {
+            "filenamePattern": "*.crash"
+          }
+        ]
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "russet.setup",
+        "title": "Set up Russet",
+        "description": "Build and run iOS apps on your iPhone without a Mac.",
+        "steps": [
+          {
+            "id": "doctor",
+            "title": "Check this computer",
+            "description": "Run the Russet doctor to check your toolchain, daemon and device prerequisites.\n[Run Doctor](command:russet.doctor)",
+            "media": {
+              "markdown": "media/walkthrough/doctor.md"
+            },
+            "completionEvents": [
+              "onContext:russet.doctorOk"
+            ]
+          },
+          {
+            "id": "toolchain",
+            "title": "Install the matching Swift toolchain",
+            "description": "Russet installs the Swift toolchain the SDK requires.\n[Open Setup](command:russet.openSetup)",
+            "media": {
+              "markdown": "media/walkthrough/toolchain.md"
+            },
+            "completionEvents": [
+              "onContext:russet.toolchainOk"
+            ]
+          },
+          {
+            "id": "xcode",
+            "title": "Import your Xcode",
+            "description": "Download Xcode from Apple yourself, then import it. Russet never redistributes it.\n[Import Xcode…](command:russet.importXcode)",
+            "media": {
+              "markdown": "media/walkthrough/xcode.md"
+            },
+            "completionEvents": [
+              "onContext:russet.sdkOk"
+            ]
+          },
+          {
+            "id": "account",
+            "title": "Sign in",
+            "description": "Add an App Store Connect API key (recommended) or sign in with an Apple ID.\n[Add API Key…](command:russet.account.addAscKey)",
+            "media": {
+              "markdown": "media/walkthrough/account.md"
+            },
+            "completionEvents": [
+              "onContext:russet.accountOk"
+            ]
+          },
+          {
+            "id": "device",
+            "title": "Connect your iPhone",
+            "description": "Connect your iPhone with USB and tap Trust. Enable Developer Mode when prompted.\n[Run Doctor](command:russet.doctor)",
+            "media": {
+              "markdown": "media/walkthrough/device.md"
+            },
+            "completionEvents": [
+              "onContext:russet.deviceReady"
+            ]
+          },
+          {
+            "id": "project",
+            "title": "Create or open a project",
+            "description": "Open a Swift or Flutter project folder.\n[Open Folder](command:workbench.action.files.openFolder)",
+            "media": {
+              "markdown": "media/walkthrough/project.md"
+            },
+            "completionEvents": [
+              "onContext:russet.projectKind"
+            ]
+          },
+          {
+            "id": "run",
+            "title": "Run on your iPhone",
+            "description": "Press Run to build, install and launch on your iPhone.\n[Run](command:russet.run)",
+            "media": {
+              "markdown": "media/walkthrough/run.md"
+            },
+            "completionEvents": [
+              "onCommand:russet.run"
+            ]
+          },
+          {
+            "id": "agents",
+            "title": "Optional: connect an AI agent",
+            "description": "Connect an AI coding agent that can build and test on your device through Russet.\n[Open Agents](command:russet.agents.open)",
+            "media": {
+              "markdown": "media/walkthrough/agents.md"
+            },
+            "completionEvents": [
+              "onView:russet.agents"
+            ]
+          }
+        ]
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "russet.mcp",
+        "label": "Russet"
+      }
+    ],
+    "authentication": [
+      {
+        "id": "russet-apple",
+        "label": "Apple Developer (Russet)"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "russet-swiftc",
+        "owner": "russet",
+        "source": "swiftc",
+        "fileLocation": "absolute",
+        "pattern": {
+          "regexp": "^(.+):(\\d+):(\\d+): (error|warning|note): (.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "russet.run",
+        "key": "ctrl+f5",
+        "mac": "cmd+f5",
+        "when": "russet.projectKind && isWorkspaceTrusted"
+      },
+      {
+        "command": "russet.stop",
+        "key": "shift+f5",
+        "mac": "shift+f5",
+        "when": "russet.isRunning && !inDebugMode"
+      },
+      {
+        "command": "russet.hotReload",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "russet.canHotReload"
+      },
+      {
+        "command": "russet.hotRestart",
+        "key": "ctrl+alt+shift+r",
+        "mac": "cmd+alt+shift+r",
+        "when": "russet.isRunning"
+      },
+      {
+        "command": "russet.openMirror",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "russet.deviceReady"
+      },
+      {
+        "command": "russet.agents.newSession",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "russet.featureAgents"
+      }
+    ],
+    "configuration": {
+      "title": "Russet",
+      "properties": {
+        "russet.binDir": {
+          "type": "string",
+          "default": "",
+          "description": "Overrides the bundled or shim location of the `russet` binaries."
+        },
+        "russet.daemon.socketPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the russetd socket. Empty asks the CLI."
+        },
+        "russet.daemon.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the Russet daemon automatically when it is not running."
+        },
+        "russet.defaultDevice": {
+          "type": "string",
+          "default": "auto",
+          "description": "A UDID or `auto`."
+        },
+        "russet.build.configuration": {
+          "type": "string",
+          "enum": [
+            "Debug",
+            "Release"
+          ],
+          "default": "Debug"
+        },
+        "russet.build.revealOutput": {
+          "type": "string",
+          "enum": [
+            "always",
+            "onError",
+            "never"
+          ],
+          "default": "onError"
+        },
+        "russet.run.openConsole": {
+          "type": "boolean",
+          "default": true
+        },
+        "russet.run.openMirror": {
+          "type": "boolean",
+          "default": false
+        },
+        "russet.console.maxLines": {
+          "type": "number",
+          "default": 50000
+        },
+        "russet.console.defaultSources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "app-stdout",
+              "app-stderr",
+              "oslog",
+              "syslog"
+            ]
+          },
+          "default": [
+            "app-stdout",
+            "app-stderr",
+            "oslog"
+          ]
+        },
+        "russet.mirror.codecs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "hevc",
+              "avc",
+              "jpeg",
+              "poll"
+            ]
+          },
+          "default": [
+            "hevc",
+            "avc",
+            "jpeg",
+            "poll"
+          ]
+        },
+        "russet.mirror.maxFps": {
+          "type": "number",
+          "default": 60
+        },
+        "russet.mirror.showStats": {
+          "type": "boolean",
+          "default": false
+        },
+        "russet.debug.adapter": {
+          "type": "string",
+          "enum": [
+            "lldb-dap",
+            "codelldb"
+          ],
+          "default": "lldb-dap"
+        },
+        "russet.debug.lldbDapPath": {
+          "type": "string",
+          "default": "",
+          "description": "Overrides the lldb-dap path the daemon reports."
+        },
+        "russet.agents.registryUrl": {
+          "type": "string",
+          "default": "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+          "description": "Empty disables the fetch."
+        },
+        "russet.agents.custom": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object"
+          }
+        },
+        "russet.agents.default": {
+          "type": "string",
+          "default": ""
+        },
+        "russet.agents.mcpTransport": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "http"
+          ],
+          "default": "stdio"
+        },
+        "russet.ai.endpoints": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object"
+          },
+          "description": "OpenAI-compatible endpoints; keys live in SecretStorage, never in settings."
+        },
+        "russet.mcp.registerWithVSCode": {
+          "type": "boolean",
+          "default": true
+        },
+        "russet.mcp.clientName": {
+          "type": "string",
+          "default": "vscode"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "compile": "npm run compile:ext && npm run compile:webview",
+    "compile:ext": "node esbuild.mjs",
+    "compile:webview": "vite build",
+    "watch": "node esbuild.mjs --watch",
+    "compile:test": "node esbuild.mjs --tests",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test:unit": "vitest run",
+    "test:integration": "npm run compile && npm run compile:test && vscode-test",
+    "test": "npm run test:unit",
+    "pretest": "npm run compile && npm run typecheck",
+    "package": "vsce package --no-dependencies -o russet.vsix",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-jsonrpc": "8.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.17.0",
+    "@types/mocha": "10.0.10",
+    "@types/node": "20.17.6",
+    "@types/vscode": "1.134.0",
+    "@vscode/test-cli": "0.0.15",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.1.0",
+    "esbuild": "0.24.2",
+    "eslint": "9.17.0",
+    "typescript": "5.6.3",
+    "typescript-eslint": "8.18.2",
+    "vite": "6.0.7",
+    "vitest": "2.1.9"
+  }
+}
