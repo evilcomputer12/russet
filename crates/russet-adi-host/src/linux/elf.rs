@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! A clean-room ELF64 loader for Android shared objects (SIGN §7.5), written from the ELF gABI and the x86-64

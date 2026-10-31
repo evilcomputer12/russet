@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The helper end to end: a synthetic two-library ADI (tests/fixtures/*.c, compiled here with the system C

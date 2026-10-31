@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! TLS for `gsa.apple.com` (SIGN §7.2 item 6, [V15]): it chains to Apple Root CA, which is not in the system

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `RemoteV3` (opt-in, SIGN §7.5): an anisette-v3 server the user runs. `GET /v3/client_info`; the websocket

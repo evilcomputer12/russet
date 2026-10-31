@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 // A synthetic stand-in for libstoreservicescore.so (no Apple code): it exports the ADI entry points under their

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Local ADI (SIGN §7.5): Apple's libraries run in the sandboxed `russet-adi-host` child, which this module drives

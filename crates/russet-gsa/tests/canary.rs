@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The log canary of the Apple ID path (AGENTS.md §8, ARCHITECTURE §17): a whole sign-in with two-factor, the

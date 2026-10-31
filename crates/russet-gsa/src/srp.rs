@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! SRP-6a as GrandSlam speaks it (SIGN §7.2): the RFC 5054 2048-bit group, `g = 2`, SHA-256, and

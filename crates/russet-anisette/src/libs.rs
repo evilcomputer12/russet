@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Library acquisition (SIGN §7.5, [V12]): after the user's consent, fetch only Apple's two ADI libraries out of

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The symmetric pieces of GrandSlam (SIGN §7.2): `spd` is AES-256-CBC (PKCS#7) under keys derived from the SRP

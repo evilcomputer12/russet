@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! GrandSlam session material (SIGN §7.3) and its sealed form (`secret:apple-id-session/<DSID>`). Every type here

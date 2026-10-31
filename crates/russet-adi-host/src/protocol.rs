@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The JSON Lines protocol of SIGN §7.5 (the daemon's side is `russet_anisette::local`). One request per line on
