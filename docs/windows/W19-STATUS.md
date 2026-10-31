@@ -178,9 +178,10 @@ above); with the current installed host the page shows "The setup runner could n
 
 ## Files outside W19's own paths
 
-Small hooks, listed for the lead's merge: `extension/package.json` (contributions; a seam file once W14
-merges), `extension/src/commands/index.ts` (route existing ids through `experience`, Run/Debug guard, the API key's
-issuer ID prompt checked by `setup/ascKey.ts`),
+Small hooks, listed for the lead's merge: `extension/package.json` (contributions, including the
+`russet.project.organizationIdentifier` setting; a seam file once W14 merges), `extension/src/commands/index.ts`
+(route existing ids through `experience`, Run/Debug guard, the API key's issuer ID prompt checked by
+`setup/ascKey.ts`, New Project's bundle ID and Run/Debug's placeholder check from `setup/bundleId.ts`),
 `extension/src/statusbar/index.ts` (Run/Debug/Stop, virtual destination), `extension/src/extension.ts`
 (`installExperience`), `extension/vite.config.ts` (three pages), `extension/media/walkthrough/*.md`,
 `docs/design/ide.md` §5.8 (note). New JSON data is covered by `REUSE.toml`'s `extension/data/*.json`

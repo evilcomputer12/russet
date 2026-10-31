@@ -14,6 +14,8 @@ import type { MirrorViewProvider } from "../panels/mirrorView";
 import type { SigningTreeProvider } from "../views/signingTree";
 import type { Experience } from "../setup";
 import { ISSUER_ID_PLACEHOLDER, ISSUER_ID_PROMPT, issuerIdParam, issuerIdProblem } from "../setup/ascKey";
+import { chooseBundleId, ensureRegistrable, isPlaceholder } from "../setup/bundleId";
+import { refreshProject } from "../daemon/subscriptions";
 import { pickDevice, pickTarget, pickConfiguration } from "./pickers";
 import { hotReload } from "./hotReload";
 import { showDaemonError } from "../daemon/errors";
@@ -49,9 +51,26 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
     }
     return !!reason;
   };
-  reg("russet.run", () => (blockedRun() ? undefined : svc.run.run()));
+  // A placeholder bundle ID can never be signed: offer the user's own before building.
+  const registrable = async (): Promise<boolean> => {
+    const project = svc.store.state.project;
+    const target = project?.targets.find((t) => t.name === svc.store.state.selectedTarget) ?? project?.targets[0];
+    if (!isPlaceholder(target?.bundleId ?? "")) {
+      return true;
+    }
+    const changed = await ensureRegistrable(target?.bundleId, project?.root);
+    if (changed) {
+      await refreshProject(svc.store, svc.client);
+    }
+    return changed;
+  };
+  reg("russet.run", async () => {
+    if (!blockedRun() && (await registrable())) {
+      await svc.run.run();
+    }
+  });
   reg("russet.debug", async () => {
-    if (blockedRun()) {
+    if (blockedRun() || !(await registrable())) {
       return;
     }
     const folder = vscode.workspace.workspaceFolders?.[0];
@@ -155,12 +174,17 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
     if (!picked || picked.length === 0) {
       return;
     }
+    const bundleId = await chooseBundleId(name);
+    if (!bundleId) {
+      return;
+    }
     const root = vscode.Uri.joinPath(picked[0], name.trim());
     try {
       const res = (await svc.client.call("project.init" as never, {
         dir: root.fsPath,
         stack: "swiftpm",
         name: name.trim(),
+        bundleId,
         force: false,
       } as never)) as { root: string; files: string[] };
       const open = await vscode.window.showInformationMessage(
