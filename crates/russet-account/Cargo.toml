@@ -17,10 +17,13 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 plist.workspace = true
+reqwest.workspace = true
 ring.workspace = true
+russet-anisette.workspace = true
 russet-asc.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
+russet-gsa.workspace = true
 russet-secrets.workspace = true
 russet-sign.workspace = true
 serde.workspace = true
@@ -29,6 +32,7 @@ sha2.workspace = true
 time = { workspace = true, features = ["formatting", "parsing"] }
 tokio = { workspace = true, features = ["sync", "rt"] }
 toml.workspace = true
+tracing.workspace = true
 url.workspace = true
 zeroize.workspace = true
 # Key dependencies of ARCHITECTURE §5.1 for W12's CSR and .p12 work (declared since F0).
@@ -39,6 +43,9 @@ x509-cert.workspace = true
 
 [dev-dependencies]
 p256.workspace = true
+russet-anisette = { workspace = true, features = ["fake"] }
+russet-gsa = { workspace = true, features = ["fake"] }
+rustls.workspace = true
 rsa = { workspace = true, features = ["getrandom"] }
 russet-macho = { workspace = true, features = ["fixture"] }
 russet-sign = { workspace = true, features = ["test-pki"] }

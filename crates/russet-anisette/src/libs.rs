@@ -166,7 +166,8 @@ fn verify_dir(dir: &Path, version: &str, abi: Abi) -> Result<LibrarySet> {
     Ok(LibrarySet { apk_version: version.to_owned(), abi, dir: dir.to_path_buf(), pinned: expected.1 })
 }
 
-pub(crate) fn libs_missing() -> Error {
+/// `anisette.libsMissing`, with the hint to download them.
+pub fn libs_missing() -> Error {
     Error::new(codes::anisette::LIBS_MISSING, "Apple's ADI libraries are not downloaded").with_hint(
         "Download them once with consent: the sign-in page offers it, or `russet account anisette fetch-libraries`.",
     )
@@ -401,6 +402,16 @@ pub async fn ensure_libraries(
     }
     let set = verify_dir(&dir, &version, abi)?;
     Ok(Fetched { set, bytes_downloaded: r.bytes })
+}
+
+/// [`ensure_libraries`] for this host's ABI from the APK under `base` (`Endpoints.anisette_libs`).
+pub async fn fetch(data_dir: &Path, base: &Url, consent: Consent) -> Result<Fetched> {
+    let abi = Abi::host().ok_or_else(|| {
+        Error::new(codes::anisette::UNSUPPORTED, "Apple ships no ADI libraries for this CPU")
+            .with_hint("Local anisette needs x86_64 or arm64; use a remote anisette-v3 server instead.")
+    })?;
+    let http = crate::http::plain_client(std::time::Duration::from_secs(120))?;
+    ensure_libraries(data_dir, &apk_url(base)?, abi, consent, &http).await
 }
 
 /// Deletes every downloaded library (`reset --libraries`).

@@ -36,6 +36,98 @@ issuerId?: string,
 p8Path: string, label?: string, };
 
 /**
+ * Params of `account.anisette.fetchLibraries`: `{consent: true} → {apkVersion, bytesDownloaded}`. `consent`
+ * records that the user read the consent screen (SIGN §7.1); anything but `true` is refused.
+ */
+export type AccountAnisetteFetchLibrariesParams = { consent: boolean, };
+
+/**
+ * Result of `account.anisette.fetchLibraries`.
+ */
+export type AccountAnisetteFetchLibrariesResult = { apkVersion: string, 
+/**
+ * HTTP traffic of the range fetch (about 2–3 MB; 0 when the libraries were already present).
+ */
+bytesDownloaded: number, 
+/**
+ * The hashes are in Russet's pin table; false means they were recorded on first use.
+ */
+pinned: boolean, };
+
+/**
+ * Params of `account.anisette.status`: `{} → {kind, librariesPresent, apkVersion?, provisioned}`.
+ */
+export type AccountAnisetteStatusParams = Record<symbol, never>;
+
+/**
+ * Result of `account.anisette.status`: the local ADI provider (remote servers are configured per account).
+ */
+export type AccountAnisetteStatusResult = { kind: AnisetteKind, 
+/**
+ * Apple's two ADI libraries are downloaded and match their pins (or their trust-on-first-use record).
+ */
+librariesPresent: boolean, apkVersion?: string, 
+/**
+ * This machine holds ADI provisioning state.
+ */
+provisioned: boolean, 
+/**
+ * Local ADI runs on this host (Linux x86_64; Windows through the engine's WSL backend).
+ */
+localSupported: boolean, 
+/**
+ * The libraries' hashes are in Russet's shipped pin table (false: recorded on first use).
+ */
+pinned?: boolean, };
+
+/**
+ * Params of `account.appleId.begin` (cli/ide only): signs in to Apple with the engine's own GrandSlam client.
+ * `Debug` never prints the Apple ID or the password; neither is logged, audited or echoed.
+ */
+export type AccountAppleIdBeginParams = { appleId: string, password: string, anisette: AnisetteChoice, 
+/**
+ * The account's label in `account.list` (default: `Apple ID (<masked id>)`).
+ */
+label?: string, };
+
+/**
+ * Result of `account.appleId.begin`.
+ */
+export type AccountAppleIdBeginResult = { 
+/**
+ * The sign-in session (valid for 10 minutes).
+ */
+sessionId: string, step: AppleIdStep, 
+/**
+ * With `step: "two-factor"`.
+ */
+twoFactor?: TwoFactorInfo, 
+/**
+ * With `step: "done"`: the account that was added (or refreshed).
+ */
+account?: Account, };
+
+/**
+ * Params of `account.appleId.requestCode`: `{sessionId, via, phoneId?} → {}`.
+ */
+export type AccountAppleIdRequestCodeParams = { sessionId: string, via: TwoFactorVia, 
+/**
+ * Required with `via: "sms"`: a `phoneNumbers[].id` of the two-factor step.
+ */
+phoneId?: number, };
+
+/**
+ * Result of `account.appleId.requestCode`.
+ */
+export type AccountAppleIdRequestCodeResult = Record<symbol, never>;
+
+/**
+ * Params of `account.appleId.submitCode`: `{sessionId, code} → Account`. The code is checked against the way it
+ * was last requested (the trusted devices unless `requestCode` sent an SMS). `Debug` never prints the code.
+ */
+export type AccountAppleIdSubmitCodeParams = { sessionId: string, code: string, };
+
+/**
  * Params of `account.importXtool` (cli/ide only; the explicit one-time import [D 50]).
  */
 export type AccountImportXtoolParams = { 
@@ -114,6 +206,22 @@ export type AccountVerifyResult = { ok: boolean, accountId: string,
  * Masked.
  */
 teamId?: string, roleProbe: RoleProbe, };
+
+/**
+ * Where the anisette data of an Apple ID sign-in comes from (`local|{remote}`): `"local"` (Apple's ADI libraries
+ * in the sandboxed `russet-adi-host`, the default) or `{"remote": "<url>"}` (an anisette-v3 server the user runs;
+ * its operator learns this machine's ADI identity) (SIGN §7.5). Untagged, like `accounts.toml`'s `anisette`.
+ */
+export type AnisetteChoice = LocalAnisette | { 
+/**
+ * The base URL of an anisette-v3 server.
+ */
+remote: string, };
+
+/**
+ * Which anisette provider `account.anisette.status` describes.
+ */
+export type AnisetteKind = "local" | "remote";
 
 /**
  * Params of the `app.exited` notification: `{leaseId, pid, code?, signal?, crashId?}; to the app.launch caller`.
@@ -254,6 +362,11 @@ bundleId: string, };
  * Result of `app.uninstall`.
  */
 export type AppUninstallResult = Record<symbol, never>;
+
+/**
+ * The step a sign-in session is at.
+ */
+export type AppleIdStep = "done" | "two-factor";
 
 /**
  * An approval record (ARCHITECTURE §6.5).
@@ -2124,6 +2237,11 @@ fixed: boolean, };
 export type LintSeverity = "info" | "warning" | "error";
 
 /**
+ * The string form of local anisette (`"local"`).
+ */
+export type LocalAnisette = "local";
+
+/**
  * One log line: `logs.entries`, `logs.tail`, `run.output`, `run.output.query`.
  */
 export type LogEntry = { 
@@ -3773,6 +3891,15 @@ export type TraceLevel = "trace" | "debug" | "info" | "warn" | "error";
 export type Tristate = "yes" | "no" | "unknown";
 
 /**
+ * A trusted phone number, as Apple obfuscates it (`(•••) •••-••12`).
+ */
+export type TrustedPhone = { id: number, 
+/**
+ * Apple's obfuscated form; never the full number.
+ */
+number: string, };
+
+/**
  * Tunnel states.
  */
 export type TunnelState = "down" | "up" | "failed";
@@ -3789,6 +3916,33 @@ since?: string,
  * Only when `state` is `failed`.
  */
 error?: ErrorData, };
+
+/**
+ * What a two-factor step offers.
+ */
+export type TwoFactorInfo = { 
+/**
+ * The ways a code can be requested (`requestCode`).
+ */
+via: Array<TwoFactorVia>, 
+/**
+ * Where the current code went: Russet asks Apple to push one to the trusted devices as soon as Apple offers
+ * that; omitted when nothing was sent yet (call `requestCode`).
+ */
+codeSentTo?: TwoFactorVia, 
+/**
+ * The trusted phone numbers for `requestCode {via: "sms", phoneId}` (empty until Apple lists them).
+ */
+phoneNumbers: Array<TrustedPhone>, 
+/**
+ * The code length (6).
+ */
+codeLength: number, };
+
+/**
+ * Where a two-factor code is sent.
+ */
+export type TwoFactorVia = "trusted-device" | "sms";
 
 /**
  * Params of `ui.confirm` (served by `cli` with a TTY or `--yes`, and `ide`).
@@ -3998,11 +4152,11 @@ export interface Methods {
   "account.verify": { params: AccountVerifyParams; result: AccountVerifyResult };
   "account.remove": { params: AccountRemoveParams; result: AccountRemoveResult };
   "account.setDefault": { params: AccountSetDefaultParams; result: AccountSetDefaultResult };
-  "account.appleId.begin": { params: Unspecified; result: Unspecified };
-  "account.appleId.requestCode": { params: Unspecified; result: Unspecified };
-  "account.appleId.submitCode": { params: Unspecified; result: Unspecified };
-  "account.anisette.status": { params: Unspecified; result: Unspecified };
-  "account.anisette.fetchLibraries": { params: Unspecified; result: Unspecified };
+  "account.appleId.begin": { params: AccountAppleIdBeginParams; result: AccountAppleIdBeginResult };
+  "account.appleId.requestCode": { params: AccountAppleIdRequestCodeParams; result: AccountAppleIdRequestCodeResult };
+  "account.appleId.submitCode": { params: AccountAppleIdSubmitCodeParams; result: Account };
+  "account.anisette.status": { params: AccountAnisetteStatusParams; result: AccountAnisetteStatusResult };
+  "account.anisette.fetchLibraries": { params: AccountAnisetteFetchLibrariesParams; result: AccountAnisetteFetchLibrariesResult };
   "identity.list": { params: IdentityListParams; result: IdentityListResult };
   "identity.importP12": { params: Unspecified; result: Unspecified };
   "identity.exportP12": { params: Unspecified; result: Unspecified };

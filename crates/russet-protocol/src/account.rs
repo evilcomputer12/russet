@@ -211,16 +211,31 @@ crate::rpc_method!(
     Permission::Secrets
 );
 
-/// Where the anisette data of an Apple ID sign-in comes from (`local|{remote}`): `"local"` (Apple's ADI libraries
-/// in the sandboxed `russet-adi-host`, the default) or `{"remote": "<url>"}` (an anisette-v3 server the user runs;
-/// its operator learns this machine's ADI identity) (SIGN §7.5).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum AnisetteChoice {
+/// The string form of local anisette (`"local"`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum LocalAnisette {
     #[default]
     Local,
-    /// The base URL of an anisette-v3 server.
-    Remote(String),
+}
+
+/// Where the anisette data of an Apple ID sign-in comes from (`local|{remote}`): `"local"` (Apple's ADI libraries
+/// in the sandboxed `russet-adi-host`, the default) or `{"remote": "<url>"}` (an anisette-v3 server the user runs;
+/// its operator learns this machine's ADI identity) (SIGN §7.5). Untagged, like `accounts.toml`'s `anisette`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(untagged)]
+pub enum AnisetteChoice {
+    Local(LocalAnisette),
+    Remote {
+        /// The base URL of an anisette-v3 server.
+        remote: String,
+    },
+}
+
+impl Default for AnisetteChoice {
+    fn default() -> Self {
+        Self::Local(LocalAnisette::Local)
+    }
 }
 
 /// Params of `account.appleId.begin` (cli/ide only): signs in to Apple with the engine's own GrandSlam client.
@@ -495,12 +510,14 @@ mod tests {
     fn anisette_choice_is_local_or_a_remote_object() {
         let local: Result<AccountAppleIdBeginParams, _> =
             serde_json::from_value(serde_json::json!({"appleId": "a", "password": "b"}));
-        assert!(local.is_ok_and(|p| p.anisette == AnisetteChoice::Local));
+        assert!(local.is_ok_and(|p| p.anisette == AnisetteChoice::default()));
         let remote: Result<AccountAppleIdBeginParams, _> = serde_json::from_value(
             serde_json::json!({"appleId": "a", "password": "b", "anisette": {"remote": "https://ani.example"}}),
         );
-        assert!(remote.is_ok_and(|p| p.anisette == AnisetteChoice::Remote("https://ani.example".into())));
-        assert!(serde_json::to_value(AnisetteChoice::Local).is_ok_and(|v| v == "local"));
+        assert!(remote.is_ok_and(|p| p.anisette == AnisetteChoice::Remote { remote: "https://ani.example".into() }));
+        assert!(serde_json::to_value(AnisetteChoice::default()).is_ok_and(|v| v == "local"));
+        let bare_remote: Result<AnisetteChoice, _> = serde_json::from_value(serde_json::json!("remote"));
+        assert!(bare_remote.is_err());
     }
 
     #[test]
@@ -508,7 +525,7 @@ mod tests {
         let begin = AccountAppleIdBeginParams {
             apple_id: "canary-user@example.invalid".into(),
             password: "canary-password-7731".into(),
-            anisette: AnisetteChoice::Local,
+            anisette: AnisetteChoice::default(),
             label: None,
         };
         let code = AccountAppleIdSubmitCodeParams { session_id: "s1".into(), code: "731904".into() };
