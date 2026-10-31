@@ -10,6 +10,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "vscode-jsonrpc": "9.0.3"
+    "vscode-jsonrpc": "10.0.0"
   }
 }
