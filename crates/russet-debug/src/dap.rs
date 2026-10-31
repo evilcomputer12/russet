@@ -133,7 +133,15 @@ impl DapHub {
     /// is `debug.prepare`'s `dapConfig` (with `attachCommands`/`initCommands`). Fails if the backend rejects it.
     pub async fn bootstrap_attach(&self, config: Value) -> Result<()> {
         let client = self.agent_client();
-        client.request("initialize", json!({ "adapterID": "russet", "linesStartAt1": true })).await?;
+        client
+            .request(
+                "initialize",
+                json!({
+                    "adapterID": "russet", "clientID": "russet-headless", "pathFormat": "path",
+                    "linesStartAt1": true, "columnsStartAt1": true,
+                }),
+            )
+            .await?;
         client.request("attach", config).await?;
         Ok(())
     }
