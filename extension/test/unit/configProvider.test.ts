@@ -27,3 +27,20 @@ it("keeps the Russet descriptor factory when a real-daemon-shaped DAP recipe nam
   expect(result?.attachCommands).toEqual(["!prepared attach"]);
   expect(call).toHaveBeenCalledWith("debug.prepare", expect.objectContaining({ frontend: "dap", symbols: "none" }), undefined);
 });
+
+it("prepares once when VS Code chains both registrations of the provider", async () => {
+  const call = vi.fn().mockResolvedValue({
+    sessionId: "synthetic-session", bundleId: "dev.russet.synthetic",
+    initCommands: [], attachCommands: [],
+    dapConfig: { type: "lldb-dap", request: "attach", attachCommands: ["!prepared attach"] },
+  });
+  const client = { state: "connected", call } as unknown as RussetClient;
+  const store = { state: { project: { root: "C:\\Synthetic" } }, setRun: vi.fn() } as unknown as Store;
+  const provider = new RussetDebugConfigProvider(client, store);
+  const first = await provider.resolveDebugConfigurationWithSubstitutedVariables(undefined, {
+    type: "russet", request: "launch", name: "Run on iPhone",
+  });
+  const second = await provider.resolveDebugConfigurationWithSubstitutedVariables(undefined, first!);
+  expect(second).toEqual(first);
+  expect(call).toHaveBeenCalledTimes(1);
+});

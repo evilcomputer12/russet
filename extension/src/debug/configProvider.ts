@@ -51,6 +51,12 @@ export class RussetDebugConfigProvider implements vscode.DebugConfigurationProvi
     if (config.type !== "russet") {
       return config;
     }
+    // The provider is registered twice (normal and Dynamic) and VS Code chains every
+    // provider's resolve: a configuration this provider already prepared passes
+    // through, or a second debug.prepare launches the app again and F5 hangs.
+    if (config.__russetToken) {
+      return config;
+    }
     if (this.client.state !== "connected") {
       void vscode.window.showErrorMessage("The Russet daemon is not connected.");
       return undefined;
