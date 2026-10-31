@@ -101,11 +101,21 @@ Nothing has talked to Apple. These are interoperability facts taken from xtool, 
 - No "remember password" option (unattended 7-day refresh needs it; SIGN §7.6): sessions are refreshed from the
   sealed `GsIdmsToken` until Apple expires it, then the user signs in again (`gsa.sessionExpired`).
 
-## Gates
+## Gates (WSL `Russet-Dev`, slot a, offline, memory secrets)
 
-See the final report of the session for the exact results; run here in WSL (`Russet-Dev`, slot a, offline):
-`cargo fmt --check`, the toolchain's `cargo-clippy clippy … --all-targets -D warnings` over the touched crates,
-their tests, `cargo deny check licenses bans sources`, `cargo xtask check-paths --ws W22`, `check-layers`,
-`check-no-apple`, `cargo xtask schema --check`. Note for the lead: `/home/russet/.cargo/bin` (the managed `CARGO_HOME`) now holds
-rustup proxies (1.99.1), and cargo prefers it for `cargo clippy`/`cargo fmt`; with the read-only 1.99.0 toolchain as
-`RUSTC` that mixes compilers (E0514). Calling `$TOOLCHAIN/bin/cargo-clippy clippy` avoids it.
+| Gate | Result |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| clippy `--all-targets -D warnings` on `russet-{anisette,gsa,adi-host,account,asc,protocol,core}` and `russetd` | clean (the toolchain's own `cargo-clippy`, see below) |
+| tests of `russet-{anisette,gsa,adi-host,account,asc,protocol,core}` (`--all-features`) | all pass (incl. `gsa`, `canary`, `anisette`, `host` suites) |
+| `russetd` lib + `account_handlers` | 40 + 5 pass |
+| `cargo deny check licenses bans sources` | bans ok, licenses ok, sources ok |
+| `cargo xtask check-layers` / `check-no-apple` | ok / no Apple files |
+| `cargo xtask schema --check` | 3 generated files up to date |
+| `cargo xtask check-paths --ws W22` | 8 warnings, all the foreign files listed in the seam requests; no seam file touched |
+
+The full `--workspace` nextest was not run (it does not fit a 6 GiB slot); only the crates W22 touched.
+
+Note for the lead: `/home/russet/.cargo/bin` (the managed `CARGO_HOME`) now holds rustup proxies (1.99.1), and cargo
+prefers `$CARGO_HOME/bin/cargo-clippy` for `cargo clippy`; with the read-only 1.99.0 toolchain as `RUSTC` that mixes
+compilers (E0514). Calling `$TOOLCHAIN/bin/cargo-clippy clippy …` avoids it.
