@@ -14,7 +14,7 @@ SPDX-FileCopyrightText: 2026 Russet contributors
 ## Checklist
 
 - [ ] `cargo xtask ci --profile pr` is green (or the summary names what was skipped and why)
-- [ ] Commits follow Conventional Commits; in the public phase each carries `Signed-off-by:` (DCO, CONTRIBUTING.md)
+- [ ] Commits follow Conventional Commits; each carries `Signed-off-by:` (DCO, CONTRIBUTING.md)
 - [ ] Only my card's paths changed (`cargo xtask check-paths`); contract changes went to `docs/ARCHITECTURE.md` separately
 - [ ] New errors have a code, a hint and a docs anchor; CLI commands support `--json`
 - [ ] SPDX headers on new files; I included no Apple files, no device identifiers and no secrets

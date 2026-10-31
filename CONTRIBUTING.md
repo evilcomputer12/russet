@@ -71,8 +71,8 @@ fix its findings: [docs/contributing/guards.md](docs/contributing/guards.md).
   `type(scope): description`, with `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`,
   `chore` or `revert`, and `!` for breaking changes. `cargo xtask guard commits` checks the branch; the changelog
   is generated from them.
-- **Pull requests** use the template: what and why, how it was tested, the checklist. Label a pull request `ci` to
-  run Linux CI on it while the repository is private ([docs/contributing/ci.md](docs/contributing/ci.md)).
+- **Pull requests** use the template: what and why, how it was tested, the checklist. CI runs on every non-draft
+  pull request ([docs/contributing/ci.md](docs/contributing/ci.md)).
 - **Review.** `.github/CODEOWNERS` names the owner for secrets, signing, agent policy, CI, licences and packaging.
 
 ## Developer Certificate of Origin
@@ -87,8 +87,7 @@ Signed-off-by: Your Name <your.email@example.org>
 to a commit (`git commit -s`) you certify that you wrote the change or otherwise have the right to submit it under
 the project's licence. Inbound licence equals outbound licence: AGPL-3.0-only for all of Russet (0BSD for
 `templates/` and `tests/fixtures/`). There is no CLA, so nobody can relicense a contribution. `cargo xtask guard
-dco` checks every commit of a branch; CI enforces it on pull requests once the repository is public (PLAN §5.9). Until then the repository has
-no outside contributors.
+dco` checks every commit of a branch, and CI enforces it on every pull request (PLAN §5.9).
 
 ## No Apple files, no secrets, no device identifiers
 
