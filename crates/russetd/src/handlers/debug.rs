@@ -9,6 +9,7 @@
 //! (ARCHITECTURE §10.2); the symbol methods front `russet_debug::symbols::SymbolCache`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use russet_core::Result;
 use russet_core::error::{Error, codes};
@@ -27,6 +28,10 @@ use crate::pipeline::run::{broker_info, debug_dir};
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
 pub fn register(r: &mut Router<DaemonCtx>) {
+    crate::ctx::provide::<russet_debug::DebugService>(r, |env| {
+        let services: Arc<dyn russet_debug::DeviceServices> = Arc::new(env.devices.clone());
+        Ok(Arc::new(russet_debug::DebugService::new(services, russet_debug::DebugConfig::from_dirs(&env.dirs))))
+    });
     r.request::<p::DebugPrepare, _, _>(prepare);
     r.request::<p::DebugAttach, _, _>(attach);
     r.request::<p::DebugControl, _, _>(control);
