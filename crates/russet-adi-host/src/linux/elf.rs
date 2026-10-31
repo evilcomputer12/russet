@@ -4,7 +4,7 @@
 //! A clean-room ELF64 loader for Android shared objects (SIGN §7.5), written from the ELF gABI and the x86-64
 //! psABI: map the `PT_LOAD` segments, apply `DT_RELA`/`DT_JMPREL`/`DT_RELR` relocations
 //! (`R_X86_64_RELATIVE/GLOB_DAT/JUMP_SLOT/64/IRELATIVE`), resolve imports through the caller, set each page's
-//! protection, run `DT_INIT`/`DT_INIT_ARRAY`, and look exports up by name. Metadata is read from the file image
+//! protection, collect `DT_INIT`/`DT_INIT_ARRAY` for the caller to run, and look exports up by name. Metadata is read from the file image
 //! (translated through the `PT_LOAD` table); only relocations and init calls touch the mapped memory.
 //!
 //! Not supported (a clear error, never a crash): other machines, TLS relocations and Android's packed
@@ -57,12 +57,31 @@ const PAGE: usize = 4096;
 pub struct Image {
     pub name: String,
     exports: HashMap<String, usize>,
+    /// `DT_INIT` then `DT_INIT_ARRAY`, not yet run.
+    inits: Vec<usize>,
 }
 
 impl Image {
     /// The address of export `name`.
     pub fn symbol(&self, name: &str) -> Option<usize> {
         self.exports.get(name).copied()
+    }
+
+    /// How many initializers the library has.
+    pub fn initializers(&self) -> usize {
+        self.inits.len()
+    }
+
+    /// Runs `DT_INIT` and `DT_INIT_ARRAY` once, with bionic's `(argc, argv, envp)`.
+    pub fn run_initializers(&mut self) {
+        static EMPTY: [usize; 1] = [0];
+        let argv = EMPTY.as_ptr() as *const *const libc::c_char;
+        for f in std::mem::take(&mut self.inits) {
+            // SAFETY: an initializer of the relocated library with the ELF/bionic init signature.
+            let init: extern "C" fn(i32, *const *const libc::c_char, *const *const libc::c_char) =
+                unsafe { std::mem::transmute(f) };
+            init(0, argv, argv);
+        }
     }
 }
 
@@ -342,9 +361,7 @@ pub fn load(name: &str, bytes: &[u8], resolve: Resolver<'_>) -> Result<Image, St
         }
     }
 
-    // Initializers, with bionic's (argc, argv, envp).
-    static EMPTY: [usize; 1] = [0];
-    let argv = EMPTY.as_ptr() as *const *const libc::c_char;
+    // Initializers (run by `Image::run_initializers` when the caller decides to).
     let mut inits = Vec::new();
     if let Some(i) = dynv.get(&DT_INIT) {
         inits.push(bias + *i as usize);
@@ -355,13 +372,8 @@ pub fn load(name: &str, bytes: &[u8], resolve: Resolver<'_>) -> Result<Image, St
             inits.push(unsafe { ((bias + *a as usize + k * 8) as *const usize).read_unaligned() });
         }
     }
-    for f in inits.into_iter().filter(|a| *a != 0 && *a != usize::MAX) {
-        // SAFETY: an initializer of the library with the ELF/bionic init signature.
-        let init: extern "C" fn(i32, *const *const libc::c_char, *const *const libc::c_char) =
-            unsafe { std::mem::transmute(f) };
-        init(0, argv, argv);
-    }
-    Ok(Image { name: name.to_owned(), exports })
+    inits.retain(|a| *a != 0 && *a != usize::MAX);
+    Ok(Image { name: name.to_owned(), exports, inits })
 }
 
 /// The number of dynamic symbols, from `DT_HASH` (nchain) or `DT_GNU_HASH` (the highest chain end).

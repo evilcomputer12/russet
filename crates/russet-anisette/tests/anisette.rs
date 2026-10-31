@@ -96,6 +96,9 @@ async fn only_the_two_libraries_are_range_fetched_and_trusted_on_first_use() {
     assert!(!f.set.pinned, "an unknown version is trusted on first use");
     assert_eq!(f.bytes_downloaded, served.load(Ordering::SeqCst));
     assert!(f.bytes_downloaded < (apk_len as u64) / 10, "{} of {apk_len} bytes", f.bytes_downloaded);
+    assert_eq!(f.entries.len(), 2);
+    assert!(f.entries.iter().all(|e| e.name.starts_with(&format!("lib/{}/", Abi::host().unwrap().dir_name()))));
+    assert!(f.entries.iter().all(|e| e.sha256.len() == 64 && e.compressed_size < e.uncompressed_size));
     let dir = libs::libs_root(tmp.path()).join("9.9.9.1").join(abi.dir_name());
     for lib in libs::LIBRARIES {
         let text = std::fs::read_to_string(dir.join(lib)).unwrap();

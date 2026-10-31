@@ -100,6 +100,19 @@ pub struct Fetched {
     pub set: LibrarySet,
     /// HTTP body bytes received (0 when the libraries were already present).
     pub bytes_downloaded: u64,
+    /// Where each library sits in the APK (empty when nothing was downloaded): provenance for the pin table.
+    pub entries: Vec<ApkEntry>,
+}
+
+/// A library's zip entry in the APK.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApkEntry {
+    pub name: String,
+    pub local_header_offset: u64,
+    pub compressed_size: u64,
+    pub uncompressed_size: u64,
+    pub crc32: u32,
+    pub sha256: String,
 }
 
 /// `<data>/anisette/libs`.
@@ -322,7 +335,7 @@ pub async fn ensure_libraries(
         .ok_or_else(|| fetch_failed("the CDN reported neither a version nor an ETag for the APK"))?;
     let dir = libs_root(data_dir).join(&version).join(abi.dir_name());
     if let Ok(set) = verify_dir(&dir, &version, abi) {
-        return Ok(Fetched { set, bytes_downloaded: 0 });
+        return Ok(Fetched { set, bytes_downloaded: 0, entries: Vec::new() });
     }
 
     let mut r = Ranged { http, url: apk, bytes: 0 };
@@ -345,6 +358,7 @@ pub async fn ensure_libraries(
     let pins = pins_for(&version, abi);
     let mut hashes = std::collections::BTreeMap::new();
     let mut files = Vec::new();
+    let mut fetched_entries = Vec::new();
     for lib in LIBRARIES {
         let wanted = format!("lib/{}/{lib}", abi.dir_name());
         let e = entries
@@ -387,6 +401,14 @@ pub async fn ensure_libraries(
         {
             return Err(pin_mismatch(&version, lib));
         }
+        fetched_entries.push(ApkEntry {
+            name: wanted.clone(),
+            local_header_offset: e.local_offset,
+            compressed_size: e.compressed,
+            uncompressed_size: e.uncompressed,
+            crc32: e.crc,
+            sha256: hash.clone(),
+        });
         hashes.insert(lib.to_owned(), hash);
         files.push((lib, bytes));
     }
@@ -401,7 +423,7 @@ pub async fn ensure_libraries(
         tracing::warn!(apk_version = %version, "anisette libraries trusted on first use (not in Russet's pin table)");
     }
     let set = verify_dir(&dir, &version, abi)?;
-    Ok(Fetched { set, bytes_downloaded: r.bytes })
+    Ok(Fetched { set, bytes_downloaded: r.bytes, entries: fetched_entries })
 }
 
 /// [`ensure_libraries`] for this host's ABI from the APK under `base` (`Endpoints.anisette_libs`).
@@ -430,6 +452,9 @@ mod tests {
     #[test]
     fn the_shipped_pin_table_parses() {
         assert!(serde_json::from_str::<PinFile>(PINS).is_ok());
+        let x86 = pins_for("4.9.6.1447", Abi::X86_64).expect("the 2026-10-31 APK is pinned");
+        assert!(LIBRARIES.iter().all(|l| x86.get(*l).is_some_and(|h| h.len() == 64)));
+        assert!(pins_for("4.9.6.1447", Abi::Arm64V8a).is_none());
     }
 
     #[test]

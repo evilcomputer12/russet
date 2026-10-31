@@ -152,5 +152,6 @@ pub fn run(args: &[String]) -> i32 {
             break;
         }
     }
-    0
+    // Skip the destructors the Android libraries registered with __cxa_atexit.
+    shims::exit_now(0)
 }

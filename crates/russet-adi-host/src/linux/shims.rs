@@ -33,6 +33,13 @@ fn tracing() -> bool {
     std::env::var_os("RUSSET_ADI_TRACE").is_some_and(|v| v == "1")
 }
 
+/// Leaves the process without running the `atexit` destructors the Android libraries registered (they may call
+/// imports Russet does not provide).
+pub fn exit_now(code: c_int) -> ! {
+    // SAFETY: _exit ends the process at once; stdout is flushed after every answer.
+    unsafe { libc::_exit(code) }
+}
+
 extern "C" fn errno_shim() -> *mut c_int {
     // SAFETY: glibc's per-thread errno location.
     unsafe { libc::__errno_location() }
@@ -83,12 +90,12 @@ extern "C" fn android_log(_prio: c_int, _tag: *const c_char, _msg: *const c_char
 
 extern "C" fn android_log_assert(_cond: *const c_char, _tag: *const c_char, _fmt: *const c_char) {
     eprintln!("russet-adi-host: an ADI library asserted");
-    std::process::exit(70);
+    exit_now(70);
 }
 
 extern "C" fn assert2(_file: *const c_char, _line: c_int, _func: *const c_char, _msg: *const c_char) {
     eprintln!("russet-adi-host: an ADI library failed an assertion");
-    std::process::exit(70);
+    exit_now(70);
 }
 
 extern "C" fn sysconf_shim(name: c_int) -> libc::c_long {
@@ -149,7 +156,7 @@ extern "C" fn operator_delete(p: *mut c_void) {
 
 extern "C" fn pure_virtual() {
     eprintln!("russet-adi-host: an ADI library called a pure virtual function");
-    std::process::exit(70);
+    exit_now(70);
 }
 
 extern "C" fn set_abort_message(_msg: *const c_char) {}
@@ -289,7 +296,7 @@ pub fn resolve_import(lib: &str, name: &str, weak: bool) -> usize {
 extern "C" fn trapped(index: usize) -> ! {
     let name = TRAPS.lock().ok().and_then(|t| t.get(index).cloned()).unwrap_or_default();
     eprintln!("russet-adi-host: an ADI library called `{name}`, which Russet does not provide yet");
-    std::process::exit(70)
+    exit_now(70)
 }
 
 /// A stub that reports `name` and exits: `mov rdi, index; mov rax, trapped; jmp rax`.
@@ -344,8 +351,20 @@ pub fn load_library(path: &str) -> Result<usize, String> {
         return Ok(i + 1);
     }
     let bytes = std::fs::read(path).map_err(|e| format!("cannot read {base}: {e}"))?;
+    let traps_before = TRAPS.lock().map(|t| t.len()).unwrap_or(0);
     let mut resolve = |name: &str, weak: bool| resolve_import(&base, name, weak);
-    let image = elf::load(&base, &bytes, &mut resolve)?;
+    let mut image = elf::load(&base, &bytes, &mut resolve)?;
+    let missing = TRAPS.lock().map(|t| t.len()).unwrap_or(0) - traps_before;
+    // Initializers of a library with missing imports could only reach code that is not there (Apple's
+    // libstoreservicescore.so constructs mediaplatform work queues); the ADI entry points do not need them.
+    if missing == 0 {
+        image.run_initializers();
+    } else if image.initializers() > 0 {
+        eprintln!(
+            "russet-adi-host: {base}: {missing} imports are not provided; its {} initializers are not run",
+            image.initializers()
+        );
+    }
     let mut libs = LIBRARIES.lock().map_err(|_| "the library table is poisoned".to_owned())?;
     libs.push(image);
     Ok(libs.len())
