@@ -118,6 +118,7 @@ export function installExperience(
     }),
   );
   deps.mirror.useDestinations(destinations);
+  deps.mirror.useClient(deps.client);
 
   const pendingVirtualStep = (): string | undefined => {
     for (const id of ["vphone", "virtual-iphone"]) {
