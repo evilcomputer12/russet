@@ -537,7 +537,7 @@ pub(crate) fn parse_trusted_numbers(text: &str) -> Vec<TrustedNumber> {
                         .get("obfuscatedNumber")
                         .or_else(|| n.get("numberWithDialCode"))
                         .and_then(serde_json::Value::as_str)
-                        .map(|s| obfuscate(s))?;
+                        .map(obfuscate)?;
                     Some(TrustedNumber { id, obfuscated })
                 })
                 .collect()

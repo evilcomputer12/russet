@@ -5543,6 +5543,7 @@ dependencies = [
  "uuid",
  "wiremock",
  "zeroize",
+ "zip 9.0.1",
 ]
 
 [[package]]

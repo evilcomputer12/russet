@@ -29,7 +29,8 @@ pub enum Request {
         ptm: String,
         tk: String,
     },
-    RequestOtp {
+    #[serde(rename = "requestOtp")]
+    Otp {
         dsid: i64,
     },
     Erase {

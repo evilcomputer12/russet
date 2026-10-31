@@ -90,7 +90,7 @@ impl Host {
                             Err(e) => Response::adi(e.0),
                         }
                     }
-                    Request::RequestOtp { dsid } => match adi.request_otp(dsid) {
+                    Request::Otp { dsid } => match adi.request_otp(dsid) {
                         Ok((mid, otp)) => {
                             Response { ok: true, mid: Some(b64(&mid)), otp: Some(b64(&otp)), ..Response::default() }
                         }

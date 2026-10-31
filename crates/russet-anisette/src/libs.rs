@@ -138,7 +138,7 @@ pub fn installed(data_dir: &Path, abi: Abi) -> Option<LibrarySet> {
         .filter(|e| e.path().join(abi.dir_name()).is_dir())
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
-    versions.sort_by(|a, b| version_key(b).cmp(&version_key(a)));
+    versions.sort_by_key(|v| std::cmp::Reverse(version_key(v)));
     versions.into_iter().find_map(|v| verify_dir(&root.join(&v).join(abi.dir_name()), &v, abi).ok())
 }
 

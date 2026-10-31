@@ -28,6 +28,7 @@ use async_trait::async_trait;
 use russet_core::Result;
 
 pub mod apple_tls;
+mod doctor;
 #[cfg(any(test, feature = "fake"))]
 pub mod fake;
 mod http;
@@ -138,7 +139,7 @@ pub fn local_supported() -> bool {
 
 /// Anisette doctor checks, for russetd's doctor seam.
 pub fn checks() -> Vec<Arc<dyn russet_doctor::Check>> {
-    Vec::new()
+    vec![Arc::new(doctor::AnisetteLocal)]
 }
 
 #[cfg(test)]
