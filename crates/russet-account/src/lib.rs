@@ -148,6 +148,8 @@ impl AccountService {
         xtool_dir: Option<PathBuf>,
     ) -> Result<Self> {
         let mut store = AccountStore::load(dirs, secrets.clone())?.with_asc_base(endpoints.asc.clone());
+        // Apple ID accounts reach developerservices2 through the home's Apple ID service (W22).
+        free::AppleIds::shared(dirs, secrets.clone(), endpoints.clone());
         if let Some(d) = xtool_dir {
             store = store.with_xtool_dir(d);
         }

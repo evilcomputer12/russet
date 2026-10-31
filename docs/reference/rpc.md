@@ -393,11 +393,11 @@ Methods:
 | `account.verify` | read |  | plain | `AccountVerifyParams` | `AccountVerifyResult` |
 | `account.remove` | secrets |  | plain | `AccountRemoveParams` | `AccountRemoveResult` |
 | `account.setDefault` | secrets |  | plain | `AccountSetDefaultParams` | `AccountSetDefaultResult` |
-| `account.appleId.begin` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.appleId.requestCode` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.appleId.submitCode` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.anisette.status` | read |  | plain | `Unspecified` | `Unspecified` |
-| `account.anisette.fetchLibraries` | system | L | plain | `Unspecified` | `Unspecified` |
+| `account.appleId.begin` | secrets |  | plain | `AccountAppleIdBeginParams` | `AccountAppleIdBeginResult` |
+| `account.appleId.requestCode` | secrets |  | plain | `AccountAppleIdRequestCodeParams` | `AccountAppleIdRequestCodeResult` |
+| `account.appleId.submitCode` | secrets |  | plain | `AccountAppleIdSubmitCodeParams` | `Account` |
+| `account.anisette.status` | read |  | plain | `AccountAnisetteStatusParams` | `AccountAnisetteStatusResult` |
+| `account.anisette.fetchLibraries` | system | L | plain | `AccountAnisetteFetchLibrariesParams` | `AccountAnisetteFetchLibrariesResult` |
 
 Notifications:
 

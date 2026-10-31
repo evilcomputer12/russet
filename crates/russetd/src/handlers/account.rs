@@ -5,8 +5,13 @@
 //!
 //! Wave 1: `account.list`, `account.addAscKey`, `account.importXtool` and `account.verify`. The two imports are
 //! `secrets`-class local-file imports; the permission engine lets a non-interactive CLI run them after a plain
-//! confirmation that `--yes` pre-confirms (ARCHITECTURE §7.5 [D 85]). The other rows answer
-//! `core.notImplemented` until W12 and W22.
+//! confirmation that `--yes` pre-confirms (ARCHITECTURE §7.5 [D 85]).
+//!
+//! W22: `account.appleId.begin/requestCode/submitCode` sign in to Apple with Russet's own GrandSlam client
+//! (`russet_account::free::AppleIds`): passwords and codes go from the params into zeroized buffers and are
+//! never logged or echoed; the account comes back with its team masked and a label that masks the Apple ID.
+//! `account.anisette.status` reads local state only; `account.anisette.fetchLibraries` downloads Apple's ADI
+//! libraries by HTTP range after the client's consent screen.
 //!
 //! **No team ID on the wire** (AGENTS.md §8): the DTOs mask team IDs (`*******345`) and name identities by their
 //! certificate serial, and every W6 handler passes its error through [`redacted`], which masks each team ID the
@@ -14,6 +19,7 @@
 
 use std::sync::Arc;
 
+use russet_account::free::{AnisetteSetting, AppleIds, BeginOutcome};
 use russet_account::{Account, AccountId, AccountKind, AccountService, AccountVerification, AddAscKey, ProbeResult};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
@@ -21,7 +27,6 @@ use russet_ipc::Router;
 use russet_protocol::account as p;
 
 use super::identity::identity_dto;
-use super::not_implemented;
 use crate::DaemonCtx;
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
@@ -50,11 +55,142 @@ pub fn register(r: &mut Router<DaemonCtx>) {
         let svc = accounts_of(&cx)?;
         redacted(Some(&svc), set_default(&svc, params).await).await
     });
-    r.request::<p::AccountAppleIdBegin, _, _>(not_implemented::<p::AccountAppleIdBegin>);
-    r.request::<p::AccountAppleIdRequestCode, _, _>(not_implemented::<p::AccountAppleIdRequestCode>);
-    r.request::<p::AccountAppleIdSubmitCode, _, _>(not_implemented::<p::AccountAppleIdSubmitCode>);
-    r.request::<p::AccountAnisetteStatus, _, _>(not_implemented::<p::AccountAnisetteStatus>);
-    r.request::<p::AccountAnisetteFetchLibraries, _, _>(not_implemented::<p::AccountAnisetteFetchLibraries>);
+    r.request::<p::AccountAppleIdBegin, _, _>(|cx: DaemonCtx, _rq, params: p::AccountAppleIdBeginParams| async move {
+        let svc = accounts_of(&cx)?;
+        let ids = apple_ids(&cx, &svc)?;
+        redacted(Some(&svc), apple_id_begin(&svc, &ids, params).await).await
+    });
+    r.request::<p::AccountAppleIdRequestCode, _, _>(
+        |cx: DaemonCtx, _rq, params: p::AccountAppleIdRequestCodeParams| async move {
+            let svc = accounts_of(&cx)?;
+            let ids = apple_ids(&cx, &svc)?;
+            redacted(Some(&svc), apple_id_request_code(&ids, params).await).await
+        },
+    );
+    r.request::<p::AccountAppleIdSubmitCode, _, _>(
+        |cx: DaemonCtx, _rq, params: p::AccountAppleIdSubmitCodeParams| async move {
+            let svc = accounts_of(&cx)?;
+            let ids = apple_ids(&cx, &svc)?;
+            redacted(Some(&svc), apple_id_submit_code(&svc, &ids, params).await).await
+        },
+    );
+    r.request::<p::AccountAnisetteStatus, _, _>(|cx: DaemonCtx, _rq, _p: p::AccountAnisetteStatusParams| async move {
+        let svc = accounts_of(&cx)?;
+        let ids = apple_ids(&cx, &svc)?;
+        Ok(anisette_status(&ids).await)
+    });
+    r.request::<p::AccountAnisetteFetchLibraries, _, _>(
+        |cx: DaemonCtx, rq: russet_ipc::RequestCtx, params: p::AccountAnisetteFetchLibrariesParams| async move {
+            let svc = accounts_of(&cx)?;
+            let ids = apple_ids(&cx, &svc)?;
+            tokio::select! {
+                r = anisette_fetch_libraries(&ids, params) => r,
+                () = rq.cancel.cancelled() => Err(Error::cancelled()),
+            }
+        },
+    );
+}
+
+/// The Apple ID service of this daemon's Russet home (W22).
+pub fn apple_ids(cx: &DaemonCtx, svc: &AccountService) -> Result<Arc<AppleIds>> {
+    Ok(AppleIds::shared(&cx.dirs, cx.secrets.get()?, svc.endpoints().clone()))
+}
+
+/// `account.appleId.begin`.
+pub async fn apple_id_begin(
+    svc: &AccountService,
+    ids: &AppleIds,
+    params: p::AccountAppleIdBeginParams,
+) -> Result<p::AccountAppleIdBeginResult> {
+    let anisette = match params.anisette {
+        p::AnisetteChoice::Local(_) => AnisetteSetting::Local,
+        p::AnisetteChoice::Remote { remote } => AnisetteSetting::Remote(remote),
+    };
+    let password = russet_secrets::SecretBytes::new(params.password.into_bytes());
+    let outcome = ids.begin(svc.accounts(), &params.apple_id, password, anisette, params.label).await?;
+    Ok(match outcome {
+        BeginOutcome::Done { session_id, account } => p::AccountAppleIdBeginResult {
+            session_id,
+            step: p::AppleIdStep::Done,
+            two_factor: None,
+            account: Some(account_dto(&account)),
+        },
+        BeginOutcome::TwoFactor { session_id, info } => {
+            let mut via = Vec::new();
+            if info.trusted_device {
+                via.push(p::TwoFactorVia::TrustedDevice);
+            }
+            via.push(p::TwoFactorVia::Sms);
+            p::AccountAppleIdBeginResult {
+                session_id,
+                step: p::AppleIdStep::TwoFactor,
+                two_factor: Some(p::TwoFactorInfo {
+                    via,
+                    code_sent_to: info.pushed.then_some(p::TwoFactorVia::TrustedDevice),
+                    phone_numbers: info
+                        .phone_numbers
+                        .into_iter()
+                        .map(|n| p::TrustedPhone { id: n.id, number: n.obfuscated })
+                        .collect(),
+                    code_length: 6,
+                }),
+                account: None,
+            }
+        }
+    })
+}
+
+/// `account.appleId.requestCode`.
+pub async fn apple_id_request_code(
+    ids: &AppleIds,
+    params: p::AccountAppleIdRequestCodeParams,
+) -> Result<p::AccountAppleIdRequestCodeResult> {
+    let via = match (params.via, params.phone_id) {
+        (p::TwoFactorVia::TrustedDevice, _) => russet_gsa::TwoFactorVia::TrustedDevice,
+        (p::TwoFactorVia::Sms, Some(phone_id)) => russet_gsa::TwoFactorVia::Sms { phone_id },
+        (p::TwoFactorVia::Sms, None) => {
+            return Err(Error::new(codes::core::INVALID_ARGUMENT, "an SMS code needs `phoneId`")
+                .with_hint("Pass one of the `twoFactor.phoneNumbers[].id` of `account.appleId.begin`."));
+        }
+    };
+    ids.request_code(&params.session_id, via).await?;
+    Ok(p::AccountAppleIdRequestCodeResult {})
+}
+
+/// `account.appleId.submitCode`.
+pub async fn apple_id_submit_code(
+    svc: &AccountService,
+    ids: &AppleIds,
+    params: p::AccountAppleIdSubmitCodeParams,
+) -> Result<p::Account> {
+    let account = ids.submit_code(svc.accounts(), &params.session_id, &params.code).await?;
+    Ok(account_dto(&account))
+}
+
+/// `account.anisette.status`: the local provider (remote servers are set per account).
+pub async fn anisette_status(ids: &AppleIds) -> p::AccountAnisetteStatusResult {
+    let s = ids.anisette_status().await;
+    p::AccountAnisetteStatusResult {
+        kind: p::AnisetteKind::Local,
+        libraries_present: s.libraries_present,
+        apk_version: s.apk_version,
+        provisioned: s.provisioned,
+        local_supported: s.local_supported,
+        pinned: s.pinned,
+    }
+}
+
+/// `account.anisette.fetchLibraries`.
+pub async fn anisette_fetch_libraries(
+    ids: &AppleIds,
+    params: p::AccountAnisetteFetchLibrariesParams,
+) -> Result<p::AccountAnisetteFetchLibrariesResult> {
+    let f = ids.fetch_libraries(params.consent).await?;
+    Ok(p::AccountAnisetteFetchLibrariesResult {
+        apk_version: f.set.apk_version,
+        bytes_downloaded: f.bytes_downloaded,
+        pinned: f.set.pinned,
+    })
 }
 
 /// The account service of the daemon context.

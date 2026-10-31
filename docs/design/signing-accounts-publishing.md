@@ -2422,3 +2422,41 @@ binding.
 - **Still open for later cards:** `identity.importP12`/`exportP12` (need the interactive password reverse-prompt),
   `portal.devices.register` (its standalone `ProvisionPlan` return overlaps apply), the `account.event`
   notification emitter, and certificate creation (the CSR flow).
+
+## 25. Wave-3 implementation notes (W22)
+
+Where the W22 code (SA-18, SA-19, SA-20/21 subsets; native Apple ID sign-in, paid personal teams first) differs
+from §7. ARCHITECTURE.md stays binding; `docs/windows/W22-STATUS.md` has the RPC shapes and the live-check steps.
+
+- **Errors** (§7.3): `russet-gsa` returns `russet_core::Result` with the `gsa.*`/`anisette.*` codes rather than a
+  `GsaError` enum; Apple's `Status.ec` maps to `gsa.badCredentials` (-22406), `gsa.locked` (-20209, -20283,
+  -22421, -20751), `gsa.identityRejected` (-36607, -45061, -45054, HTTP 429/503) and `gsa.protocol` otherwise,
+  with e-mail-like words masked in Apple's message.
+- **SRP** (§7.2): `k`, `u` and `M1` pad `g`, `A` and `B` to the group length (RFC 5054); `K = H(S)` hashes `S`
+  unpadded, as the srp-crate clients (isideload, apple-private-apis) do; the client redraws `a` until `A` is
+  full-length. `M2` is verified; `np` is read but not verified (no known client verifies it).
+- **Sign-in flow** (§13.1): `account.appleId.begin` pushes a trusted-device code at once when Apple offers it, and
+  lists the trusted numbers for SMS; pending sessions live 10 minutes in the daemon (`free::AppleIds`) and end
+  after 5 wrong codes. After the code, Russet logs in again (as xtool does), takes the Xcode token, picks the paid
+  team from `listTeams` (else the first), seals `{adsid, dsid, GsIdmsToken, sk, c, Xcode token}` as
+  `secret:apple-id-session/<DSID>` (JSON, not CBOR; never the password) and writes the `apple-id` account. The DS2
+  portal refreshes the Xcode token from the sealed session when it is within 5 minutes of expiry.
+- **DS2** (§7.4): `Ds2Auth` lives in `russet-asc/src/ds2.rs` behind a `Ds2Credentials` trait (asc sits below
+  gsa); the QH65B2 actions live in `russet-gsa/src/ds2.rs`. Apple ID accounts get an `AscPortal` over `Ds2Auth`
+  (the `bundleIdCapabilities` DS2 relationship is not applied yet).
+- **Anisette** (§7.5): `AnisetteProvider::client_info` returns the GSA profile's identity for local ADI (the
+  profile is the single source); the Apple-Root-only HTTP client lives in `russet-anisette::apple_tls` because
+  provisioning (`midStart/midFinish`) also talks to `gsa.apple.com`. Unknown APK versions are trusted on first
+  use with a `tofu.json` beside the libraries (the shipped `anisette-pins.json` pins APK 4.9.6.1447/x86_64, recorded
+  by W22 on 2026-10-31); `consent: true` covers that prompt and the result says `pinned: false`.
+- **`russet-adi-host`** (§7.5): x86_64 only so far; DT_RELA/JMPREL/RELR relocations; imports resolve to Rust shims,
+  the helper's own `dlopen`/`dlsym`, then the host glibc (same SysV ABI, `struct stat`, errno and `open` flags);
+  unknown imports get trap stubs that name them and exit 70. A library's `DT_INIT`/`DT_INIT_ARRAY` run only when
+  all its imports resolved: Apple's `libstoreservicescore.so` (APK 4.9.6.1447) imports 360 symbols of
+  `libc++_shared`, CoreFoundation and `libmediaplatform`, and one of its 64 initializers builds a mediaplatform work
+  queue; the ADI entry points work without them. The helper leaves with `_exit`, so destructors registered through
+  `__cxa_atexit` never run. The seccomp filter is a deny-list (network, exec,
+  ptrace, namespaces, mounts, BPF, modules, keyrings, io_uring), Landlock is applied where the kernel has it (WSL
+  kernels do not).
+- **Free-team policy** (§7.6): `free::policy` has the ledger (`<data>/accounts/<team>/ledger.json`), the bundle map
+  and the refresh timing; the provisioner does not call them yet, and there is no remember-password option.
