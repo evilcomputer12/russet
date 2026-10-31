@@ -243,3 +243,28 @@ async fn a_bare_503_from_grandslam_is_retried_once() {
     assert_eq!(e.code(), codes::gsa::IDENTITY_REJECTED);
     assert!(e.message().contains("HTTP 503 at init"), "{}", e.message());
 }
+
+#[tokio::test]
+async fn developer_services_answers_are_read_whatever_their_encoding() {
+    use russet_gsa::fake::Ds2Body;
+    for shape in [Ds2Body::Xml, Ds2Body::Binary, Ds2Body::Gzip, Ds2Body::BomXml, Ds2Body::Json, Ds2Body::Html] {
+        let cfg = GsaFakeConfig { two_factor: None, ds2_body: shape, ..Default::default() };
+        let fake = GsaFake::start(cfg.clone()).await;
+        let gsa = client(&fake);
+        let LoginState::Authenticated(session) = gsa.login(&cfg.apple_id, cfg.password.as_bytes()).await.unwrap()
+        else {
+            panic!("signed in expected");
+        };
+        let token = gsa.xcode_token(&session).await.unwrap();
+        let qh = Qh65b2::new(fake.ds2_url(), Arc::new(Ds2Session::new(gsa.clone(), token))).unwrap();
+        let teams = qh.list_teams().await;
+        if shape == Ds2Body::Html {
+            let e = teams.unwrap_err();
+            assert_eq!(e.code(), codes::gsa::PROTOCOL);
+            assert!(e.message().contains("listTeams") && e.message().contains("html"), "{}", e.message());
+        } else {
+            let teams = teams.unwrap_or_else(|e| panic!("{shape:?}: {}", e.message()));
+            assert_eq!((teams.len(), teams[0].tier()), (1, TeamTier::Paid), "{shape:?}");
+        }
+    }
+}
