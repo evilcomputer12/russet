@@ -15,8 +15,8 @@ export interface WebviewPageOptions {
   /** The page folder under dist/webview (e.g. "console", "mirror"). */
   page: string;
   title: string;
-  /** Allow ws://127.0.0.1:<port> in connect-src (mirror only). */
-  mirrorPort?: number;
+  /** Allow ws://127.0.0.1:<port> in connect-src (mirror only); "any" while the port is not known. */
+  mirrorPort?: number | "any";
 }
 
 /** Build the HTML document for a webview page with a strict per-page CSP. */
@@ -29,7 +29,8 @@ export function renderPage(
   const scriptUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, "dist", "webview", opts.page, "index.js"),
   );
-  const connectSrc = opts.mirrorPort ? `ws://127.0.0.1:${opts.mirrorPort}` : "'none'";
+  const connectSrc =
+    opts.mirrorPort === "any" ? "ws://127.0.0.1:*" : opts.mirrorPort ? `ws://127.0.0.1:${opts.mirrorPort}` : "'none'";
   const csp = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data: blob:`,

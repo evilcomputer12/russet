@@ -3,7 +3,7 @@
 
 //! `screen.*`: screenshots, the live mirror and UI elements. Owner: W10.
 //!
-//! `screen.screenshot` has its DTOs. The other names of ARCHITECTURE §8.2 are still F0 stubs with placeholder DTOs
+//! `screen.screenshot` and `screen.mirror.*` have their DTOs. The other names of ARCHITECTURE §8.2 are still F0 stubs with placeholder DTOs
 //! ([`Unspecified`]): replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
 //! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
 
@@ -84,10 +84,52 @@ crate::rpc_method!(
     Permission::Read
 );
 
+/// A mirror codec, best first: HEVC from the device's display service, AVC, MJPEG, or screenshot polling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum MirrorCodec {
+    Hevc,
+    Avc,
+    Jpeg,
+    Poll,
+}
+
 /// Params of `screen.mirror.start`: `{udid?, codecs: (hevc|avc|jpeg|poll)[], maxFps?, input?} → {streamId, url, token, codec, width, height} (class: read, input → device)`.
-pub type ScreenMirrorStartParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenMirrorStartParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// The codecs the viewer decodes, best first. The daemon streams HEVC; a viewer without it polls
+    /// `screen.screenshot` instead.
+    #[serde(default)]
+    pub codecs: Vec<MirrorCodec>,
+    /// A frame-rate cap (not applied yet: the device paces the stream).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_fps: Option<u32>,
+    /// Also accept touch, button, key and text messages on the WebSocket (class `device`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub input: Option<bool>,
+}
+
 /// Result of `screen.mirror.start`.
-pub type ScreenMirrorStartResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenMirrorStartResult {
+    /// `str_…`.
+    pub stream_id: String,
+    /// `ws://127.0.0.1:<port>/mirror/v1?stream=<streamId>` (ARCHITECTURE §10.1).
+    pub url: String,
+    /// The single-use token for the WebSocket's first message.
+    pub token: String,
+    pub codec: MirrorCodec,
+    /// The screen's size in pixels.
+    pub width: u32,
+    pub height: u32,
+}
 crate::rpc_method!(
     /// `screen.mirror.start` (class `read`, `input: true` → `device`; resolved per call, ceiling `device`).
     /// W10 (Wave 2).
@@ -98,20 +140,23 @@ crate::rpc_method!(
 );
 
 /// Per-call class of `screen.mirror.start` [D 66]: `read`, or `device` with `input: true`.
-///
-/// F0 stub: fails closed at the ceiling (`device`) until the owner reads the params.
 pub fn screen_mirror_start_permission(
-    _p: &ScreenMirrorStartParams,
+    p: &ScreenMirrorStartParams,
     _c: &ConnInfo,
     _o: &dyn Ownership,
 ) -> russet_core::Result<Permission> {
-    Ok(Permission::Device)
+    Ok(if p.input == Some(true) { Permission::Device } else { Permission::Read })
 }
 
 /// Params of `screen.mirror.stop`: `{streamId} → {}`.
-pub type ScreenMirrorStopParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenMirrorStopParams {
+    pub stream_id: String,
+}
 /// Result of `screen.mirror.stop`.
-pub type ScreenMirrorStopResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct ScreenMirrorStopResult {}
 crate::rpc_method!(
     /// `screen.mirror.stop` (class `read`). W10 (Wave 2).
     ScreenMirrorStop,

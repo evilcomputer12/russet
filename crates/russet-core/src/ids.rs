@@ -159,6 +159,11 @@ prefixed_id!(
     ApprovalId,
     "apr_"
 );
+prefixed_id!(
+    /// A mirror stream (`str_…`, ARCHITECTURE §10.1).
+    StreamId,
+    "str_"
+);
 
 #[cfg(test)]
 mod tests {

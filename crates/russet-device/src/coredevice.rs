@@ -32,6 +32,9 @@ pub mod service {
     pub const OPEN_STDIO_SOCKET: &str = "com.apple.coredevice.openstdiosocket";
     pub const DT_SERVICE_HUB: &str = "com.apple.instruments.dtservicehub";
     pub const SCREEN_CAPTURE: &str = "com.apple.coredevice.screencaptureservice";
+    pub const DISPLAY: &str = "com.apple.coredevice.displayservice";
+    pub const HID_UNIVERSAL: &str = "com.apple.coredevice.hid.universalhidservice";
+    pub const HID_INDIGO: &str = "com.apple.coredevice.hid.indigo";
     pub const CRYPTEXD: &str = "com.apple.security.cryptexd.remote";
     pub const DEBUG_PROXY: &str = "com.apple.internal.dt.remote.debugproxy";
 }

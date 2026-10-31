@@ -504,14 +504,16 @@ impl DeviceHandle {
         crate::screen::screenshot(self).await
     }
 
+    /// A display session: the screen as HEVC access units and, with `o.input`, HID input (device.md §6.8.2).
     pub async fn mirror(&self, o: MirrorOptions) -> Result<MirrorHandle> {
-        let _ = o;
-        Err(wave2("screen.mirror"))
+        crate::screen::mirror(self, o).await
     }
 
+    /// One input event outside a mirror. The device accepts HID input only while a display session authenticates
+    /// it, so input goes through [`MirrorHandle::input`] for now.
     pub async fn input(&self, e: InputEvent) -> Result<()> {
         let _ = e;
-        Err(wave2("input"))
+        Err(wave2("input outside a mirror"))
     }
 
     pub async fn crash_pull(&self, q: CrashQuery, dest: &Path) -> Result<Vec<IpsReport>> {

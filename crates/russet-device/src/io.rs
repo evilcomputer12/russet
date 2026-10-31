@@ -57,6 +57,13 @@ pub trait ServiceConnector: Send + Sync + 'static {
         Err(device_error(codes::device::UNSUPPORTED, format!("this device backend cannot reach tunnel port {port}")))
     }
 
+    /// A UDP socket inside the device's tunnel, for a CoreDevice media stream (the display session). Provided,
+    /// like [`Self::tunnel_port`].
+    async fn tunnel_udp(&self, udid: &Udid) -> Result<crate::tunnel::TunnelUdp> {
+        let _ = udid;
+        Err(device_error(codes::device::UNSUPPORTED, "this device backend has no tunnel for a media stream"))
+    }
+
     /// A classic usbmux `Connect` to a device port (`ForwardTarget::UsbmuxPort`, iproxy-style). Provided, like
     /// [`Self::tunnel_port`].
     async fn usbmux_port(&self, udid: &Udid, port: u16) -> Result<Box<dyn idevice::ReadWrite>> {
