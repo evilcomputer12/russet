@@ -262,7 +262,8 @@ async fn remote_v3_provisions_once_through_its_websocket_and_serves_headers() {
     let gsa_url = url::Url::parse(&format!("{}/", gsa.uri())).unwrap();
     let remote = RemoteV3::new(url.clone(), secrets.clone(), reqwest::Client::new(), gsa_url, fallback).unwrap();
     assert_eq!(remote.kind(), AnisetteKind::Remote { url: url.clone() });
-    assert!(remote.client_info().await.unwrap().starts_with("<RemoteFake>"));
+    let id = remote.identity().await.unwrap();
+    assert!(id.client_info.starts_with("<RemoteFake>") && id.user_agent == "akd/1.0");
 
     let h = remote.headers().await.unwrap();
     assert_eq!((h.md.as_str(), h.md_m.as_str(), h.md_rinfo.as_str()), ("b3Rw", "bWlk", "999"));
@@ -286,4 +287,62 @@ async fn remote_v3_provisions_once_through_its_websocket_and_serves_headers() {
         .is_err(),
         "plain http to a non-loopback server is refused"
     );
+}
+
+#[cfg(feature = "fake")]
+#[tokio::test]
+async fn local_adi_provisions_again_when_the_client_identity_changes() {
+    use russet_anisette::fake::FakeAdi;
+    use russet_anisette::{LibrarySet, LocalAdi};
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let gsa = gsa().await;
+    let gsa_url = url::Url::parse(&format!("{}/", gsa.uri())).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let libs = LibrarySet { apk_version: "t".into(), abi: Abi::X86_64, dir: tmp.path().join("libs"), pinned: false };
+    let adi = tmp.path().join("adi");
+    let secrets: Arc<dyn russet_secrets::SecretStore> = Arc::new(russet_secrets::memory::MemoryStore::new());
+    let windows = ClientIdentity {
+        client_info: "<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1 (com.apple.akd/1.0)>".into(),
+        user_agent: "akd/1.0 CFNetwork/808.1.4".into(),
+    };
+    let mac = ClientIdentity {
+        client_info: "<MacBookPro18,3> <macOS;27.0;26A5378j> <com.apple.AuthKit/1 (com.apple.akd/1.0)>".into(),
+        user_agent: "akd/1.0 CFNetwork/808.1.4".into(),
+    };
+    // A new provider (a new helper process) per identity, as after a Russet update.
+    let provider = |id: &ClientIdentity| {
+        LocalAdi::new(
+            libs.clone(),
+            Arc::new(FakeAdi::new()),
+            secrets.clone(),
+            reqwest::Client::new(),
+            gsa_url.clone(),
+            id.clone(),
+            adi.clone(),
+        )
+    };
+    let finishes = || async {
+        gsa.received_requests()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| r.url.path().ends_with("finishMachineProvisioning"))
+            .map(|r| r.headers.get("x-mme-client-info").and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    let old = provider(&mac);
+    old.headers().await.unwrap();
+    old.headers().await.unwrap();
+    assert_eq!(finishes().await, std::slice::from_ref(&mac.client_info), "provisioned once under the old identity");
+    provider(&mac).headers().await.unwrap();
+    assert_eq!(finishes().await.len(), 1, "the same identity reuses the provisioning");
+
+    let new = provider(&windows);
+    let h = new.headers().await.unwrap();
+    assert_eq!(finishes().await, [mac.client_info.clone(), windows.client_info.clone()], "provisioned again");
+    assert_eq!(new.identity().await.unwrap(), windows);
+    assert!(!h.md.is_empty());
+    provider(&windows).headers().await.unwrap();
+    assert_eq!(finishes().await.len(), 2);
 }

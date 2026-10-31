@@ -39,17 +39,23 @@ fn default_model() -> String {
 }
 
 impl ClientProfile {
-    /// The identity Russet ships (version 3, from xtool 450223eb0 of 2026-09-10).
+    /// The identity Russet ships for its local (Android) ADI: version 4. Since 2026-10-12 GrandSlam refuses a
+    /// macOS client info with Android ADI data (`-80045` at init) and, since about 2026-10-19, Android-identifying
+    /// clients at two-factor (`-80046`); Android-ADI clients present this Windows identity with the akd user agent
+    /// (anisette-v3-server #61; xtool #337, #406).
     pub fn builtin() -> Self {
         Self {
-            version: 3,
-            client_info: "<{model}> <macOS;27.0;26A5378j> <com.apple.AuthKit/1 (com.apple.akd/1.0)>".into(),
-            user_agent: "AuthKit/1 (Macintosh; OS X 27.0) (com.apple.dt.Xcode/26.5)".into(),
+            version: 4,
+            client_info: "<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1 (com.apple.akd/1.0)>".into(),
+            user_agent: "akd/1.0 CFNetwork/808.1.4".into(),
             xcode_version: "26.5 (17F42)".into(),
             app_info: "com.apple.gs.xcode.auth".into(),
             anisette_client_info_override: None,
             model: default_model(),
-            source: Some("xtool 450223eb0 (2026-09-10); isideload uses X-Xcode-Version 27.0 (27A5218g)".into()),
+            source: Some(
+                "2026-10-31: Windows identity for Android ADI (GrandSlam -80045 with macOS since 2026-10-12, anisette-v3-server #61, xtool #337/#406); X-Xcode-Version as xtool"
+                    .into(),
+            ),
         }
     }
 
@@ -103,10 +109,12 @@ mod tests {
         std::fs::write(ClientProfile::path(tmp.path()), serde_json::to_vec(&old).expect("json")).expect("write");
         assert_eq!(ClientProfile::load(tmp.path()).expect("loads").user_agent, ClientProfile::builtin().user_agent);
         let mut new = ClientProfile::builtin();
-        new.version = 4;
+        new.version = 5;
         new.user_agent = "new".into();
         std::fs::write(ClientProfile::path(tmp.path()), serde_json::to_vec(&new).expect("json")).expect("write");
         assert_eq!(ClientProfile::load(tmp.path()).expect("loads").user_agent, "new");
-        assert!(ClientProfile::builtin().client_info().starts_with("<MacBookPro18,3> <macOS;27.0;"));
+        let id = ClientProfile::builtin().identity();
+        assert_eq!(russet_anisette::platform_of(&id.client_info), "windows");
+        assert!(id.user_agent.starts_with("akd/1.0 CFNetwork/"));
     }
 }

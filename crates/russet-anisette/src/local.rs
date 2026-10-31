@@ -342,6 +342,23 @@ impl LocalAdi {
             Some(s) => s,
             None => AnisetteState::load_or_create(&*self.secrets, STATE_NAME).await?,
         };
+        // A provisioning made under another client identity is dropped and redone (GrandSlam answers hsc 434 or
+        // -80045 for a machine ID presented under a different platform).
+        let stale = state.adi_pb.is_some() && state.client_info.as_deref() != Some(self.id.client_info.as_str());
+        if stale {
+            tracing::info!(
+                platform = crate::platform_of(&self.id.client_info),
+                "anisette: the client identity changed since provisioning; provisioning again"
+            );
+            state.adi_pb = None;
+            state.rinfo = None;
+            state.client_info = None;
+            state.save(&*self.secrets, STATE_NAME).await?;
+            let _ = std::fs::remove_file(self.adi_dir.join("adi.pb"));
+            if inner.loaded {
+                let _ = self.backend.erase(ADI_DSID).await;
+            }
+        }
         if !inner.loaded {
             crate::http::create_private_dir(&self.adi_dir)?;
             let pb = self.adi_dir.join("adi.pb");
@@ -377,8 +394,12 @@ impl LocalAdi {
             state.set_adi_pb(&pb);
         }
         state.rinfo = rinfo.or(state.rinfo.take());
+        state.client_info = Some(self.id.client_info.clone());
         state.save(&*self.secrets, STATE_NAME).await?;
-        tracing::info!("anisette: this machine is provisioned for local ADI");
+        tracing::info!(
+            platform = crate::platform_of(&self.id.client_info),
+            "anisette: this machine is provisioned for local ADI"
+        );
         Ok(())
     }
 }
@@ -417,8 +438,8 @@ impl AnisetteProvider for LocalAdi {
         })
     }
 
-    async fn client_info(&self) -> Result<String> {
-        Ok(self.id.client_info.clone())
+    async fn identity(&self) -> Result<ClientIdentity> {
+        Ok(self.id.clone())
     }
 
     async fn reset(&self) -> Result<()> {
@@ -430,6 +451,7 @@ impl AnisetteProvider for LocalAdi {
         let mut state = AnisetteState::load_or_create(&*self.secrets, STATE_NAME).await?;
         state.adi_pb = None;
         state.rinfo = None;
+        state.client_info = None;
         state.save(&*self.secrets, STATE_NAME).await?;
         inner.state = None;
         inner.loaded = false;

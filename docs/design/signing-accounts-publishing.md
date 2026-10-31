@@ -2458,5 +2458,11 @@ from §7. ARCHITECTURE.md stays binding; `docs/windows/W22-STATUS.md` has the RP
   `__cxa_atexit` never run. The seccomp filter is a deny-list (network, exec,
   ptrace, namespaces, mounts, BPF, modules, keyrings, io_uring), Landlock is applied where the kernel has it (WSL
   kernels do not).
+- **Client identity** (§7.2, profile version 4): GrandSlam refuses (`-80045` at `init`, since 2026-10-12) a
+  client info whose platform differs from the anisette's; Russet's local ADI is Apple's Android CoreADI, so the
+  built-in profile presents `<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1 (com.apple.akd/1.0)>` with the akd
+  user agent `akd/1.0 CFNetwork/808.1.4` (Android identities are refused at two-factor, `-80046`). Every GrandSlam
+  request takes the provider's identity (`AnisetteProvider::identity`, a remote server's own), `cpd` carries
+  `X-MMe-Client-Info`, and local ADI re-provisions when the identity it provisioned under changes.
 - **Free-team policy** (§7.6): `free::policy` has the ledger (`<data>/accounts/<team>/ledger.json`), the bundle map
   and the refresh timing; the provisioner does not call them yet, and there is no remember-password option.

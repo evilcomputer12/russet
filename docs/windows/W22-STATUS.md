@@ -91,6 +91,39 @@ helper's `dlopen`; all of CoreADI's imports resolved), `isProvisioned {-2}` → 
 initializers constructs a `mediaplatform` work queue (a missing import); the loader now runs a library's initializers
 only when all its imports resolved, and the helper leaves with `_exit` so library destructors never run.
 
+## First live sign-in (owner, 2026-10-31): `-80045`, and the fix
+
+The owner's first attempt (integration build `0a45065`, local anisette) fetched the libraries and provisioned the
+machine with Apple, then GrandSlam refused the login with `ec -80045`, "This action cannot be completed at this
+time." Cause: since 2026-10-12 GrandSlam refuses an SRP `init` whose `X-Mme-Client-Info` claims a platform other
+than the one the anisette data comes from. Russet's profile (version 3, from xtool 450223eb0) claimed macOS while
+its local ADI is Apple's *Android* CoreADI. xtool hit the same error and fixed it the same day by presenting an
+Android identity (xtool #337); Apple then refused Android-identifying clients at two-factor (`-80046`, about
+2026-10-19), and Android-ADI clients have since presented a Windows identity (anisette-v3-server #61 and its forks,
+2026-10-16 to 10-30). xtool itself now uses a remote macOS anisette server instead (#380).
+
+Fix on this branch:
+
+- `gsa-profile.json` version 4: `X-Mme-Client-Info` `<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1
+  (com.apple.akd/1.0)>`, `User-Agent` `akd/1.0 CFNetwork/808.1.4` (a user copy older than version 4 loses).
+- Every GrandSlam request (lookup, provisioning, `init`/`complete`/`apptokens`, two-factor) presents the anisette
+  provider's identity, user agent included (a remote server's own identity for `RemoteV3`, xtool #406); `cpd`
+  repeats `X-MMe-Client-Info` as working clients do; two-factor requests use the akd user agent instead of `Xcode`.
+- Local ADI records the identity it provisioned under and provisions again when it changes: the owner's machine,
+  provisioned under the macOS identity, re-provisions once on the next attempt.
+- `-80045`/`-80046` map to `gsa.identityRejected` naming the stage; a bare HTTP 503 (back-to-back logins) is
+  retried once after 8 s.
+- `GsaFake` now refuses a macOS identity or a `cpd`/header mismatch with `-80045` and a non-akd user agent with a
+  bare 503; the suites pin the request shape.
+
+Diagnosis for the retry: start the engine with `RUSSET_LOG=info,russet_gsa=debug,hyper=warn` (the daemon reads
+`RUSSET_LOG`, not `RUST_LOG`; logs go to `state/logs/russetd.<date>.log`). Each GrandSlam call
+logs `gsa: request` (stage, claimed platform, header names, `cpd` keys) and `gsa: response` (stage, HTTP status,
+`hsc`, `ec`, `em`, `au`); never values, the Apple ID, tokens or identifiers (canary-tested). If Windows is refused
+too, the fallback is `anisette: {"remote": "<macOS anisette-v3 server>"}` (xtool's current default is
+`https://mac-ani.jkcoxson.com`), whose operator then sees this machine's ADI identity; Russet configures none by
+default.
+
 ## What still needs the owner's live sign-in
 
 Nothing has talked to Apple's sign-in services. These are interoperability facts taken from xtool, isideload,

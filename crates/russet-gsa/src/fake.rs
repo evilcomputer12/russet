@@ -5,6 +5,10 @@
 //! It runs the server side of SRP-6a with a synthetic account, encrypts `spd` and app tokens like Apple does, plays
 //! both two-factor flows, provisions anisette for `FakeAdi`, and answers `listTeams` and a few `v1` reads. All of
 //! its data is synthetic.
+//!
+//! It enforces what GrandSlam enforces since 2026-10-12 for Android ADI anisette (the kind every Russet fake
+//! stands for): `init` with a macOS `X-Mme-Client-Info`, or with a `cpd` client info that differs from the header,
+//! answers `ec -80045`; a non-akd `User-Agent` gets a bare HTTP 503.
 
 use std::sync::{Arc, Mutex};
 
@@ -35,6 +39,8 @@ pub struct GsaFakeConfig {
     pub paid: bool,
     /// Lifetime of the Xcode tokens it issues, in seconds.
     pub token_seconds: i64,
+    /// How many `init` requests to answer with a bare HTTP 503 first (GrandSlam's answer to back-to-back logins).
+    pub busy_inits: u32,
 }
 
 impl Default for GsaFakeConfig {
@@ -51,6 +57,7 @@ impl Default for GsaFakeConfig {
             team_name: "Fake Personal Team".into(),
             paid: true,
             token_seconds: 3600,
+            busy_inits: 0,
         }
     }
 }
@@ -67,6 +74,10 @@ pub struct FakeStats {
     pub provisionings: u32,
     pub team_lists: u32,
     pub v1_requests: u32,
+    /// `init` requests refused for their client identity (`-80045`).
+    pub identity_rejections: u32,
+    /// `gsService` requests answered with a bare 503.
+    pub busy_answers: u32,
 }
 
 struct Handshake {
@@ -147,15 +158,43 @@ impl State {
     fn gs_service(&mut self, req: &Request) -> ResponseTemplate {
         let r = request_dict(req);
         match r.get("o").and_then(plist::Value::as_string).unwrap_or_default() {
-            "init" => self.init(&r),
+            "init" => self.init(&r, req),
             "complete" => self.complete(&r),
             "apptokens" => self.apptokens(&r),
             _ => ResponseTemplate::new(400),
         }
     }
 
-    fn init(&mut self, r: &plist::Dictionary) -> ResponseTemplate {
+    fn init(&mut self, r: &plist::Dictionary, req: &Request) -> ResponseTemplate {
         self.stats.inits += 1;
+        if self.stats.busy_answers < self.cfg.busy_inits {
+            self.stats.busy_answers += 1;
+            return ResponseTemplate::new(503).set_body_string("<html>Service Temporarily Unavailable</html>");
+        }
+        let header = |k: &str| req.headers.get(k).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+        if !header("user-agent").starts_with("akd/") {
+            self.stats.busy_answers += 1;
+            return ResponseTemplate::new(503).set_body_string("<html>Service Temporarily Unavailable</html>");
+        }
+        let client_info = header("x-mme-client-info");
+        let cpd_client_info = r
+            .get("cpd")
+            .and_then(plist::Value::as_dictionary)
+            .and_then(|c| c.get("X-MMe-Client-Info"))
+            .and_then(plist::Value::as_string)
+            .unwrap_or_default();
+        let mac = russet_anisette::platform_of(&client_info) == "macos";
+        if mac || client_info.is_empty() || cpd_client_info != client_info {
+            self.stats.identity_rejections += 1;
+            return gs_response(vec![(
+                "Status",
+                dict(vec![
+                    ("hsc", 500.into()),
+                    ("ec", (-80045).into()),
+                    ("em", "This action cannot be completed at this time.".into()),
+                ]),
+            )]);
+        }
         let user = r.get("u").and_then(plist::Value::as_string).unwrap_or_default().to_owned();
         let a_pub = r.get("A2k").and_then(plist::Value::as_data).map(<[u8]>::to_vec).unwrap_or_default();
         let has_cpd =

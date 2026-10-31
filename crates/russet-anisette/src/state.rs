@@ -29,6 +29,10 @@ pub struct AnisetteState {
     /// `X-Apple-I-MD-RINFO` from provisioning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rinfo: Option<String>,
+    /// The `X-Mme-Client-Info` the machine was provisioned with: a provisioning made under another identity is
+    /// redone, as GrandSlam refuses a machine ID presented under a different platform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_info: Option<String>,
 }
 
 fn one() -> u32 {
@@ -44,7 +48,7 @@ impl std::fmt::Debug for AnisetteState {
 impl AnisetteState {
     /// A new identity with a random local user UUID.
     pub fn generate() -> Self {
-        Self { v: 1, uuid: uuid::Uuid::new_v4().hyphenated().to_string(), adi_pb: None, rinfo: None }
+        Self { v: 1, uuid: uuid::Uuid::new_v4().hyphenated().to_string(), adi_pb: None, rinfo: None, client_info: None }
     }
 
     /// `X-Apple-I-MD-LU`: `hex_upper(SHA256(uuid))`.
@@ -122,7 +126,13 @@ mod tests {
 
     #[test]
     fn identity_derivations_follow_the_known_clients() {
-        let s = AnisetteState { v: 1, uuid: "0a1b2c3d-4e5f-4061-8273-94a5b6c7d8e9".into(), adi_pb: None, rinfo: None };
+        let s = AnisetteState {
+            v: 1,
+            uuid: "0a1b2c3d-4e5f-4061-8273-94a5b6c7d8e9".into(),
+            adi_pb: None,
+            rinfo: None,
+            client_info: None,
+        };
         assert_eq!(s.android_id(), "0a1b2c3d4e5f4061");
         assert_eq!(s.device_id(), "0A1B2C3D-4E5F-4061-8273-94A5B6C7D8E9");
         assert_eq!(s.md_lu().len(), 64);

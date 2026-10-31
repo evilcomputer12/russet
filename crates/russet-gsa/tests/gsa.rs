@@ -151,3 +151,95 @@ async fn a_stale_token_is_refused_by_developer_services() {
     let e = qh.list_teams().await.unwrap_err();
     assert_eq!(e.code(), codes::gsa::SESSION_EXPIRED);
 }
+
+#[tokio::test]
+async fn the_request_shape_matches_what_grandslam_accepts() {
+    let cfg = GsaFakeConfig::default();
+    let fake = GsaFake::start(cfg.clone()).await;
+    let gsa = client(&fake);
+    let LoginState::NeedsTwoFactor(p) = gsa.login(&cfg.apple_id, cfg.password.as_bytes()).await.unwrap() else {
+        panic!("two-factor expected");
+    };
+    gsa.request_code(&p, TwoFactorVia::TrustedDevice).await.unwrap();
+    let windows = "<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
+    let received = fake.received().await;
+    let header =
+        |r: &wiremock::Request, k: &str| r.headers.get(k).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+    let gs: Vec<_> =
+        received.iter().filter(|r| r.method.as_str() == "POST" && r.url.path() == "/grandslam/GsService2").collect();
+    assert_eq!(gs.len(), 2, "init and complete");
+    for (r, op) in gs.iter().zip(["init", "complete"]) {
+        assert_eq!(header(r, "user-agent"), "akd/1.0 CFNetwork/808.1.4");
+        assert_eq!(header(r, "x-mme-client-info"), windows);
+        assert_eq!(header(r, "content-type"), "text/x-xml-plist");
+        let v: plist::Value = plist::from_bytes(&r.body).unwrap();
+        let root = v.as_dictionary().unwrap();
+        assert_eq!(root["Header"].as_dictionary().unwrap()["Version"].as_string(), Some("1.0.1"));
+        let req = root["Request"].as_dictionary().unwrap();
+        assert_eq!(req["o"].as_string(), Some(op));
+        let cpd = req["cpd"].as_dictionary().unwrap();
+        assert_eq!(cpd["X-MMe-Client-Info"].as_string(), Some(windows));
+        for k in [
+            "bootstrap",
+            "icscrec",
+            "pbe",
+            "prkgen",
+            "svct",
+            "loc",
+            "X-Apple-I-MD",
+            "X-Apple-I-MD-M",
+            "X-Apple-I-MD-RINFO",
+            "X-Apple-I-MD-LU",
+            "X-Mme-Device-Id",
+            "X-Apple-I-Client-Time",
+            "X-Apple-Locale",
+            "X-Apple-I-TimeZone",
+        ] {
+            assert!(cpd.contains_key(k), "cpd lacks {k}");
+        }
+        if op == "init" {
+            let ps: Vec<_> = req["ps"].as_array().unwrap().iter().filter_map(plist::Value::as_string).collect();
+            assert_eq!(ps, ["s2k", "s2k_fo"]);
+        }
+    }
+    let push = received.iter().find(|r| r.url.path() == "/auth/verify/trusteddevice").unwrap();
+    assert_eq!(header(push, "user-agent"), "akd/1.0 CFNetwork/808.1.4");
+    assert_eq!(header(push, "x-mme-client-info"), windows);
+}
+
+#[tokio::test]
+async fn a_macos_identity_over_android_anisette_is_refused_at_init_like_grandslam_does() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let cfg = GsaFakeConfig::default();
+    let fake = GsaFake::start(cfg.clone()).await;
+    let mut profile = ClientProfile::builtin();
+    profile.anisette_client_info_override =
+        Some("<MacBookPro18,3> <macOS;27.0;26A5378j> <com.apple.AuthKit/1 (com.apple.akd/1.0)>".into());
+    let gsa = GsaClient::new(reqwest::Client::new(), fake.gsa_url(), Arc::new(AnisetteFake::new()), profile);
+    let e = gsa.login(&cfg.apple_id, cfg.password.as_bytes()).await.unwrap_err();
+    assert_eq!(e.code(), codes::gsa::IDENTITY_REJECTED);
+    assert!(e.message().contains("at init (-80045)"), "{}", e.message());
+    let stats = fake.stats();
+    assert_eq!((stats.identity_rejections, stats.completes), (1, 0));
+}
+
+#[tokio::test]
+async fn a_bare_503_from_grandslam_is_retried_once() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let cfg = GsaFakeConfig { two_factor: None, busy_inits: 1, ..Default::default() };
+    let fake = GsaFake::start(cfg.clone()).await;
+    let gsa =
+        GsaClient::new(reqwest::Client::new(), fake.gsa_url(), Arc::new(AnisetteFake::new()), ClientProfile::builtin())
+            .with_retry_delay(std::time::Duration::ZERO);
+    assert!(matches!(gsa.login(&cfg.apple_id, cfg.password.as_bytes()).await.unwrap(), LoginState::Authenticated(_)));
+    assert_eq!((fake.stats().inits, fake.stats().busy_answers), (2, 1));
+
+    let cfg = GsaFakeConfig { two_factor: None, busy_inits: 2, ..Default::default() };
+    let fake = GsaFake::start(cfg.clone()).await;
+    let gsa =
+        GsaClient::new(reqwest::Client::new(), fake.gsa_url(), Arc::new(AnisetteFake::new()), ClientProfile::builtin())
+            .with_retry_delay(std::time::Duration::ZERO);
+    let e = gsa.login(&cfg.apple_id, cfg.password.as_bytes()).await.unwrap_err();
+    assert_eq!(e.code(), codes::gsa::IDENTITY_REJECTED);
+    assert!(e.message().contains("HTTP 503 at init"), "{}", e.message());
+}

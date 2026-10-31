@@ -104,7 +104,7 @@ impl RemoteV3 {
         base.join(path).map_err(|e| Error::invalid_argument(e.to_string()))
     }
 
-    async fn identity(&self, cached: &mut Option<ClientIdentity>) -> Result<ClientIdentity> {
+    async fn server_identity(&self, cached: &mut Option<ClientIdentity>) -> Result<ClientIdentity> {
         if let Some(c) = cached.clone() {
             return Ok(c);
         }
@@ -191,14 +191,19 @@ impl AnisetteProvider for RemoteV3 {
 
     async fn headers(&self) -> Result<AnisetteHeaders> {
         let mut inner = self.inner.lock().await;
-        let id = self.identity(&mut inner.0).await?;
+        let id = self.server_identity(&mut inner.0).await?;
         let name = state_name(&self.url);
         let mut state = match inner.1.clone() {
             Some(s) => s,
             None => AnisetteState::load_or_create(&*self.secrets, &name).await?,
         };
+        if state.adi_pb.is_some() && state.client_info.as_deref() != Some(id.client_info.as_str()) {
+            // The server changed its identity: its old provisioning would be presented under another platform.
+            state.adi_pb = None;
+        }
         if state.adi_pb.is_none() {
             self.provision(&id, &mut state).await?;
+            state.client_info = Some(id.client_info.clone());
             state.save(&*self.secrets, &name).await?;
         }
         let url = self.join("v3/get_headers")?;
@@ -239,9 +244,9 @@ impl AnisetteProvider for RemoteV3 {
         Ok(headers)
     }
 
-    async fn client_info(&self) -> Result<String> {
+    async fn identity(&self) -> Result<ClientIdentity> {
         let mut inner = self.inner.lock().await;
-        Ok(self.identity(&mut inner.0).await?.client_info)
+        self.server_identity(&mut inner.0).await
     }
 
     async fn reset(&self) -> Result<()> {
