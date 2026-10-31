@@ -5486,7 +5486,7 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "url",
  "wiremock",
- "x509-cert 0.2.5",
+ "x509-cert 0.3.0",
  "zeroize",
 ]
 
@@ -5980,7 +5980,7 @@ dependencies = [
  "sha1 0.10.7",
  "sha2 0.11.0",
  "udif",
- "x509-cert 0.2.5",
+ "x509-cert 0.3.0",
 ]
 
 [[package]]
@@ -8637,6 +8637,7 @@ dependencies = [
  "const-oid 0.10.2",
  "der 0.8.2",
  "spki 0.8.1",
+ "tls_codec",
 ]
 
 [[package]]
