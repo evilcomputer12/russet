@@ -2447,11 +2447,15 @@ from §7. ARCHITECTURE.md stays binding; `docs/windows/W22-STATUS.md` has the RP
 - **Anisette** (§7.5): `AnisetteProvider::client_info` returns the GSA profile's identity for local ADI (the
   profile is the single source); the Apple-Root-only HTTP client lives in `russet-anisette::apple_tls` because
   provisioning (`midStart/midFinish`) also talks to `gsa.apple.com`. Unknown APK versions are trusted on first
-  use with a `tofu.json` beside the libraries (the shipped `anisette-pins.json` is empty until a release pins the
-  live hashes); `consent: true` covers that prompt and the result says `pinned: false`.
+  use with a `tofu.json` beside the libraries (the shipped `anisette-pins.json` pins APK 4.9.6.1447/x86_64, recorded
+  by W22 on 2026-10-31); `consent: true` covers that prompt and the result says `pinned: false`.
 - **`russet-adi-host`** (§7.5): x86_64 only so far; DT_RELA/JMPREL/RELR relocations; imports resolve to Rust shims,
   the helper's own `dlopen`/`dlsym`, then the host glibc (same SysV ABI, `struct stat`, errno and `open` flags);
-  unknown imports get trap stubs that name them and exit 70. The seccomp filter is a deny-list (network, exec,
+  unknown imports get trap stubs that name them and exit 70. A library's `DT_INIT`/`DT_INIT_ARRAY` run only when
+  all its imports resolved: Apple's `libstoreservicescore.so` (APK 4.9.6.1447) imports 360 symbols of
+  `libc++_shared`, CoreFoundation and `libmediaplatform`, and one of its 64 initializers builds a mediaplatform work
+  queue; the ADI entry points work without them. The helper leaves with `_exit`, so destructors registered through
+  `__cxa_atexit` never run. The seccomp filter is a deny-list (network, exec,
   ptrace, namespaces, mounts, BPF, modules, keyrings, io_uring), Landlock is applied where the kernel has it (WSL
   kernels do not).
 - **Free-team policy** (§7.6): `free::policy` has the ledger (`<data>/accounts/<team>/ledger.json`), the bundle map

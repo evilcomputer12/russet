@@ -19,7 +19,7 @@ Apple portal resource touched; no live login made. Seam requests: [W22-SEAM-REQU
 | Log canary: a whole sign-in at TRACE with all events captured; no password, Apple ID, code, `adsid`, team ID, token or anisette value | `russet-gsa/tests/canary.rs` | passes; also `Debug` canaries in protocol, session and anisette types |
 | Anisette providers: `LocalAdi` (helper over JSON Lines, provisioning via `midStart/midFinish`, `-45061` re-provisioning, `adi.pb` mirrored into the secret store), `RemoteV3` (websocket provisioning + `get_headers`) | `russet-anisette` | `free/tests.rs` (LocalAdi on `FakeAdi` through `GsaFake`), `tests/anisette.rs` (RemoteV3 against a fake v3 server) |
 | Library acquisition: HEAD, 64 KiB tail, central directory, local headers, inflate, CRC/size/SHA-256, 0700/0600 files, TOFU record, no re-download, refusal of a CDN ignoring `Range` | `russet-anisette/src/libs.rs` | `tests/anisette.rs`: only the libraries' bytes travel (< 10 % of a synthetic APK with 2 MB filler) |
-| `russet-adi-host`: clean-room ELF64 loader (x86_64), bionic shims, own `dlopen`/`dlsym`, trap stubs naming unknown imports (exit 70), seccomp (no sockets/exec/ptrace/namespaces…), Landlock when available | `russet-adi-host` | `tests/host.rs`: a synthetic two-library ADI in C (compiled by `cc` at test time) loads, provisions, answers OTPs; its `socket()` is refused |
+| `russet-adi-host`: clean-room ELF64 loader (x86_64), bionic shims, own `dlopen`/`dlsym`, trap stubs naming unknown imports (exit 70), seccomp (no sockets/exec/ptrace/namespaces…), Landlock when available | `russet-adi-host` | `tests/host.rs`: a synthetic two-library ADI in C (compiled by `cc` at test time) loads, provisions, answers OTPs; its `socket()` is refused. **Apple's real x86_64 libraries (APK 4.9.6.1447) load locally** under seccomp and Landlock: `load` ok, `isProvisioned` false, `requestOtp` → ADI `-45061` (see "Real-library check") |
 | Sign-in service: `AppleIds::begin/request_code/submit_code`, trusted-device push at once, 10-minute pending sessions (5 wrong codes), session sealed as `secret:apple-id-session/<DSID>` (never the password), `accounts.toml` entry (`kind = "apple-id"`, `team-tier`, `anisette`), DS2 portal for the account, `remove --wipe-secrets` | `russet-account/src/free/` | `free/tests.rs` |
 | Free-team policy: App ID ledger (10 per rolling 7 days, next free slot), bundle-ID map (`<id>.<TEAMID>`, extensions, app groups), refresh timing (24 h ahead) | `free/policy.rs` | unit tests (not yet called by the provisioner, see seam requests) |
 | RPC rows | `handlers/account.rs` | `russetd` builds; clippy clean |
@@ -62,19 +62,49 @@ Errors the page should handle: `gsa.badCredentials` (5250), `gsa.badCode` (5251,
 `gsa.loginExpired` (5258, start again), `anisette.libsMissing` (5270 → step 1–2), `anisette.consentRequired`,
 `anisette.fetchFailed`, `anisette.adiFailed`, `anisette.provisioningFailed`, `account.appleServiceUnavailable`.
 
+## Real-library check (lead-approved, 2026-10-31)
+
+One fetch of the two x86_64 libraries, approved by the lead within the owner's download budget, made with Russet's
+own `libs::fetch` (HEAD plus HTTP range GETs, nothing else): no GrandSlam, provisioning or other Apple endpoint, no
+login. The libraries stay only under the isolated `RUSSET_HOME` in `Russet-Dev`
+(`/home/russet/.russet-dev/w22-engine/data/anisette/libs/4.9.6.1447/x86_64/`, 0700/0600); only their hashes are
+committed (`crates/russet-anisette/anisette-pins.json`).
+
+| | |
+|---|---|
+| URL | `https://apps.mzstatic.com/content/android-apple-music-apk/applemusic.apk` |
+| Date | 2026-10-31T16:18:39Z |
+| APK version (`x-apple-version-number`) | 4.9.6.1447 |
+| Bytes received | 2,332,091 (64 KiB tail + central directory + two local headers + the two compressed entries) |
+| `lib/x86_64/libstoreservicescore.so` | local header at 125,027,081; 901,029 → 2,391,768 bytes; CRC-32 `0d7ebf7b`; SHA-256 `d8be230df34c0044758d43e33a8dabd3236b9a4258c4d48cb366911224d52f68` |
+| `lib/x86_64/libCoreADI.so` | local header at 97,688,726; 1,093,336 → 1,596,128 bytes; CRC-32 `7b0c5a50`; SHA-256 `ece4ffa6bbe4239e8f0d4714da57e62ce5e3c581d19553a83d78ac897783b905` |
+
+The entry sizes match the design's survey [V12]. ELF facts: both are x86_64 `ET_DYN` with `RELA`, `JMPREL`,
+`DT_HASH` and `DT_GNU_HASH`, `BIND_NOW`, no `RELR` or packed relocations; relocation types are only
+`R_X86_64_RELATIVE/64/GLOB_DAT/JUMP_SLOT`. `libstoreservicescore.so` needs `libc++_shared`, `libCoreFoundation`,
+`libmediaplatform`, `libz` and `libandroid` besides bionic, and 360 of its imports are absent by design.
+
+Local run of the helper (`russet-adi-host --libs <dir> --state <empty dir>`, dummy Android ID, sandbox on: seccomp
+and **Landlock both on** in this WSL kernel): `load` → ok (`LoadLibraryWithPath` reached `libCoreADI.so` through the
+helper's `dlopen`; all of CoreADI's imports resolved), `isProvisioned {-2}` → `false`, `requestOtp {-2}` → ADI
+`-45061` (not provisioned), clean exit. The first run showed that one of `libstoreservicescore.so`'s 64 static
+initializers constructs a `mediaplatform` work queue (a missing import); the loader now runs a library's initializers
+only when all its imports resolved, and the helper leaves with `_exit` so library destructors never run.
+
 ## What still needs the owner's live sign-in
 
-Nothing has talked to Apple. These are interoperability facts taken from xtool, isideload, omnisette and Provision
-(SIGN §7) that only a live run confirms:
+Nothing has talked to Apple's sign-in services. These are interoperability facts taken from xtool, isideload,
+omnisette and Provision (SIGN §7) that only a live run confirms:
 
 - GrandSlam's acceptance of Russet's SRP proof (M1/K padding as the srp-crate clients do), the `np` field (read, not
   verified), the two-factor endpoints' answers, `apptokens` decryption, and the `gsa-profile.json` identity (version
   3, xtool 450223eb0); a rejection surfaces as `gsa.identityRejected` with the profile refresh hint.
-- Apple's real libraries in the clean-room loader: only a synthetic ELF pair is tested. Unknown imports exit with
-  `an ADI library called <name>` (status 70) on the helper's stderr; `RUSSET_ADI_TRACE=1` lists every import's
-  resolution (names only). x86_64 only; Android packed relocations would be reported, not mis-applied.
-- `anisette-pins.json` is empty: the owner's first consented fetch is trust-on-first-use. Afterwards copy the hashes
-  from `<data>/anisette/libs/<apkver>/x86_64/tofu.json` into `crates/russet-anisette/anisette-pins.json`.
+- ADI provisioning and OTPs with Apple's libraries (`startProvisioning`/`endProvisioning` need Apple's `spim`/`ptm`,
+  so they were not run): if a provisioning path calls an import Russet does not provide, the helper exits with
+  `an ADI library called <name>` (status 70) on stderr; `RUSSET_ADI_TRACE=1` lists every import's resolution
+  (names only).
+- APK 4.9.6.1447/x86_64 is pinned; if Apple's CDN serves a newer APK, the owner's fetch is trust-on-first-use
+  (`pinned: false`), and its hashes are in `<data>/anisette/libs/<apkver>/x86_64/tofu.json`.
 - DS2 for the paid personal team: `listTeams` must report the Apple Developer Program membership (tier `paid`).
 
 **Live check, for the owner through the IDE page (nobody else types the credentials):**
@@ -82,7 +112,7 @@ Nothing has talked to Apple. These are interoperability facts taken from xtool, 
 1. Prerequisites (lead): `russet-adi-host` built next to `russetd` in the Linux engine (or `RUSSET_ADI_HOST`); the
    engine reaches `apps.mzstatic.com`, `www.apple.com`, `gsa.apple.com`, `developerservices2.apple.com`;
    `RUSSET_OFFLINE` unset; a real secrets backend (not `memory`) so the session survives.
-2. Status → consent → `fetchLibraries` (about 2–3 MB).
+2. Status → consent → `fetchLibraries` (about 2.3 MB; `pinned: true` while the CDN still serves 4.9.6.1447).
 3. `begin` with the paid Apple ID and `anisette: "local"` → expect `two-factor` with `codeSentTo: "trusted-device"`.
 4. Enter the code → `submitCode` → expect an `apple-id` account with `team-tier = "paid"` in `accounts.toml`.
 5. Report back the helper's stderr if anything fails (it never prints secrets).
