@@ -153,7 +153,8 @@ async fn gsa() -> MockServer {
     impl Respond for Finish {
         fn respond(&self, req: &Request) -> ResponseTemplate {
             let v: plist::Value = plist::from_bytes(&req.body).unwrap();
-            let cpim = v.as_dictionary().unwrap()["Request"].as_dictionary().unwrap()["cpim"].as_string().unwrap().to_owned();
+            let cpim =
+                v.as_dictionary().unwrap()["Request"].as_dictionary().unwrap()["cpim"].as_string().unwrap().to_owned();
             let cpim = base64::engine::general_purpose::STANDARD.decode(cpim).unwrap();
             let mut resp = plist::Dictionary::new();
             resp.insert("ptm".into(), b64(&[b"ptm:".as_slice(), &cpim].concat()).into());
@@ -193,13 +194,19 @@ async fn v3(provisionings: Arc<Mutex<u32>>) -> String {
                     let id = ws.next().await.unwrap().unwrap().into_text().unwrap();
                     assert!(id.contains("identifier"));
                     ws.send(say(serde_json::json!({"result": "GiveStartProvisioningData"}))).await.unwrap();
-                    let spim: serde_json::Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+                    let spim: serde_json::Value =
+                        serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
                     assert_eq!(spim["spim"], b64(b"spim"));
-                    ws.send(say(serde_json::json!({"result": "GiveEndProvisioningData", "cpim": b64(b"server-cpim")}))).await.unwrap();
-                    let end: serde_json::Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+                    ws.send(say(serde_json::json!({"result": "GiveEndProvisioningData", "cpim": b64(b"server-cpim")})))
+                        .await
+                        .unwrap();
+                    let end: serde_json::Value =
+                        serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
                     assert_eq!(end["ptm"], b64(b"ptm:server-cpim"));
                     *provisionings.lock().unwrap() += 1;
-                    ws.send(say(serde_json::json!({"result": "ProvisioningSuccess", "adi_pb": b64(b"remote-adi-pb")}))).await.unwrap();
+                    ws.send(say(serde_json::json!({"result": "ProvisioningSuccess", "adi_pb": b64(b"remote-adi-pb")})))
+                        .await
+                        .unwrap();
                     return;
                 }
                 let mut buf = Vec::new();
@@ -208,12 +215,14 @@ async fn v3(provisionings: Arc<Mutex<u32>>) -> String {
                     let n = s.read(&mut chunk).await.unwrap_or(0);
                     buf.extend_from_slice(&chunk[..n]);
                     let text = String::from_utf8_lossy(&buf).into_owned();
-                    let Some(end) = text.find("\r\n\r\n") else {
-                        if n == 0 { break } else { continue }
-                    };
+                    let Some(end) = text.find("\r\n\r\n") else { if n == 0 { break } else { continue } };
                     let len = text[..end]
                         .lines()
-                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                        })
                         .unwrap_or(0);
                     if n == 0 || buf.len() >= end + 4 + len {
                         break;
@@ -228,7 +237,10 @@ async fn v3(provisionings: Arc<Mutex<u32>>) -> String {
                     serde_json::json!({"result": "GetHeadersError", "message": "unknown identity"})
                 }
                 .to_string();
-                let resp = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
                 let _ = s.write_all(resp.as_bytes()).await;
             });
         }
@@ -254,15 +266,21 @@ async fn remote_v3_provisions_once_through_its_websocket_and_serves_headers() {
     assert_eq!(h.md_lu.len(), 64);
     remote.headers().await.unwrap();
     assert_eq!(*provisionings.lock().unwrap(), 1, "provisioned once, then reused");
-    let state = russet_anisette::AnisetteState::load(&*secrets, &russet_anisette::remote::state_name(&url)).await.unwrap().unwrap();
+    let state = russet_anisette::AnisetteState::load(&*secrets, &russet_anisette::remote::state_name(&url))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(state.adi_pb_bytes().unwrap(), b"remote-adi-pb");
 
-    assert!(RemoteV3::new(
-        url::Url::parse("http://anisette.example/").unwrap(),
-        secrets,
-        reqwest::Client::new(),
-        url,
-        ClientIdentity { client_info: String::new(), user_agent: String::new() },
-    )
-    .is_err(), "plain http to a non-loopback server is refused");
+    assert!(
+        RemoteV3::new(
+            url::Url::parse("http://anisette.example/").unwrap(),
+            secrets,
+            reqwest::Client::new(),
+            url,
+            ClientIdentity { client_info: String::new(), user_agent: String::new() },
+        )
+        .is_err(),
+        "plain http to a non-loopback server is refused"
+    );
 }
