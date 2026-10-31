@@ -12,6 +12,7 @@ import type { RunManager } from "../run/session";
 import type { ConsoleViewProvider } from "../panels/consoleView";
 import type { MirrorViewProvider } from "../panels/mirrorView";
 import type { SigningTreeProvider } from "../views/signingTree";
+import type { Experience } from "../setup";
 import { pickDevice, pickTarget, pickConfiguration } from "./pickers";
 import { hotReload } from "./hotReload";
 import { showDaemonError } from "../daemon/errors";
@@ -25,6 +26,8 @@ export interface CommandServices {
   mirror: MirrorViewProvider;
   signing: SigningTreeProvider;
   refreshDevices: () => Promise<void>;
+  /** The W19 setup, sign-in and run-destination surfaces. */
+  experience?: Experience;
 }
 
 export function registerCommands(context: vscode.ExtensionContext, svc: CommandServices): void {
@@ -36,8 +39,20 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   };
 
   // --- Run / Debug / Stop / Hot reload -------------------------------------
-  reg("russet.run", () => svc.run.run());
+  const blockedRun = (): boolean => {
+    const reason = svc.experience?.runBlocker();
+    if (reason) {
+      void vscode.window.showInformationMessage(reason, "Select Run Destination").then((c) =>
+        c ? vscode.commands.executeCommand("russet.selectDevice") : undefined,
+      );
+    }
+    return !!reason;
+  };
+  reg("russet.run", () => (blockedRun() ? undefined : svc.run.run()));
   reg("russet.debug", async () => {
+    if (blockedRun()) {
+      return;
+    }
     const folder = vscode.workspace.workspaceFolders?.[0];
     const ok = await vscode.debug.startDebugging(folder, {
       type: "russet",
@@ -69,15 +84,17 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   reg("russet.clean", () => runRussetTask("clean"));
 
   // --- Pickers --------------------------------------------------------------
-  reg("russet.selectDevice", () => pickDevice(svc.store));
+  reg("russet.selectDevice", () => (svc.experience ? svc.experience.selectDestination() : pickDevice(svc.store)));
   reg("russet.selectTarget", () => pickTarget(svc.store));
   reg("russet.selectConfiguration", () => pickConfiguration(svc.store));
   reg("russet.device.setRunDestination", (node: unknown) => {
     const udid = extractUdid(node) ?? svc.store.activeDevice?.udid;
-    if (udid) {
+    if (udid && svc.experience) {
+      svc.experience.selectDevice(udid);
+    } else if (udid) {
       svc.store.setActiveDevice(udid);
     } else {
-      void pickDevice(svc.store);
+      void vscode.commands.executeCommand("russet.selectDevice");
     }
   });
 
@@ -104,14 +121,18 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
 
   // --- Doctor / setup -------------------------------------------------------
   reg("russet.doctor", runDoctor);
-  reg("russet.openSetup", async () => {
+  reg("russet.openSetup", async (step?: unknown) => {
+    if (svc.experience) {
+      svc.experience.openSetup(typeof step === "string" ? step : undefined);
+      return;
+    }
     await vscode.commands.executeCommand(
       "workbench.action.openWalkthrough",
       "russet.russet#russet.setup",
       false,
     );
   });
-  reg("russet.importXcode", () => soon("Import Xcode"));
+  reg("russet.importXcode", () => (svc.experience ? svc.experience.importXcode() : soon("Import Xcode")));
 
   // --- Project --------------------------------------------------------------
   reg("russet.project.new", async () => {
@@ -160,7 +181,7 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
 
   // --- Accounts / signing ---------------------------------------------------
   reg("russet.account.addAscKey", addAscKey);
-  reg("russet.account.signInAppleId", () => soon("Sign in with Apple ID"));
+  reg("russet.account.signInAppleId", () => (svc.experience ? svc.experience.signIn() : soon("Sign in with Apple ID")));
   reg("russet.account.signOut", () => soon("Sign Out"));
   reg("russet.signing.refresh", () => svc.signing.refresh());
   reg("russet.signing.fix", () => soon("Fix Signing"));
