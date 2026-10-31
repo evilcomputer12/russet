@@ -1,0 +1,189 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 Russet contributors */
+/* Shared look for the W19 pages: VS Code theme variables only (light, dark and
+   both high-contrast themes), visible focus, reduced motion. */
+:root {
+  color-scheme: light dark;
+  --r-border: var(--vscode-contrastBorder, var(--vscode-widget-border, var(--vscode-panel-border, transparent)));
+  --r-card: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  --r-muted: var(--vscode-descriptionForeground);
+  --r-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
+  --r-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+  --r-err: var(--vscode-errorForeground, var(--vscode-charts-red));
+  --r-info: var(--vscode-textLink-foreground, var(--vscode-charts-blue));
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  line-height: 1.45;
+}
+a {
+  color: var(--vscode-textLink-foreground);
+}
+a:hover {
+  color: var(--vscode-textLink-activeForeground);
+}
+h1 {
+  font-size: 1.6em;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+h2 {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 0;
+}
+p {
+  margin: 4px 0;
+}
+.muted {
+  color: var(--r-muted);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 1px solid var(--vscode-button-border, transparent);
+  padding: 4px 12px;
+  border-radius: 2px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+button:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+button.secondary {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+button.secondary:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+button.link {
+  background: none;
+  border: none;
+  color: var(--vscode-textLink-foreground);
+  padding: 0;
+  text-decoration: underline;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+input[type="text"],
+input[type="email"],
+input[type="password"],
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--r-border));
+  border-radius: 2px;
+  padding: 4px 6px;
+}
+input::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+label {
+  display: block;
+  margin: 10px 0 4px;
+}
+.card {
+  background: var(--r-card);
+  border: 1px solid var(--r-border);
+  border-radius: 4px;
+  padding: 12px 14px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85em;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.badge.done {
+  color: var(--r-ok);
+}
+.badge.needed,
+.badge.unknown {
+  color: var(--r-muted);
+}
+.badge.running {
+  color: var(--r-info);
+}
+.badge.failed {
+  color: var(--r-err);
+}
+.badge.unavailable {
+  color: var(--r-warn);
+}
+.alert {
+  border-left: 3px solid var(--r-err);
+  padding: 6px 10px;
+  margin: 8px 0;
+  background: var(--vscode-inputValidation-errorBackground, transparent);
+}
+.alert.info {
+  border-left-color: var(--r-info);
+  background: var(--vscode-inputValidation-infoBackground, transparent);
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--vscode-progressBar-background);
+}
+.spin {
+  display: inline-block;
+  animation: r-spin 1s linear infinite;
+}
+@keyframes r-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+body.vscode-high-contrast .card,
+body.vscode-high-contrast-light .card {
+  border-color: var(--vscode-contrastBorder);
+}
