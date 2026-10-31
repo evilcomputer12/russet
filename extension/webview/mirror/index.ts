@@ -1,48 +1,54 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 //
-// The embedded iPhone webview. Tier 0 draws a phone-shaped placeholder where the
-// live mirror / virtual-iPhone emulator will render. The decode worker + HID input
-// (WebCodecs over ws://127.0.0.1) arrive with WS-12; the message contract is already
-// backend-neutral (device vs virtual).
+// The sidebar iPhone view: a compact device frame for the run destination. The
+// interactive screen (touch, keyboard, hardware buttons) lives in the "Virtual
+// iPhone" editor tab, which shares this frame (webview/shared/deviceFrame.ts);
+// the decode pipeline arrives with the mirror stream (EXT-09). The message
+// contract stays backend-neutral (device vs virtual).
 
 import { vscodeApi } from "../shared/vscode";
+import { addStyles, h } from "../shared/dom";
+import { DeviceFrame } from "../shared/deviceFrame";
+import baseCss from "../shared/base.css?inline";
+import deviceCss from "../shared/device.css?inline";
 
 const vscode = vscodeApi();
-const root = document.getElementById("root") as HTMLElement;
+addStyles(
+  baseCss,
+  deviceCss,
+  `#root{height:100vh;display:flex;flex-direction:column}.stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px}.foot{padding:4px 8px 10px;text-align:center}`,
+);
 
-root.innerHTML = `
-  <div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:12px">
-    <div id="frame" style="width:min(260px,70vw);aspect-ratio:9/19.5;border:10px solid var(--vscode-panel-border);border-radius:28px;background:var(--vscode-editorWidget-background);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:16px">
-      <div style="font-size:28px">📱</div>
-      <div id="title" style="font-weight:600">Virtual iPhone</div>
-      <div id="status" style="opacity:0.75;font-size:12px">The embedded iPhone screen will render here.</div>
-    </div>
-  </div>
-`;
-
-const titleEl = document.getElementById("title") as HTMLElement;
-const statusEl = document.getElementById("status") as HTMLElement;
+const stage = h("div", { class: "stage" });
+const open = h("button", { class: "secondary", onclick: () => vscode.postMessage({ kind: "openEditor" }) }, "Open in Editor");
+document.getElementById("root")?.append(stage, h("div", { class: "foot" }, open));
+const frame = new DeviceFrame(stage, { interactive: false });
+frame.setStatus({ title: "iPhone", detail: "Connect an iPhone or create a virtual iPhone to see its screen here." });
 
 window.addEventListener("message", (event: MessageEvent) => {
   const msg = event.data as {
     kind?: string;
     status?: string;
-    target?: { name?: string; kind?: string };
+    target?: { name?: string; kind?: string; detail?: string; screen?: [number, number] };
   };
   if (msg.kind !== "state") {
     return;
   }
-  if (msg.target?.name) {
-    titleEl.textContent = msg.target.name;
-    statusEl.textContent =
-      msg.status === "placeholder"
-        ? "Screen mirroring arrives in a later update. Press Mirror Screen to connect."
-        : `Connected (${msg.target.kind ?? "device"}).`;
-  } else {
-    titleEl.textContent = "Virtual iPhone";
-    statusEl.textContent = "Connect an iPhone to see its screen here.";
+  const t = msg.target;
+  if (!t?.name) {
+    frame.setDevice({ name: "iPhone", detail: "", screen: [1206, 2622] });
+    frame.setStatus({ title: "No run destination", detail: "Connect an iPhone or create a virtual iPhone." });
+    return;
   }
+  frame.setDevice({ name: t.name, detail: t.detail ?? "", screen: t.screen ?? [1206, 2622] });
+  frame.setStatus({
+    title: t.name,
+    detail:
+      t.kind === "virtual"
+        ? "Open the Virtual iPhone tab to interact with it."
+        : "Screen mirroring for USB iPhones arrives with the mirror stream.",
+  });
 });
 
 vscode.postMessage({ kind: "ready" });
