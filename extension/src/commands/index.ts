@@ -13,6 +13,7 @@ import type { ConsoleViewProvider } from "../panels/consoleView";
 import type { MirrorViewProvider } from "../panels/mirrorView";
 import type { SigningTreeProvider } from "../views/signingTree";
 import type { Experience } from "../setup";
+import { ISSUER_ID_PLACEHOLDER, ISSUER_ID_PROMPT, issuerIdParam, issuerIdProblem } from "../setup/ascKey";
 import { pickDevice, pickTarget, pickConfiguration } from "./pickers";
 import { hotReload } from "./hotReload";
 import { showDaemonError } from "../daemon/errors";
@@ -287,12 +288,18 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
     }
     const issuerId = await vscode.window.showInputBox({
       title: "Issuer ID",
-      prompt: "The App Store Connect issuer ID (omit for an individual key).",
+      prompt: ISSUER_ID_PROMPT,
+      placeHolder: ISSUER_ID_PLACEHOLDER,
+      ignoreFocusOut: true,
+      validateInput: issuerIdProblem,
     });
+    if (issuerId === undefined) {
+      return; // Escape cancels; it must not add the key as an individual one.
+    }
     try {
       await svc.client.call("account.addAscKey", {
         keyId,
-        issuerId: issuerId || undefined,
+        issuerId: issuerIdParam(issuerId),
         p8Path,
       });
       await svc.signing.refresh();
