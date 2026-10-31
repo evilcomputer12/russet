@@ -1083,6 +1083,20 @@ first install.
 | `run` | Run on your iPhone | `[Run](command:russet.run)` | `onCommand:russet.run` |
 | `agents` | Optional: connect an AI agent | Opens the Agents view; registration choices (§6.6) | `onView:russet.agents` |
 
+**Windows: guided setup page and native sign-in (W19, 2026-10-31).** On Windows the walkthrough gains two
+steps shown when `russet.windowsSetup` is set: `setup` ("Set up this PC", `onContext:russet.setupOk`) and
+`virtual` ("Create a virtual iPhone", `onContext:russet.virtualIphoneOk`). `russet.openSetup` opens a setup
+*page* (editor tab, `extension/src/setup/**`) instead of the walkthrough: it renders the supervisor's setup
+runner (`RUSSET_WINDOWS_HOST --setup status|run`, contract in the host tree's `IDE-EXPERIENCE-PLAN.md`) with
+status, progress, log tail and Run / Retry / Repair / Cancel, detects `Xcode_*.xip` in Downloads for the
+`xcode-sdk` step and picks the virtual iPhone (default iPhone17,3 / iOS 27.0.1). It opens on the first run
+when the runner exists. The `account` step's Apple ID path is a native sign-in page (webview, not input
+boxes): consent and anisette libraries, Apple ID and password sent once to `account.appleId.begin`, then the
+two-factor code (trusted device or text message), then the account and team; the password is never stored
+by the extension. The setting `russet.account.appleIdSignIn` (`auto|on|off`) gates it until W22 lands. The
+completion keys `toolchainOk`, `sdkOk` and `accountOk` are set from the runner and the daemon
+(`toolchain.list`, `account.list`), never assumed.
+
 **AuthenticationProvider `russet-apple`.**
 - It lists Russet accounts in VS Code's Accounts menu.
 - `getSessions()` maps `account.list`. Each session is `{id: accountId, accessToken: "<opaque>", account: {id, label}, scopes: []}`.

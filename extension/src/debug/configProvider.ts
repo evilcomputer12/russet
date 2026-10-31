@@ -12,6 +12,7 @@ import type { Store } from "../state/store";
 import { configToWire } from "../run/session";
 import { stashPrepared } from "./adapterFactory";
 import { showDaemonError } from "../daemon/errors";
+import type { DebugPrepareParams } from "../generated/protocol";
 
 export class RussetDebugConfigProvider implements vscode.DebugConfigurationProvider {
   constructor(
@@ -50,6 +51,12 @@ export class RussetDebugConfigProvider implements vscode.DebugConfigurationProvi
     if (config.type !== "russet") {
       return config;
     }
+    // The provider is registered twice (normal and Dynamic) and VS Code chains every
+    // provider's resolve: a configuration this provider already prepared passes
+    // through, or a second debug.prepare launches the app again and F5 hangs.
+    if (config.__russetToken) {
+      return config;
+    }
     if (this.client.state !== "connected") {
       void vscode.window.showErrorMessage("The Russet daemon is not connected.");
       return undefined;
@@ -82,6 +89,7 @@ export class RussetDebugConfigProvider implements vscode.DebugConfigurationProvi
               build: config.build !== false,
               args: (config.args as string[] | undefined) ?? [],
               env: (config.env as Record<string, string> | undefined) ?? {},
+              symbols: config.symbols as DebugPrepareParams["symbols"],
             },
             token,
           ),
@@ -94,14 +102,14 @@ export class RussetDebugConfigProvider implements vscode.DebugConfigurationProvi
       // Rewrite in place to the lldb-dap attach recipe, keeping type "russet".
       return {
         ...config,
+        initCommands: result.initCommands,
+        attachCommands: result.attachCommands,
+        ...dapConfig,
         type: "russet",
         request: "attach",
         name: config.name ?? "Debug on iPhone",
         __russetToken: token2,
         __russetSessionId: result.sessionId,
-        initCommands: result.initCommands,
-        attachCommands: result.attachCommands,
-        ...dapConfig,
       };
     } catch (err) {
       await showDaemonError(err, "Could not prepare the debug session");

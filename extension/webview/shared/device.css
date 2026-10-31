@@ -1,0 +1,187 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 Russet contributors */
+/* The iPhone frame. Chrome uses theme variables; the screen itself is black like
+   a real display that is off (device content, not editor chrome), with white
+   overlay text for full contrast in every theme. */
+.device {
+  --bezel: 12px;
+  --radius: 48px;
+  position: relative;
+  flex: none;
+  padding: var(--bezel);
+  border-radius: var(--radius);
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  border: 2px solid color-mix(in srgb, var(--vscode-foreground) 55%, transparent);
+  box-shadow: 0 6px 24px var(--vscode-widget-shadow, transparent);
+}
+body.vscode-high-contrast .device,
+body.vscode-high-contrast-light .device {
+  border-color: var(--vscode-contrastBorder);
+  box-shadow: none;
+}
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: calc(var(--radius) - var(--bezel));
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  touch-action: none;
+  user-select: none;
+  cursor: default;
+}
+.device:not(.compact) .screen {
+  cursor: crosshair;
+}
+.screen:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 3px;
+}
+.screen-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.island {
+  position: absolute;
+  top: 2.2%;
+  left: 50%;
+  width: 30%;
+  height: 3.4%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #000;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.o90 .island,
+.o270 .island {
+  top: 50%;
+  width: 3.4%;
+  height: 30%;
+  transform: translateY(-50%);
+}
+.o90 .island {
+  left: auto;
+  right: 2.2%;
+}
+.o270 .island {
+  left: 2.2%;
+}
+.o180 .island {
+  top: auto;
+  bottom: 2.2%;
+}
+.screen-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12%;
+  text-align: center;
+}
+.screen-overlay[hidden] {
+  display: none;
+}
+.overlay-title {
+  font-weight: 600;
+  font-size: 1.05em;
+  margin: 0;
+}
+.overlay-detail {
+  font-size: 0.9em;
+  opacity: 0.85;
+  margin: 0;
+}
+.overlay-action {
+  margin-top: 8px;
+}
+.spin.big {
+  font-size: 2em;
+}
+/* Side buttons: volume on the left edge, the side (lock) button on the right,
+   moved with the frame when it rotates. */
+.side {
+  position: absolute;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 55%, transparent);
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  border-radius: 3px;
+  width: 6px;
+  height: 7%;
+}
+.side:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+.side:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+}
+.o0 .volumeUp,
+.o0 .volumeDown {
+  left: -8px;
+}
+.o0 .volumeUp {
+  top: 22%;
+}
+.o0 .volumeDown {
+  top: 31%;
+}
+.o0 .lock {
+  right: -8px;
+  top: 26%;
+  height: 10%;
+}
+.o180 .volumeUp,
+.o180 .volumeDown {
+  right: -8px;
+}
+.o180 .volumeUp {
+  bottom: 22%;
+}
+.o180 .volumeDown {
+  bottom: 31%;
+}
+.o180 .lock {
+  left: -8px;
+  bottom: 26%;
+  height: 10%;
+}
+.o90 .side,
+.o270 .side {
+  width: 7%;
+  height: 6px;
+}
+.o90 .volumeUp,
+.o90 .volumeDown {
+  top: -8px;
+}
+.o90 .volumeUp {
+  right: 22%;
+}
+.o90 .volumeDown {
+  right: 31%;
+}
+.o90 .lock {
+  bottom: -8px;
+  right: 26%;
+  width: 10%;
+}
+.o270 .volumeUp,
+.o270 .volumeDown {
+  bottom: -8px;
+}
+.o270 .volumeUp {
+  left: 22%;
+}
+.o270 .volumeDown {
+  left: 31%;
+}
+.o270 .lock {
+  top: -8px;
+  left: 26%;
+  width: 10%;
+}

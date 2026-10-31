@@ -2,11 +2,13 @@
 // SPDX-FileCopyrightText: 2026 Russet contributors
 //
 // The Russet extension entry point (ide.md §5.2). activate() wires the daemon
-// client, state, views, status bar, run/debug flow, console and the embedded
-// iPhone panel, and returns the RussetApi other extensions consume (§5.4).
+// client, state, views, status bar, run/debug flow, console, the embedded
+// iPhone panel and the guided setup, sign-in and run-destination surfaces
+// (W19), and returns the RussetApi other extensions consume (§5.4).
 
 import * as vscode from "vscode";
 import { RussetClient } from "./daemon/client";
+import { WindowsBackend } from "./daemon/windowsBackend";
 import { Store } from "./state/store";
 import { installContextKeys } from "./state/contextKeys";
 import {
@@ -30,6 +32,7 @@ import { RussetDebugConfigProvider } from "./debug/configProvider";
 import { RussetDebugAdapterFactory } from "./debug/adapterFactory";
 import { RussetDebugTrackerFactory } from "./debug/tracker";
 import { registerIdeBridge } from "./debug/ideBridge";
+import { installExperience } from "./setup";
 import { log, disposeLog } from "./util/log";
 import type { DeviceSummary } from "./generated/protocol";
 
@@ -45,12 +48,15 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
   logger.info(`Russet extension ${context.extension.packageJSON.version} activating`);
 
   const config = vscode.workspace.getConfiguration("russet");
+  const backend = WindowsBackend.fromEnvironment();
+  if (backend) context.subscriptions.push(backend);
   const client = new RussetClient(
     {
       socketPath: config.get<string>("daemon.socketPath") || undefined,
       binDir: config.get<string>("binDir", ""),
       autoStart: config.get<boolean>("daemon.autoStart", true),
       clientVersion: String(context.extension.packageJSON.version),
+      backend,
     },
     logger,
   );
@@ -86,8 +92,11 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
     vscode.window.registerTreeDataProvider("russet.agentActivity", agentActivityTree),
   );
 
+  // Guided setup, Apple ID sign-in, run destinations and the Virtual iPhone tab.
+  const experience = installExperience(context, { client, store, mirror: mirrorView });
+
   // Status bar.
-  context.subscriptions.push(new StatusBar(store, client));
+  context.subscriptions.push(new StatusBar(store, client, experience.destinations));
 
   // Context keys and the daemon event stream.
   installContextKeys(store, client, context.subscriptions);
@@ -96,6 +105,8 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
 
   // Debug type `russet`.
   const configProvider = new RussetDebugConfigProvider(client, store);
+  const adapterFactory = new RussetDebugAdapterFactory(backend);
+  context.subscriptions.push(adapterFactory, vscode.debug.onDidTerminateDebugSession((session) => adapterFactory.release(session.id)));
   context.subscriptions.push(
     vscode.debug.registerDebugConfigurationProvider("russet", configProvider),
     vscode.debug.registerDebugConfigurationProvider(
@@ -103,7 +114,7 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
       configProvider,
       vscode.DebugConfigurationProviderTriggerKind.Dynamic,
     ),
-    vscode.debug.registerDebugAdapterDescriptorFactory("russet", new RussetDebugAdapterFactory()),
+    vscode.debug.registerDebugAdapterDescriptorFactory("russet", adapterFactory),
     vscode.debug.registerDebugAdapterTrackerFactory("russet", new RussetDebugTrackerFactory(client, store)),
   );
 
@@ -124,6 +135,7 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
     mirror: mirrorView,
     signing: signingTree,
     refreshDevices: () => refreshDevices({ client, store, console: consoleView, diagnostics, run }),
+    experience,
   });
 
   // Re-read the project when folders change.
@@ -133,6 +145,12 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
 
   // Connect.
   void client.start();
+  if (experience.runnerAvailable && !context.globalState.get<boolean>("windowsSetupShown", false)) {
+    void vscode.commands.executeCommand("russet.openSetup").then(
+      () => context.globalState.update("windowsSetupShown", true),
+      () => logger.warn("Could not open the setup page."),
+    );
+  }
 
   const api: RussetApi = {
     apiVersion: 1,

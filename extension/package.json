@@ -40,7 +40,9 @@
     "workspaceContains:**/russet.toml",
     "onDebugResolve:russet",
     "onWebviewPanel:russet.mirror",
-    "onWebviewPanel:russet.console"
+    "onWebviewPanel:russet.console",
+    "onWebviewPanel:russet.setup",
+    "onWebviewPanel:russet.virtualIphone"
   ],
   "contributes": {
     "viewsContainers": {
@@ -198,6 +200,11 @@
         "category": "Russet"
       },
       {
+        "command": "russet.setup.openWalkthrough",
+        "title": "Open Getting Started Walkthrough",
+        "category": "Russet"
+      },
+      {
         "command": "russet.importXcode",
         "title": "Import Xcode (.xip or Xcode.app)…",
         "category": "Russet"
@@ -264,6 +271,52 @@
         "title": "Mirror Screen",
         "category": "Russet",
         "icon": "$(device-mobile)"
+      },
+      {
+        "command": "russet.openVirtualIphone",
+        "title": "Open Virtual iPhone",
+        "category": "Russet",
+        "icon": "$(vm)"
+      },
+      {
+        "command": "russet.virtual.home",
+        "title": "Home",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(home)"
+      },
+      {
+        "command": "russet.virtual.lock",
+        "title": "Lock",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "russet.virtual.volumeUp",
+        "title": "Volume Up",
+        "category": "Russet Virtual iPhone"
+      },
+      {
+        "command": "russet.virtual.volumeDown",
+        "title": "Volume Down",
+        "category": "Russet Virtual iPhone"
+      },
+      {
+        "command": "russet.virtual.rotateLeft",
+        "title": "Rotate Left",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "russet.virtual.rotateRight",
+        "title": "Rotate Right",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(redo)"
+      },
+      {
+        "command": "russet.virtual.screenshot",
+        "title": "Take Screenshot",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(device-camera)"
       },
       {
         "command": "russet.takeScreenshot",
@@ -427,6 +480,34 @@
         {
           "command": "russet.stop",
           "when": "russet.isRunning"
+        },
+        {
+          "command": "russet.virtual.home",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.lock",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.volumeUp",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.volumeDown",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.rotateLeft",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.rotateRight",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.screenshot",
+          "when": "russet.virtualIphoneOpen"
         }
       ],
       "editor/title/run": [
@@ -444,6 +525,11 @@
           "command": "russet.hotReload",
           "group": "russet@3",
           "when": "russet.canHotReload"
+        },
+        {
+          "command": "russet.stop",
+          "group": "russet@4",
+          "when": "russet.isRunning"
         }
       ],
       "view/title": [
@@ -481,6 +567,11 @@
           "command": "russet.signing.refresh",
           "when": "view == russet.signing",
           "group": "navigation@1"
+        },
+        {
+          "command": "russet.openVirtualIphone",
+          "when": "view == russet.mirror",
+          "group": "navigation@1"
         }
       ],
       "russet/titleBar": [
@@ -489,20 +580,24 @@
           "group": "navigation@1"
         },
         {
-          "command": "russet.stop",
+          "command": "russet.debug",
           "group": "navigation@2"
         },
         {
-          "command": "russet.hotReload",
+          "command": "russet.stop",
           "group": "navigation@3"
         },
         {
-          "command": "russet.selectTarget",
+          "command": "russet.hotReload",
           "group": "navigation@4"
         },
         {
-          "command": "russet.selectDevice",
+          "command": "russet.selectTarget",
           "group": "navigation@5"
+        },
+        {
+          "command": "russet.selectDevice",
+          "group": "navigation@6"
         }
       ],
       "view/item/context": [
@@ -575,6 +670,43 @@
         {
           "command": "russet.openCapabilities",
           "when": "resourceExtname == .entitlements"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "russet.virtual.home",
+          "group": "navigation@1",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.rotateLeft",
+          "group": "navigation@2",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.rotateRight",
+          "group": "navigation@3",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.screenshot",
+          "group": "navigation@4",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.lock",
+          "group": "1_hardware@1",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.volumeUp",
+          "group": "1_hardware@2",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.volumeDown",
+          "group": "1_hardware@3",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
         }
       ]
     },
@@ -808,6 +940,18 @@
         "description": "Build and run iOS apps on your iPhone without a Mac.",
         "steps": [
           {
+            "id": "setup",
+            "title": "Set up this PC",
+            "description": "Russet installs its backend, USB support through Apple Devices, xtool and the iOS SDK for you, with progress and repair.\n[Open Setup](command:russet.openSetup)",
+            "media": {
+              "markdown": "media/walkthrough/setup.md"
+            },
+            "completionEvents": [
+              "onContext:russet.setupOk"
+            ],
+            "when": "russet.windowsSetup"
+          },
+          {
             "id": "doctor",
             "title": "Check this computer",
             "description": "Run the Russet doctor to check your toolchain, daemon and device prerequisites.\n[Run Doctor](command:russet.doctor)",
@@ -832,7 +976,7 @@
           {
             "id": "xcode",
             "title": "Import your Xcode",
-            "description": "Download Xcode from Apple yourself, then import it. Russet never redistributes it.\n[Import Xcode…](command:russet.importXcode)",
+            "description": "Download Xcode from Apple yourself, then choose the .xip. Russet reads the iOS SDK from it and never redistributes it.\n[Choose Xcode…](command:russet.importXcode)",
             "media": {
               "markdown": "media/walkthrough/xcode.md"
             },
@@ -843,7 +987,7 @@
           {
             "id": "account",
             "title": "Sign in",
-            "description": "Add an App Store Connect API key (recommended) or sign in with an Apple ID.\n[Add API Key…](command:russet.account.addAscKey)",
+            "description": "Sign in with your Apple ID (free or paid), or add an App Store Connect API key.\n[Sign in with Apple ID…](command:russet.account.signInAppleId)\n[Add API Key…](command:russet.account.addAscKey)",
             "media": {
               "markdown": "media/walkthrough/account.md"
             },
@@ -854,13 +998,25 @@
           {
             "id": "device",
             "title": "Connect your iPhone",
-            "description": "Connect your iPhone with USB and tap Trust. Enable Developer Mode when prompted.\n[Run Doctor](command:russet.doctor)",
+            "description": "Connect your iPhone with USB and tap Trust. Enable Developer Mode when prompted.\n[Choose Run Destination](command:russet.selectDevice)\n[Run Doctor](command:russet.doctor)",
             "media": {
               "markdown": "media/walkthrough/device.md"
             },
             "completionEvents": [
               "onContext:russet.deviceReady"
             ]
+          },
+          {
+            "id": "virtual",
+            "title": "Create a virtual iPhone",
+            "description": "Russet builds a virtual iPhone (iPhone17,3 with iOS 27.0.1 by default) that runs, installs and debugs like a real one, in an editor tab.\n[Create Virtual iPhone](command:russet.openSetup?%5B%22virtual-iphone%22%5D)\n[Open Virtual iPhone](command:russet.openVirtualIphone)",
+            "media": {
+              "markdown": "media/walkthrough/virtual.md"
+            },
+            "completionEvents": [
+              "onContext:russet.virtualIphoneOk"
+            ],
+            "when": "russet.windowsSetup"
           },
           {
             "id": "project",
@@ -962,6 +1118,48 @@
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "when": "russet.featureAgents"
+      },
+      {
+        "command": "russet.virtual.home",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.lock",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+l",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.volumeUp",
+        "key": "ctrl+shift+up",
+        "mac": "cmd+shift+up",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.volumeDown",
+        "key": "ctrl+shift+down",
+        "mac": "cmd+shift+down",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.rotateLeft",
+        "key": "ctrl+shift+left",
+        "mac": "cmd+left",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.rotateRight",
+        "key": "ctrl+shift+right",
+        "mac": "cmd+right",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.screenshot",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+s",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
       }
     ],
     "configuration": {
@@ -1058,6 +1256,21 @@
         "russet.mirror.showStats": {
           "type": "boolean",
           "default": false
+        },
+        "russet.account.appleIdSignIn": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Offer Apple ID sign-in when the Russet engine supports it.",
+            "Always show the sign-in form, even if the engine does not report its sign-in libraries (development).",
+            "Hide Apple ID sign-in; use App Store Connect API keys only."
+          ],
+          "default": "auto",
+          "description": "Native Apple ID sign-in. Russet never stores your password in settings or in the IDE."
         },
         "russet.debug.adapter": {
           "type": "string",

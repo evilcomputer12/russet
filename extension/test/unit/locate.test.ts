@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import * as path from "node:path";
 import { defaultSocketPath, russetBinary } from "../../src/daemon/locate";
 
 const saved = { ...process.env };
 afterEach(() => {
   process.env = { ...saved };
+  vi.unstubAllGlobals();
 });
 
 describe("defaultSocketPath", () => {
@@ -16,6 +17,7 @@ describe("defaultSocketPath", () => {
   });
 
   it("uses RUSSET_HOME/runtime/russetd.sock when set", () => {
+    vi.stubGlobal("process", { ...process, platform: "linux" });
     process.env.RUSSET_HOME = "/home/x/wt/.russet-dev";
     delete process.env.XDG_RUNTIME_DIR;
     expect(defaultSocketPath("")).toBe(
@@ -24,11 +26,16 @@ describe("defaultSocketPath", () => {
   });
 
   it("falls back to XDG_RUNTIME_DIR/russet/russetd.sock", () => {
+    vi.stubGlobal("process", { ...process, platform: "linux" });
     delete process.env.RUSSET_HOME;
     process.env.XDG_RUNTIME_DIR = "/run/user/1000";
     expect(defaultSocketPath("")).toBe(
       path.join("/run/user/1000", "russet", "russetd.sock"),
     );
+  });
+  it("selects a Windows pipe instead of a Linux runtime path on Windows", () => {
+    vi.stubGlobal("process", { ...process, platform: "win32", env: { ...process.env, USERNAME: "test-user", RUSSET_HOME: "/home/example" } });
+    expect(defaultSocketPath("")).toBe("\\\\.\\pipe\\russet-test-user");
   });
 });
 
