@@ -4,8 +4,8 @@
 // A synthetic russetd for the W19 screenshot pass: a named-pipe JSON-RPC server
 // that answers what the setup, sign-in and run-destination surfaces ask, with
 // made-up devices and a made-up account (no real identifiers). Apple ID sign-in
-// follows the ARCHITECTURE §8 shapes: begin → two-factor → requestCode →
-// submitCode → Account.
+// follows W22's wire shapes: begin → two-factor (code already pushed to the
+// trusted devices) → requestCode for a text → submitCode → Account.
 
 import * as net from "node:net";
 import { createMessageConnection, SocketMessageReader, SocketMessageWriter, ResponseError } from "vscode-jsonrpc/node.js";
@@ -50,14 +50,23 @@ export function startFakeDaemon(pipePath, projectRoot) {
     }),
     "account.list": () => ({ accounts: signedIn ? [ACCOUNT] : [] }),
     "toolchain.list": () => ({ tools: [{ component: "swift", version: "6.4", path: "/opt/swift", provenance: { kind: "managed", pin: "6.4" }, env: {}, ok: true, problems: [] }], sdks: [], pins: {} }),
-    "account.anisette.status": () => ({ kind: "local", librariesPresent: true, provisioned: true }),
+    "account.anisette.status": () => ({ kind: "local", librariesPresent: true, apkVersion: "synthetic", provisioned: true, localSupported: true, pinned: true }),
     "account.appleId.begin": (p) => {
       if (!p || typeof p.password !== "string" || p.password.length === 0) {
         throw new ResponseError(5250, "bad credentials", { russetCode: "gsa.badCredentials" });
       }
-      return { sessionId: "synthetic-session", step: "two-factor", twoFactor: { via: "trustedDevice", numbers: [{ id: 1, masked: "+• (•••) •••-••42" }] } };
+      return {
+        sessionId: "synthetic-session",
+        step: "two-factor",
+        twoFactor: { via: ["trusted-device", "sms"], codeSentTo: "trusted-device", phoneNumbers: [{ id: 1, number: "(•••) •••-••42" }], codeLength: 6 },
+      };
     },
-    "account.appleId.requestCode": () => ({}),
+    "account.appleId.requestCode": (p) => {
+      if (p?.via !== "trusted-device" && p?.via !== "sms") {
+        throw new ResponseError(-32602, "unknown variant for via");
+      }
+      return {};
+    },
     "account.appleId.submitCode": (p) => {
       if (p?.code !== "123456") {
         throw new ResponseError(5251, "bad code", { russetCode: "gsa.badCode" });

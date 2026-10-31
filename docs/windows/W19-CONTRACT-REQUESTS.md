@@ -52,13 +52,14 @@ above are what the page already produces (`parseInput` validates them).
 
 ## 4. Apple ID sign-in shapes (ARCHITECTURE §8 rows `account.appleId.*`)
 
-- **`step` spelling:** ARCHITECTURE writes `two-factor`, SIGN §12 writes
-  `twoFactor`. Pick one; the IDE accepts both.
-- **Trusted-device push:** does `begin` already trigger the push to trusted
-  devices? The IDE calls `requestCode {sessionId, via: "trustedDevice"}` once when
-  it shows the code screen (and again for "Send a new code").
-- **`phoneId` type:** SIGN §5 uses `phone_id: u32`; the IDE sends a number when
-  the id the daemon gave is numeric, else the string.
+- **Answered by W22's DTOs (`ws/w22-apple-signin`, russet-protocol `account.rs`), and
+  the IDE now follows them:** `step` is `two-factor`; `twoFactor` is `{via: ["trusted-device",
+  "sms"], codeSentTo?, phoneNumbers: [{id: u32, number}], codeLength}` with kebab-case
+  `trusted-device` on the wire; `begin` already pushes the code (`codeSentTo`), so the
+  IDE requests a code only for "Send a new code" or a text; `phoneId` is `u32`;
+  `step: "done"` carries the `account`. ARCHITECTURE §8's row still shows the draft
+  (`via` as one value, `numbers`); it should be updated to W22's shapes. The IDE also
+  still reads the draft shape.
 - **Teams:** an Apple ID can belong to several teams (SIGN §13.1 step 5, team
   picker). No RPC lists them yet; the success screen shows the `Account.teamId`
   that `submitCode` returns. Request: `submitCode` → `Account & {teams?: [{id, name,

@@ -58,12 +58,16 @@ Nothing is pushed or merged.
   the account, its type and team.
 - RPCs: `account.anisette.status`, `account.anisette.fetchLibraries {consent: true}`,
   `account.appleId.begin {appleId, password, anisette: "local"}`, `account.appleId.requestCode`,
-  `account.appleId.submitCode`, with the ARCHITECTURE §8 shapes as local types (`step` accepts `two-factor` and
-  `twoFactor`).
+  `account.appleId.submitCode`, with W22's DTOs (`ws/w22-apple-signin`) as local types: `via` on the wire is
+  `trusted-device`/`sms`, the code the engine already pushed (`codeSentTo`) is used without a second request,
+  trusted numbers come from `phoneNumbers[{id, number}]`, and `step: "done"` uses the returned `account`. The
+  ARCHITECTURE draft shapes are still read.
 - Credentials: the password goes from the page into `account.appleId.begin` only; the form clears it on send;
   the controller never keeps it; nothing logs it (canary unit test). Never written to settings, state or logs.
-- Errors by code: bad credentials (5250), bad code (5251), locked (5252), identity rejected (5253),
-  libraries missing (5270), Apple unavailable (5107), `perm.*`, not implemented (1005 / -32601 / 3013).
+- Errors by code: bad credentials (5250), bad code (5251), locked (5252), identity rejected (5253), too many
+  codes (5254), sign-in timed out (5258, back to the form), libraries missing or consent required (5270/5273),
+  local anisette unsupported on this host (5276, also from `localSupported: false`), Apple unavailable (5107),
+  `perm.*`, not implemented (1005 / -32601 / 3013).
 - Setting `russet.account.appleIdSignIn`: `auto` (default; an engine that answers not-implemented gets an
   explanation and the API-key alternative), `on` (show the form even without anisette status), `off`.
 - Live check: against today's engine the page shows "not available in this version of the Russet engine yet
@@ -101,7 +105,7 @@ checked in dark, light and high-contrast themes; `prefers-reduced-motion` stops 
 
 ## Verification (2026-10-31, Windows, Node 24.22.1)
 
-- `vitest run`: 12 files, **63 tests pass** (18 pre-existing + setup contract, runner against an in-process
+- `vitest run`: 12 files, **68 tests pass** (18 pre-existing + setup contract, runner against an in-process
   fake and against `test/fixtures/fake-setup-runner.mjs`, setup model, Xcode detection, sign-in flows with a
   password canary, destinations, catalog, tap geometry, input validation).
 - `tsc --noEmit`: clean. ESLint on every changed file: clean.
@@ -152,9 +156,10 @@ above); with the current installed host the page shows "The setup runner could n
 
 ## Waiting on others
 
-- **W22** (`ws/w22-apple-signin`): the real `account.appleId.*` / `account.anisette.*` handlers and generated
-  types. Then swap the local types in `src/setup/appleId.ts` for the generated ones; `auto` mode picks the
-  engine up with no other change.
+- **W22** (`ws/w22-apple-signin`): its handlers and DTOs are committed and the owner can sign in. When W22 merges,
+  regenerate `src/generated/protocol.ts` and swap the local types in `src/setup/appleId.ts` for the generated
+  ones (the local copies already match W22's wire shapes). Not yet checked end to end against W22's daemon from
+  this branch: the unit tests use W22's shapes.
 - **Setup runner (host tree)**: deploy the runner build in the installed app; honour `--arg repair=1`
   (contract request 3).
 - **Contract changes** (`docs/windows/W19-CONTRACT-REQUESTS.md`): `DeviceSummary.transport: "virtual"`;
