@@ -2525,6 +2525,11 @@ export type McpUninstallParams = { client: string, scope?: McpScope, project?: s
 export type MessageLevel = "info" | "warning" | "error";
 
 /**
+ * A mirror codec, best first: HEVC from the device's display service, AVC, MJPEG, or screenshot polling.
+ */
+export type MirrorCodec = "hevc" | "avc" | "jpeg" | "poll";
+
+/**
  * The kind of an account change.
  */
 export type MutationKind = "create-certificate" | "register-device" | "register-bundle-id" | "enable-capability" | "create-profile" | "delete-profile";
@@ -3198,6 +3203,55 @@ export type RunSubscribeParams = { sessionId?: SessionId, };
  * Result of `run.subscribe`; then `run.state`, `run.output`, `run.exited` (and `run.jit`, W18).
  */
 export type RunSubscribeResult = { subscriptionId: SubscriptionId, };
+
+/**
+ * Params of `screen.mirror.start`: `{udid?, codecs: (hevc|avc|jpeg|poll)[], maxFps?, input?} → {streamId, url, token, codec, width, height} (class: read, input → device)`.
+ */
+export type ScreenMirrorStartParams = { udid?: string, 
+/**
+ * The codecs the viewer decodes, best first. The daemon streams HEVC; a viewer without it polls
+ * `screen.screenshot` instead.
+ */
+codecs: Array<MirrorCodec>, 
+/**
+ * A frame-rate cap (not applied yet: the device paces the stream).
+ */
+maxFps?: number, 
+/**
+ * Also accept touch, button, key and text messages on the WebSocket (class `device`).
+ */
+input?: boolean, };
+
+/**
+ * Result of `screen.mirror.start`.
+ */
+export type ScreenMirrorStartResult = { 
+/**
+ * `str_…`.
+ */
+streamId: string, 
+/**
+ * `ws://127.0.0.1:<port>/mirror/v1?stream=<streamId>` (ARCHITECTURE §10.1).
+ */
+url: string, 
+/**
+ * The single-use token for the WebSocket's first message.
+ */
+token: string, codec: MirrorCodec, 
+/**
+ * The screen's size in pixels.
+ */
+width: number, height: number, };
+
+/**
+ * Params of `screen.mirror.stop`: `{streamId} → {}`.
+ */
+export type ScreenMirrorStopParams = { streamId: string, };
+
+/**
+ * Result of `screen.mirror.stop`.
+ */
+export type ScreenMirrorStopResult = Record<symbol, never>;
 
 /**
  * Params of `screen.screenshot`: `{udid?, format?: png|jpeg, maxDimension?, scale?, quality?, toFile?} → {imageBase64?|path?, format, width, height, orientation}`.
@@ -4159,8 +4213,8 @@ export interface Methods {
   "logs.subscribe": { params: LogsSubscribeParams; result: LogsSubscribeResult };
   "logs.tail": { params: LogsTailParams; result: LogsTailResult };
   "screen.screenshot": { params: ScreenScreenshotParams; result: ScreenScreenshotResult };
-  "screen.mirror.start": { params: Unspecified; result: Unspecified };
-  "screen.mirror.stop": { params: Unspecified; result: Unspecified };
+  "screen.mirror.start": { params: ScreenMirrorStartParams; result: ScreenMirrorStartResult };
+  "screen.mirror.stop": { params: ScreenMirrorStopParams; result: ScreenMirrorStopResult };
   "screen.elements": { params: Unspecified; result: Unspecified };
   "screen.press": { params: Unspecified; result: Unspecified };
   "input.tap": { params: Unspecified; result: Unspecified };

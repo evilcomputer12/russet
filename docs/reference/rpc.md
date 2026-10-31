@@ -270,8 +270,8 @@ Methods:
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
 | `screen.screenshot` | read |  | plain | `ScreenScreenshotParams` | `ScreenScreenshotResult` |
-| `screen.mirror.start` | device (per call) |  | plain | `Unspecified` | `Unspecified` |
-| `screen.mirror.stop` | read |  | plain | `Unspecified` | `Unspecified` |
+| `screen.mirror.start` | device (per call) |  | plain | `ScreenMirrorStartParams` | `ScreenMirrorStartResult` |
+| `screen.mirror.stop` | read |  | plain | `ScreenMirrorStopParams` | `ScreenMirrorStopResult` |
 | `screen.elements` | read |  | plain | `Unspecified` | `Unspecified` |
 | `screen.press` | device |  | plain | `Unspecified` | `Unspecified` |
 
