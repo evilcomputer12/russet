@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Parsing and edits on synthetic Mach-O images built at test time (ARCHITECTURE §19; build T-MACHO).

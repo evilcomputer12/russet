@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `ui.*`: requests the daemon sends to `cli` and `ide` clients (ARCHITECTURE §9.3), and `ui.showMessage`.

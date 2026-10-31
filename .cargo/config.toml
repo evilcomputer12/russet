@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # Build hygiene (PLAN §0 rule 7): CARGO_TARGET_DIR (slot a or b), CARGO_BUILD_JOBS=6 and CARGO_INCREMENTAL=0

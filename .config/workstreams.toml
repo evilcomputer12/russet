@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # The machine-readable copy of PLAN §3 (who owns which paths) and ARCHITECTURE §5.1–§5.2 (the layer of every
@@ -76,7 +76,7 @@ paths = ["Cargo.lock", "schemas/**", "extension/src/generated/**", "docs/referen
 "xtask" = "dev"
 
 [layer-rules]
-# SPDX ids that count as permissive for layer F and its dependencies (ARCHITECTURE §5.2, §19). `bzip2-1.0.6`
+# SPDX ids that count as permissive for layer F's third-party dependencies (ARCHITECTURE §5.2, §19). `bzip2-1.0.6`
 # (libbz2-rs-sys under russet-xar's optional udif reader) is a reviewed deny.toml exception awaiting the lead's
 # sign-off [D 48]; drop it here if the lead drops udif instead.
 permissive = [

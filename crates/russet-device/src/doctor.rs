@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet doctor` device checks (DEV-25 subset; device.md §10): the mux flavor, pairing, Developer Mode, the DDI

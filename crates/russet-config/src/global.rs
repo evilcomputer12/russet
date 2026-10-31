@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The global `config.toml` (ARCHITECTURE §14.3), in the config directory. Accounts are not here (`accounts.toml`,

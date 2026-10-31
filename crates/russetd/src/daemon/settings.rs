@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Daemon settings from the configuration files (ARCHITECTURE §14.1, §14.3, §14.6): `[daemon]` and `[web]` of

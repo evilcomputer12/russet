@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! H1 (RD §23.2): the Rust gdb-remote client does `vRun` and `vAttach` against `lldb-server` from the Swift

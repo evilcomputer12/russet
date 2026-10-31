@@ -997,7 +997,7 @@ QA-04 creates the following files:
 | File | Content |
 |---|---|
 | `CONTRIBUTING.md` | Dev setup (`rust-toolchain.toml`, the tool install line from Appendix A); `cargo xtask ci`; branch and PR flow; Conventional Commits; the DCO; tests and docs required; CODEOWNERS review; "no Apple files"; clean-room rules; how to report device logs safely (`russet doctor --report --redact`) |
-| DCO | [Developer Certificate of Origin 1.1][S32]: every commit carries `Signed-off-by`. Enforced by `xtask guard dco`. Inbound licence equals outbound licence (GPL-3.0-or-later; 0BSD for `templates/` and `tests/fixtures/`). No CLA. |
+| DCO | [Developer Certificate of Origin 1.1][S32]: every commit carries `Signed-off-by`. Enforced by `xtask guard dco`. Inbound licence equals outbound licence (AGPL-3.0-only; 0BSD for `templates/` and `tests/fixtures/`). No CLA. |
 | `CODE_OF_CONDUCT.md` | Contributor Covenant **3.0**, the current version (July 2025) [S34] |
 | `SECURITY.md` | Private reporting through GitHub Security Advisories (public phase) or email (private phase); supported versions; a 90-day disclosure target |
 | `AGENTS.md`, with `CLAUDE.md` pointing to it | Rules for AI agents (below) |
@@ -1182,8 +1182,8 @@ Run by `cargo xtask legal-check` (automated items) together with the manual item
 
 | # | Item | Check |
 |---|---|---|
-| L1 | GPL-3.0-or-later `LICENSE` at the root, plus `LICENSES/` (REUSE layout) [S24] | Automated (`reuse lint`) |
-| L2 | Every source file has `SPDX-FileCopyrightText: 2026 The Russet contributors` and `SPDX-License-Identifier: GPL-3.0-or-later`. `templates/`, `tests/fixtures/` and `corpus/` use 0BSD or CC0. Bulk annotations go in `REUSE.toml` [S24]. | Automated |
+| L1 | AGPL-3.0-only `LICENSE` at the root, plus `LICENSES/` (REUSE layout) [S24] | Automated (`reuse lint`) |
+| L2 | Every source file has `SPDX-FileCopyrightText: 2026 The Russet contributors` and `SPDX-License-Identifier: AGPL-3.0-only`. `templates/`, `tests/fixtures/` and `corpus/` use 0BSD or CC0. Bulk annotations go in `REUSE.toml` [S24]. | Automated |
 | L3 | `NOTICE.md` (Apple disclaimer, trademarks, no Apple files) is shipped in every package and shown in the IDE About dialog | Automated (package content check) |
 | L4 | Third-party notices: cargo-about for Rust; an npm licence report for the extension and IDE; Code-OSS's `ThirdPartyNotices.txt`; MPL-2.0 notices (apple-codesign, mdBook if bundled) | Automated |
 | L5 | **Corresponding Source** for every binary: a source tarball with vendored crates, npm lockfiles and Code-OSS patches is attached to the release, and each package points to it (GPLv3 §6) [S31] | Automated (artifact present) |

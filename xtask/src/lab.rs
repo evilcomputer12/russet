@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask lab`: runs the device-in-the-loop suites through the live daemon of its own `RUSSET_HOME`; refuses while a daemon of another `RUSSET_HOME` holds the live-device lock (ARCHITECTURE §3.3 item 7). Lane A only.

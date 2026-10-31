@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Interop with stock `vscode-jsonrpc` 9.0.3 (ARCHITECTURE §7.2, core §19 "Interop"; PLAN W2 tests): the Node

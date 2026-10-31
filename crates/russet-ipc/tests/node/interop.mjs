@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 // Stock vscode-jsonrpc 9.0.3 (SocketMessageReader/Writer) against a russet-ipc server on a Unix socket

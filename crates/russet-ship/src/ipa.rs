@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The store/development IPA (SIGN §9.3), written through the deterministic `russet-ipa` writer: `Payload/<App>`,

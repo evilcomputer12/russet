@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet run`, `russet sessions`, `russet stop` (ARCHITECTURE §8.7). Owner: W7 (run, sessions, stop), W11

@@ -2,7 +2,7 @@
 
 SDK facts, platform view, toolsets, SDK and DDI import.
 
-- Layer **L3** (domain crate; may depend on F and L0–L2 except russet-ipc, and on the L3 edges of ARCHITECTURE §5.2) (ARCHITECTURE §5.1–§5.2). Licence: GPL-3.0-or-later.
+- Layer **L3** (domain crate; may depend on F and L0–L2 except russet-ipc, and on the L3 edges of ARCHITECTURE §5.2) (ARCHITECTURE §5.1–§5.2). Licence: AGPL-3.0-only.
 - **Owner:** W5 (Wave 1); `src/import/` W16b, `src/import/windows/` W27b.
 - `facts::BundleFacts::read` reads a Darwin SDK bundle in place (`SDKSettings`, `SystemVersion.plist`, the platform
   `Info.plist` `AdditionalInfo`, the platform and Xcode `version.plist`s, the back-deployment dylib directories, the

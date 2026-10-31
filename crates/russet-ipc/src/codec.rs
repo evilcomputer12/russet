@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! LSP base-protocol framing (ARCHITECTURE §7.2): `Content-Length: <n>\r\n\r\n<n bytes of UTF-8 JSON>`.

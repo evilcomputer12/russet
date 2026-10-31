@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Reading an SDK bundle in place (ARCHITECTURE §16.3; build §3.4). The layout is the Swift SDK bundle that xtool

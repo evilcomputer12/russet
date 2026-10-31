@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The Mach-O operations the build plane needs, behind one seam: summaries for the build report, `build.inspect`,
 //! back-deployment and `BuiltApp.uuids`, and the in-place `LC_RPATH` deletion of rpath hygiene (build §4.6).
 //!
-//! [`RussetMachO`], the default, is `russet-macho` (W6, ARCHITECTURE §5.3 [D 20]): one shared MIT parser and editor
+//! [`RussetMachO`], the default, is `russet-macho` (W6, ARCHITECTURE §5.3 [D 20]): one shared parser and editor
 //! for the build and signing planes. Tests substitute their own [`MachOTool`].
 
 use camino::Utf8Path;

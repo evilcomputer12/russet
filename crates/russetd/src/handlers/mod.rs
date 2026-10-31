@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The handler seam (ARCHITECTURE §5.3, §6.1): one file per namespace, each owned by its area (PLAN §3).

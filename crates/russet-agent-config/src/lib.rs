@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Writes MCP registrations for the agent clients (plan, apply, detect; IDE §6.6, ARCHITECTURE §11.7).

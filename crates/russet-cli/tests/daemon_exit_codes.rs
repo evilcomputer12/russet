@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Exit codes and the `--json` error shape of the real binary (ARCHITECTURE §13.1, §13.4; PLAN W2 acceptance

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask`: code generation and repository gates (ARCHITECTURE §4).
@@ -49,7 +49,7 @@ enum Cmd {
     Schema(schema::Args),
     /// Generate and sign pins/stable.toml (W3 in Wave 1, W26 later)
     Pins(pins::Args),
-    /// Check crate layering and layer F's permissive-licence rule (ARCHITECTURE §5.2)
+    /// Check crate layering and that layer F's third-party dependencies are permissive (ARCHITECTURE §5.2)
     CheckLayers(layers::Args),
     /// Warn about edits outside a workstream's paths and about seam files (PLAN §0 rule 2)
     CheckPaths(paths::Args),

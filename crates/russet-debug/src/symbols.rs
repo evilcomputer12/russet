@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Device symbols: the cache, status, the consent-gated fetch plan, the quota and LRU prune (RD §11, RD-12).

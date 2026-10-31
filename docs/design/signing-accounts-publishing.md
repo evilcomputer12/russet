@@ -173,17 +173,17 @@ russet-macho (LC_BUILD_VERSION, LC_SYMTAB alignment, signature parsing) ──�
 
 | Crate | Licence | Purpose | Main dependencies |
 |---|---|---|---|
-| `russet-secrets` | GPL-3.0-or-later | Secret storage abstraction | `keyring` 4.2 (`v1` feature), `aes-gcm`, `argon2`, `zeroize`, `windows-sys` (DPAPI, optional) |
-| `russet-asc` | GPL-3.0-or-later (MIT/Apache candidate, §21 Q3) | Typed async ASC client; JWT; scopes; DS2 transport hook | `reqwest` 0.13 (rustls), `p256` (ES256), `serde`, `tokio`, `url`, `base64` |
-| `russet-account` | GPL-3.0-or-later | Accounts, identities, provisioning engine, free-team policy | `russet-asc`, `russet-gsa`, `russet-secrets`, `russet-sign` (profile type), `rsa` 0.9, `x509-cert` 0.3, `p12-keystore` 0.4 |
-| `russet-gsa` | GPL-3.0-or-later | GrandSlam auth, 2FA, app tokens, developerservices2 | `num-bigint`, `sha2`, `hmac`, `pbkdf2`, `aes`, `cbc`, `aes-gcm`, `plist`, `reqwest` (custom root store) |
-| `russet-anisette` | GPL-3.0-or-later | Anisette providers, library acquisition, helper IPC | `reqwest`, `zip` (range-fed), `sha2`, `serde_json`, `tokio-tungstenite` (RemoteV3 only) |
-| `russet-adi-host` (bin) | GPL-3.0-or-later | Clean-room ELF loader + ADI calls in a separate, sandboxed process | `object` or `goblin` (ELF parsing), `libc`, `landlock`/`seccompiler` (Linux), `windows-sys` (Windows) |
-| `russet-macho` | GPL-3.0-or-later | Small Mach-O reader/patcher shared by sign, ship, build and debug | `object` or `goblin` |
-| `russet-sign` | GPL-3.0-or-later | Bundle model, profiles, entitlements merge, signing, verify, lints | `apple-codesign` 0.29.0 (`default-features=false`), `plist` 1.10, `cms`/`x509-cert` |
-| `russet-ship` | GPL-3.0-or-later | Archive, IPA, stamping, validation, upload, TestFlight, metadata, CI | `russet-sign`, `russet-asc`, `zip` 9, `md-5`, `sha2`, `reqwest` |
+| `russet-secrets` | AGPL-3.0-only | Secret storage abstraction | `keyring` 4.2 (`v1` feature), `aes-gcm`, `argon2`, `zeroize`, `windows-sys` (DPAPI, optional) |
+| `russet-asc` | AGPL-3.0-only | Typed async ASC client; JWT; scopes; DS2 transport hook | `reqwest` 0.13 (rustls), `p256` (ES256), `serde`, `tokio`, `url`, `base64` |
+| `russet-account` | AGPL-3.0-only | Accounts, identities, provisioning engine, free-team policy | `russet-asc`, `russet-gsa`, `russet-secrets`, `russet-sign` (profile type), `rsa` 0.9, `x509-cert` 0.3, `p12-keystore` 0.4 |
+| `russet-gsa` | AGPL-3.0-only | GrandSlam auth, 2FA, app tokens, developerservices2 | `num-bigint`, `sha2`, `hmac`, `pbkdf2`, `aes`, `cbc`, `aes-gcm`, `plist`, `reqwest` (custom root store) |
+| `russet-anisette` | AGPL-3.0-only | Anisette providers, library acquisition, helper IPC | `reqwest`, `zip` (range-fed), `sha2`, `serde_json`, `tokio-tungstenite` (RemoteV3 only) |
+| `russet-adi-host` (bin) | AGPL-3.0-only | Clean-room ELF loader + ADI calls in a separate, sandboxed process | `object` or `goblin` (ELF parsing), `libc`, `landlock`/`seccompiler` (Linux), `windows-sys` (Windows) |
+| `russet-macho` | AGPL-3.0-only | Small Mach-O reader/patcher shared by sign, ship, build and debug | `object` or `goblin` |
+| `russet-sign` | AGPL-3.0-only | Bundle model, profiles, entitlements merge, signing, verify, lints | `apple-codesign` 0.29.0 (`default-features=false`), `plist` 1.10, `cms`/`x509-cert` |
+| `russet-ship` | AGPL-3.0-only | Archive, IPA, stamping, validation, upload, TestFlight, metadata, CI | `russet-sign`, `russet-asc`, `zip` 9, `md-5`, `sha2`, `reqwest` |
 
-apple-codesign is MPL-2.0. Linking it into a GPL-3.0-or-later program is permitted under MPL-2.0
+apple-codesign is MPL-2.0. Linking it into an AGPL-3.0-only program is permitted under MPL-2.0
 §3.3 "Larger Work" (landscape §3.6). Russet does not fork it unless that becomes necessary.
 `apple-codesign-quick` (LGPL-2.1+, 3.5k LOC, RustCrypto stack) is the documented fallback signer if
 apple-codesign blocks us (R-12).
@@ -2220,7 +2220,7 @@ SA-01 → SA-02 → SA-03 → SA-04 → SA-05 → SA-06 → SA-07.
    - Should the visible `RussetToolchain` Info.plist marker be on when stamping?
 2. **Apple public CA certificates.** apple-codesign embeds them. Accept that, or patch the crate to
    fetch them at runtime with pinned hashes?
-3. **Licence of `russet-asc`.** GPL-3.0-or-later, or MIT/Apache-2.0 so the wider Rust ecosystem
+3. **Licence of `russet-asc`** (answered 2026-10-31: AGPL-3.0-only, like all of Russet). GPL-3.0-or-later, or MIT/Apache-2.0 so the wider Rust ecosystem
    can reuse it?
 4. **Owner approval for live tests that mutate the account.**
    - (a) Import xtool's existing development identity and reuse its certificate (it expires

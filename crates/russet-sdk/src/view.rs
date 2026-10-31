@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The platform view (ARCHITECTURE §16.3; build §3.4): a Russet-owned directory that mirrors the SDK's

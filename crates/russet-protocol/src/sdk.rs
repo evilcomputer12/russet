@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `sdk.*`: SDK registry and the native SDK/DDI importer (ARCHITECTURE §16.3). Owner: W3 (`sdk.list`); W16b

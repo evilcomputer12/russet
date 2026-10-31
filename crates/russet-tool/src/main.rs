@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet-tool`: multi-call Xcode-tool shims for Swift Build and flutter_tools (ARCHITECTURE §3.1): `actool`,

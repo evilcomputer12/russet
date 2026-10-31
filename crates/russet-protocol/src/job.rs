@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `job.*`: jobs (ARCHITECTURE §6.2, §7.6, §8.1, §9.2). Owner: W2.

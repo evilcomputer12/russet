@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet config get|set|unset|list|path|edit|schema [--scope …]` (ARCHITECTURE §8.7, §14). Owner: W3.

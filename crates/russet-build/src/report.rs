@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `build-report.json`, schema 1 (build §9.6; ARCHITECTURE §14.8): what was built, with which toolchain and SDK,

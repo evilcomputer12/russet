@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Out-of-band approvals end to end (ARCHITECTURE §11.3; PLAN W2 tests): an `mcp` connection calling a tier-3

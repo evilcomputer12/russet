@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask traces`: RDT trace tools (QA §3.5): `lint` (the redaction safety net, DC-13), `info` (a summary)

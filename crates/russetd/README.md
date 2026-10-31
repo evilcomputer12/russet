@@ -4,7 +4,7 @@ The per-user daemon (ARCHITECTURE §3, §6): lifecycle, `DaemonCtx`, handlers, p
 jobs, leases, subscriptions, the web endpoint and the audit log. One per OS user (one per worktree with
 `RUSSET_HOME`), autostarted by any client.
 
-- Layer **L4** (may depend on anything; ARCHITECTURE §5.1–§5.2). Licence: GPL-3.0-or-later.
+- Layer **L4** (may depend on anything; ARCHITECTURE §5.1–§5.2). Licence: AGPL-3.0-only.
 - **Owner:** W2 (CORE-06 and the runtime modules). W1 created the crate as a compiling stub (freeze F0).
 - **Seam files** (lead-only after W1 merges, PLAN §0 rule 2): `Cargo.toml`, `src/handlers/mod.rs` (the fixed
   namespace list) and `src/doctor_registry.rs` (the fixed list of crates' `checks()`).

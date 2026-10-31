@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The headless master key (core §9.6): derived from a passphrase with Argon2id (m = 64 MiB, t = 3, p = 1) and a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `provision.*`: provisioning plans (GET-only planning; approved apply) (ARCHITECTURE §8.4; SIGN §6.4). Owner:

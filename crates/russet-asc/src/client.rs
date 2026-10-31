@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The transport (SIGN §5.3): pluggable [`Auth`], the per-key [`RateLimiter`] (a token bucket that also follows

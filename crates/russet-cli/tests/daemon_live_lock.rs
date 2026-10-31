@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Development isolation across processes (ARCHITECTURE §3.3 item 7 [D 63, D 83]; PLAN W2 tests; AGENTS.md §4),

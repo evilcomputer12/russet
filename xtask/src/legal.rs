@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask legal-check`: the legal release gate: REUSE, notices, third-party licences, the Corresponding Source, no Apple files (QA §9).

@@ -1,5 +1,5 @@
 <!--
-SPDX-License-Identifier: GPL-3.0-or-later
+SPDX-License-Identifier: AGPL-3.0-only
 SPDX-FileCopyrightText: 2026 Russet contributors
 PRIVATE handoff. Contains the commercial/Windows direction — strip or move §8 before the public G1 squash.
 -->
@@ -168,7 +168,7 @@ A single Russet IDE window that is a true Xcode/Android-Studio peer:
   `main`**; never push unless asked.
 - **Synthetic test identifiers**: new fixture UDIDs use chip-id `00000000` or an **all-zero ECID** so `guard
   secrets` admits them without an allowlist entry. Never commit a real UDID/ECID/team-id/Apple-ID.
-- **Licensing**: engine = `GPL-3.0-or-later`; templates + injected-into-user-app code = `0BSD`; permissive layer-F
+- **Licensing** (superseded 2026-10-31: all of Russet is `AGPL-3.0-only`, see ARCHITECTURE §19): engine = `GPL-3.0-or-later`; templates + injected-into-user-app code = `0BSD`; permissive layer-F
   crates = `MIT`/`MIT OR Apache-2.0`. `deny.toml` allows only MIT/Apache-2.0/MPL-2.0/BSD/0BSD/GPL-3.0; **no
   LGPL/copyleft** in a shipped binary → **reims-vgpu (LGPL) must run out-of-process**. SPDX header on every file
   (REUSE 3.3); files that can't carry one go in `REUSE.toml`.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! A fake iOS debugserver (RD V5/V6, H6), ported from `docs/design/run-debug-prototypes/fake_ios_stub.py`.

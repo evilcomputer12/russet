@@ -312,7 +312,7 @@ committed `ide/product.json` is plain JSON.
   "win32TunnelServiceMutex": "russetide-tunnelservice",
   "win32TunnelMutex": "russetide-tunnel",
   "win32ContextMenu": { "x64": { "clsid": "GUID-5" }, "arm64": { "clsid": "GUID-6" } },
-  "licenseName": "GPL-3.0-or-later",
+  "licenseName": "AGPL-3.0-only",
   "licenseUrl": "https://github.com/evilcomputer12/russet/blob/main/LICENSE",
   "reportIssueUrl": "https://github.com/evilcomputer12/russet/issues/new",
   "documentationUrl": "https://github.com/evilcomputer12/russet/tree/main/docs",
@@ -340,7 +340,7 @@ committed `ide/product.json` is plain JSON.
 - `product.version` stays the Code-OSS version (1.135.x), because extension `engines` checks use it
   (QA §5.1).
 - The gallery block is VSCodium's, verbatim [V5].
-- `LICENSE.txt` in the app is a combined notice: GPL-3.0-or-later for Russet, plus the MIT notices of
+- `LICENSE.txt` in the app is a combined notice: AGPL-3.0-only for Russet, plus the MIT notices of
   Code-OSS and VSCodium. QA's legal gate checks it.
 - `chat.disableAIFeatures` stays `true`, as in VSCodium [V5]. Russet's AI surface is its own agent
   panel (§6.7), not Copilot Chat.
@@ -589,7 +589,7 @@ Budget: about 0.5 agent-day per bump [A].
 
 | Extension (Open VSX id) | Version [V11] | Licence | Size | Role | Russet IDE |
 |---|---|---|---|---|---|
-| `russet.russet` | ours | GPL-3.0-or-later | — | Everything in Part C | **Built in** |
+| `russet.russet` | ours | AGPL-3.0-only | — | Everything in Part C | **Built in** |
 | `swiftlang.swift-vscode` | 2.17.20260923 | Apache-2.0 | 15.0 MB | SourceKit-LSP, SwiftPM tasks, `swift` debug type | **Built in** |
 | `Dart-Code.dart-code` | 3.145.20260930 | MIT | 16.7 MB | Dart LSP, `dart` debug type, DevTools | **Built in** |
 | `Dart-Code.flutter` | 3.145.20260930 | MIT | 18 KB | Flutter commands (`flutter.hotReload`, …) [V21] | **Built in** |
@@ -648,7 +648,7 @@ Manifest excerpt. The complete file lives in `extension/package.json`; every id 
 ```jsonc
 {
   "name": "russet", "publisher": "russet", "displayName": "Russet", "version": "0.6.0",
-  "license": "GPL-3.0-or-later", "engines": { "vscode": "^1.135.0" },
+  "license": "AGPL-3.0-only", "engines": { "vscode": "^1.135.0" },
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -1423,7 +1423,7 @@ approvals, so the stdio and HTTP transports cannot diverge.
 - `schemars 1.2`, `serde`, `tokio 1.53`, `axum 0.8` (HTTP mount), `jsonschema` (tests);
 - `russet-proto` and the daemon client (core).
 
-**Licence:** GPL-3.0-or-later. rmcp is Apache-2.0, which is compatible (landscape §3.6).
+**Licence:** AGPL-3.0-only. rmcp is Apache-2.0, which is compatible (landscape §3.6).
 
 **Public Rust API:**
 

@@ -242,9 +242,9 @@ Principles:
 
 | Crate | Licence | Purpose |
 |---|---|---|
-| `russet-device` | GPL-3.0-or-later | Library: the device model, manager and actors, all capabilities, the error model, the pymobiledevice3 fallback |
-| `russet-device-proto` | GPL-3.0-or-later (could be MIT) | Serde types shared by the JSON-RPC and MCP surfaces (§7, §8); no idevice dependency, so the IDE can use the generated TypeScript |
-| `russet-device-hil` | GPL-3.0-or-later | Hardware-in-the-loop tests (§15), gated by `RUSSET_HIL_UDID` |
+| `russet-device` | AGPL-3.0-only | Library: the device model, manager and actors, all capabilities, the error model, the pymobiledevice3 fallback |
+| `russet-device-proto` | AGPL-3.0-only | Serde types shared by the JSON-RPC and MCP surfaces (§7, §8); no idevice dependency, so the IDE can use the generated TypeScript |
+| `russet-device-hil` | AGPL-3.0-only | Hardware-in-the-loop tests (§15), gated by `RUSSET_HIL_UDID` |
 | (upstream) idevice / jktcp patches | MIT | Upstream PRs, kept free of GPL code (§13) |
 
 `russet-device/Cargo.toml` (sketch):

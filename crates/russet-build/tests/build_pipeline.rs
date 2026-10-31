@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The whole build pipeline on the RussetProbe fixture with a scripted `swift`, a fake Mach-O tool and fixed SDK

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Port forwards and debug launch helpers (DEV-08; ARCHITECTURE §10.4, device.md §6.6, §14).

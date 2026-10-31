@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Xcode build-setting macro expansion (`INFOPLIST_EXPAND_BUILD_SETTINGS` semantics, build §4.4).

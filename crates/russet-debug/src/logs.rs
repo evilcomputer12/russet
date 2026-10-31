@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The run-output view (RD-09 minimal; RD §12): the app's stdout/stderr (CoreDevice stdio) merged with its

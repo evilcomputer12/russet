@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `ide.*`: requests the daemon sends to `ide` connections that declared `capabilities.ideDebug` [D 36]. Owner: W11 (daemon side), W14 (extension side).

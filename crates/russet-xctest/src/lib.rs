@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! XCTest and XCUITest runs on the device through idevice `xctest` (testmanagerd), with JUnit output [D 80].

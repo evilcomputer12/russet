@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Jobs (ARCHITECTURE §6.2, §7.6; PLAN W2 tests): a non-background job is cancelled within 1 s of its owner's

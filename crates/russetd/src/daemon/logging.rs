@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Logging (core §12; CORE-13): the daemon's daily files, the reloadable filter of `daemon.setLogFilter`,

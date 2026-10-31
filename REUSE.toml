@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # REUSE (core §18, ARCHITECTURE §19): every source file carries SPDX headers; this file covers what cannot carry
@@ -11,14 +11,14 @@ SPDX-PackageDownloadLocation = "https://github.com/evilcomputer12/russet"
 path = ["Cargo.lock"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Russet contributors"
-SPDX-License-Identifier = "GPL-3.0-or-later"
+SPDX-License-Identifier = "AGPL-3.0-only"
 
 [[annotations]]
 # Generated, committed outputs (PLAN §0 rule 2): regenerate, never hand-edit.
 path = ["schemas/**", "extension/src/generated/**", "docs/reference/**", "pins/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Russet contributors"
-SPDX-License-Identifier = "GPL-3.0-or-later"
+SPDX-License-Identifier = "AGPL-3.0-only"
 
 [[annotations]]
 # Project documents and the pre-W1 skeleton.
@@ -35,7 +35,7 @@ path = [
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Russet contributors"
-SPDX-License-Identifier = "GPL-3.0-or-later"
+SPDX-License-Identifier = "AGPL-3.0-only"
 
 [[annotations]]
 # W14 extension: dotfiles, media assets (SVG icons, walkthrough docs), the Info.plist/entitlement data
@@ -51,10 +51,10 @@ path = [
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Russet contributors"
-SPDX-License-Identifier = "GPL-3.0-or-later"
+SPDX-License-Identifier = "AGPL-3.0-only"
 
 [[annotations]]
-# The READMEs of the permissive layer-F crates follow their crate's licence.
+# The READMEs of the layer-F crates, AGPL-3.0-only like everything else.
 path = [
     "crates/russet-plist/README.md",
     "crates/russet-macho/README.md",
@@ -70,10 +70,10 @@ path = [
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Russet contributors"
-SPDX-License-Identifier = "MIT"
+SPDX-License-Identifier = "AGPL-3.0-only"
 
 [[annotations]]
 path = ["crates/russet-gdbremote/README.md"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Russet contributors"
-SPDX-License-Identifier = "MIT OR Apache-2.0"
+SPDX-License-Identifier = "AGPL-3.0-only"

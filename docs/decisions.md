@@ -54,8 +54,10 @@ Decisions agreed with the project owner. Newest first.
   and Windows with a physical iPhone, without needing a Mac. Headless operation must
   also work.
 - **Name.** Russet (an apple variety, and a nod to Rust). The IDE is "Russet"; the CLI is `russet`. Renamed from "Orchard" on 2026-10-11 to avoid clashing with yaelliethy/orchard (macOS on QEMU) and OpenAI/Cirrus Orchard (Tart VMs).
-- **License.** GPL-3.0-or-later. Pieces meant for upstreaming may be MIT where
-  compatible.
+- **License.** ~~GPL-3.0-or-later; pieces meant for upstreaming may be MIT where compatible.~~ Superseded
+  2026-10-31 by the owner: **AGPL-3.0-only** for all of Russet, layer F included, so nobody can ship a closed
+  fork or run a modified Russet as a service without sharing its source. Contributions use the DCO, no CLA
+  (ARCHITECTURE §19).
 - **Core language.** Rust. The device plane builds on `idevice` (MIT).
   `pymobiledevice3` is used as a reference and fallback.
 - **GUI.** Our own IDE built on Code-OSS, with dedicated buttons, plus a bundled

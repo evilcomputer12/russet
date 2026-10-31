@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet tap`, `russet swipe`, `russet button`, `russet type` (ARCHITECTURE §8.7). Owner: W10.

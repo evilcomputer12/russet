@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! A tiny arm64 iOS Mach-O executable built at test time (no Apple file is committed, ARCHITECTURE §19), and

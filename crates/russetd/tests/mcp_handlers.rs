@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The `mcp.*` administration handlers in-process (ARCHITECTURE §8.6, §11.7; W13): `mcp.install`,

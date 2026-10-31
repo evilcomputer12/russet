@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The CI store (`RUSSET_SECRETS_BACKEND=env`, ARCHITECTURE §14.9): read-only secrets from environment variables,

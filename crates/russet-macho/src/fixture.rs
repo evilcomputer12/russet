@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Synthetic Mach-O images for tests (feature `fixture`). ARCHITECTURE §19: Mach-O fixtures are built by Russet's

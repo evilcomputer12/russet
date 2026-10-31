@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Domain types → the wire shapes of ARCHITECTURE §9.5 (`russet_protocol::common`) and the device namespaces.

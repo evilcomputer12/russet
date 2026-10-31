@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! In-place edits: rpath deletion, the iOS 27 string-pool alignment fix, thinning and the last-resort SDK patch.

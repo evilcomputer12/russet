@@ -2,7 +2,7 @@
 
 gdb-remote codec, stop-reply parser, async GdbClient and interposer hooks.
 
-- Layer **F** (format/protocol library; permissive; may depend only on F crates) (ARCHITECTURE §5.1–§5.2). Licence: MIT OR Apache-2.0.
+- Layer **F** (format/protocol library; may depend only on F crates) (ARCHITECTURE §5.1–§5.2). Licence: AGPL-3.0-only.
 - **Owner:** W7 (RD-01).
 - `codec`: `$payload#xx` framing with per-side ack checking, the raw interrupt, `}` escapes and `*` run-length decoding.
 - `stop`: `T`/`S`/`W`/`X`/`O` replies with expedited registers, Mach exceptions and `jstopinfo`.

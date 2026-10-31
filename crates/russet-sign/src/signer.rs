@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Signing through apple-codesign 0.29.0 (SIGN §8.2, §8.7): one `SigningSettings` for the whole tree, with the

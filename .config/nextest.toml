@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # cargo-nextest profiles (QA §3.9.2). W8 owns CI wiring; W9 adds the lab profile.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The in-memory store for tests (`RUSSET_SECRETS_BACKEND=memory`): nothing touches the disk or a keyring.

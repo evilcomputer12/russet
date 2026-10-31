@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! DS2 authentication (SIGN §7.4, SA-18/SA-20): the typed client of this crate talking to developerservices2's

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet doctor [--fix] [--online] [--strict] [--check ID]… [--category C]…` (ARCHITECTURE §8.7; core §11).

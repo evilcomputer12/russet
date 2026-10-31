@@ -73,7 +73,7 @@ Each item is verified on this machine (Swift 6.4, xtool's Darwin SDK from Xcode 
 
 | Crate / binary | Kind | Licence | Responsibility |
 |---|---|---|---|
-| `russet-build` | lib | GPL-3.0-or-later | Orchestrator: request, plan, execute, report. Stack adapters (`stack::{swiftpm, flutter, xcode, rn, maui}`), bundle assembly (`bundle`), Info.plist synthesis (`infoplist`), events, build reports. |
+| `russet-build` | lib | AGPL-3.0-only | Orchestrator: request, plan, execute, report. Stack adapters (`stack::{swiftpm, flutter, xcode, rn, maui}`), bundle assembly (`bundle`), Info.plist synthesis (`infoplist`), events, build reports. |
 | `russet-plist` | lib | MIT | plist I/O: XML and binary via the `plist` crate, plus our own OpenStep (ASCII) reader/writer. Xcode build-setting macro expansion (`$(VAR)`, `${VAR}`, `$(VAR:op)`). |
 | `russet-macho` | lib | MIT | Mach-O read and lint. Safe in-place edits (delete `LC_RPATH`, thin fat files). A last-resort `LC_BUILD_VERSION` sdk patch, used only for foreign binaries. |
 | `russet-ipa` | lib | MIT | Deterministic IPA writer and reader. |

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The userspace CoreDeviceProxy tunnel with the MSS clamp, and the per-generation RSD service map (device.md §5.3,

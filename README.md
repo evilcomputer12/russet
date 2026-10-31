@@ -35,4 +35,12 @@ Xcode download (`Xcode.xip`), which you get from Apple with your own Apple ID. S
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+Russet is free software under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`). See
+[LICENSE](LICENSE).
+
+In short: you may use, study, change and share Russet, also commercially, but anything you distribute that
+contains Russet, and any modified Russet you let others use over a network, must come with its complete source
+code under the same licence. Nobody can turn Russet into a closed product.
+
+Contributions are welcome under the same licence, with a [DCO](CONTRIBUTING.md#developer-certificate-of-origin)
+sign-off (`git commit -s`); there is no CLA, so contributions can never be relicensed.

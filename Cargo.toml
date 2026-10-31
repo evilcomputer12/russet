@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # Seam file: lead-only after W1 merges (PLAN §0 rule 2). Crate layout and layering: ARCHITECTURE §4–§5.
@@ -13,14 +13,14 @@ members = ["crates/*", "xtask", "tests/lab"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99" # ARCHITECTURE §16.7 [D 70]; rust-toolchain.toml names `stable`, never `1.99.0`
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-only"
 repository = "https://github.com/evilcomputer12/russet"
 authors = ["Russet contributors"]
 publish = false
 
 [workspace.dependencies]
 # ---- Russet crates (ARCHITECTURE §5.1) --------------------------------------------------------------
-# F: format/protocol libraries (MIT; russet-gdbremote MIT OR Apache-2.0)
+# F: format/protocol libraries
 russet-plist = { path = "crates/russet-plist" }
 russet-macho = { path = "crates/russet-macho" }
 russet-ipa = { path = "crates/russet-ipa" }

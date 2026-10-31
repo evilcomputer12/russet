@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Framing of the gdb-remote serial protocol: `$payload#xx` packets, `+`/`-` acknowledgements, the raw `0x03`

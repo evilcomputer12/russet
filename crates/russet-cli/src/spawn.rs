@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Spawning the daemon from the CLI (`daemon run --detach` from the CLI's own executable, ARCHITECTURE §3.3).

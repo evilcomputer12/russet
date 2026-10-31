@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `build.inspect` / `russet inspect` (build §9.3): an `.app` or `.ipa`'s Info.plist, its DT* keys, a summary of

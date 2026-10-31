@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! B01 acceptance on real Apple files: the SDK's own `SDKSettings.plist` (binary), the platform `Info.plist`

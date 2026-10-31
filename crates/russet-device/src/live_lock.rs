@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The host-wide live-device lock (ARCHITECTURE §3.3 item 7 [D 83]) for the lane-A tools that drive the live

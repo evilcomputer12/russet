@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Russet's Node interop harness: drives a russet/1 daemon with stock vscode-jsonrpc (core §23, CORE-15)",
-  "license": "GPL-3.0-or-later",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "main": "interop.mjs",
   "engines": {

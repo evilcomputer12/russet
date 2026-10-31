@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The Node interop harness (CORE-15, shared with W2): stock vscode-jsonrpc 9.0.3, the client library of the VS
