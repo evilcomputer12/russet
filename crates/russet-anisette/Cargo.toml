@@ -14,7 +14,33 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# `AnisetteFake` and `FakeAdi`: deterministic providers for the mocked suites of the crates above (W22).
+fake = []
+
 [dependencies]
+async-trait.workspace = true
+base64 = "0.22.1"
+flate2.workspace = true
+futures.workspace = true
+plist.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+ring.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
+russet-secrets.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time = { workspace = true, features = ["formatting"] }
+tokio = { workspace = true, features = ["io-util", "process", "sync", "time", "fs"] }
 tokio-tungstenite = { workspace = true, features = ["connect", "rustls-tls-webpki-roots"] }
+tracing.workspace = true
+url.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+wiremock = "0.6.5"

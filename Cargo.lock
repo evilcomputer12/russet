@@ -5511,9 +5511,28 @@ dependencies = [
 name = "russet-anisette"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "flate2",
+ "futures",
+ "plist",
+ "reqwest 0.13.5",
+ "ring",
  "russet-core",
  "russet-doctor",
+ "russet-secrets",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
  "tokio-tungstenite 0.30.0",
+ "tracing",
+ "url",
+ "uuid",
+ "wiremock",
+ "zeroize",
 ]
 
 [[package]]
@@ -5730,11 +5749,29 @@ name = "russet-gsa"
 version = "0.1.0"
 dependencies = [
  "aes-gcm 0.11.1",
+ "async-trait",
+ "base64 0.22.1",
+ "cbc 0.2.1",
  "num-bigint",
+ "plist",
+ "reqwest 0.13.5",
+ "ring",
  "russet-anisette",
  "russet-asc",
  "russet-core",
  "russet-doctor",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "wiremock",
+ "zeroize",
 ]
 
 [[package]]

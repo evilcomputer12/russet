@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "about": "SHA-256 of Apple's ADI libraries inside the Apple Music APK, by x-apple-version-number and ABI (SIGN 7.5). Hashes only: the libraries are fetched from Apple's CDN at runtime after consent and never redistributed. A version missing here is trusted on first use and recorded locally; a Russet release adds it.",
+  "versions": {}
+}
