@@ -68,6 +68,13 @@ Nothing is pushed or merged.
   codes (5254), sign-in timed out (5258, back to the form), libraries missing or consent required (5270/5273),
   local anisette unsupported on this host (5276, also from `localSupported: false`), Apple unavailable (5107),
   `perm.*`, not implemented (1005 / -32601 / 3013).
+- Identity (anisette): setting `russet.account.anisetteServer` (machine scope; the extension also reads only the
+  user-settings value, so a workspace cannot redirect it). Empty: this PC's own local ADI. An `https://` URL (the
+  owner chose xtool's `https://mac-ani.jkcoxson.com` after Apple refused the local identity with -80045):
+  `begin` sends `anisette: {remote: url}`, the local status check, consent and library download are skipped, and
+  the form names the server's host and says its operator sees this computer's device-identity requests, not the
+  password or codes. Non-https values are refused with a message. `gsa.identityRejected` (-80045/-80046) on the
+  local path suggests the setting (**Use an identity server…** opens it).
 - Setting `russet.account.appleIdSignIn`: `auto` (default; an engine that answers not-implemented gets an
   explanation and the API-key alternative), `on` (show the form even without anisette status), `off`.
 - Live check: against today's engine the page shows "not available in this version of the Russet engine yet
@@ -105,7 +112,7 @@ checked in dark, light and high-contrast themes; `prefers-reduced-motion` stops 
 
 ## Verification (2026-10-31, Windows, Node 24.22.1)
 
-- `vitest run`: 12 files, **68 tests pass** (18 pre-existing + setup contract, runner against an in-process
+- `vitest run`: 12 files, **77 tests pass** (18 pre-existing + setup contract, runner against an in-process
   fake and against `test/fixtures/fake-setup-runner.mjs`, setup model, Xcode detection, sign-in flows with a
   password canary, destinations, catalog, tap geometry, input validation).
 - `tsc --noEmit`: clean. ESLint on every changed file: clean.

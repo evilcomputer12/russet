@@ -95,6 +95,9 @@ export class SignInPanel implements vscode.Disposable {
       case "back":
         c.back();
         break;
+      case "openIdentitySetting":
+        await vscode.commands.executeCommand("workbench.action.openSettings", "russet.account.anisetteServer");
+        break;
       case "addKey":
         await vscode.commands.executeCommand("russet.account.addAscKey");
         break;
