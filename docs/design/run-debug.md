@@ -1208,7 +1208,7 @@ pub enum GdbError { Io(std::io::Error), Protocol(String), Remote { code: u8, mes
 
 ### 17.2 Crate `russet-debug`
 
-Licence: GPL-3.0-or-later.
+Licence: AGPL-3.0-only.
 
 > **Superseded on the wire (ARCHITECTURE §9.5, §20.1):** `SessionState` and `SessionSummary` convert to the wire
 > shapes of ARCHITECTURE §9.5. `Detached` is not a wire state: a session whose debugger detached stays `running`,

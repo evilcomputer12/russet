@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Output rules for tool results (ARCHITECTURE §11.6, QA §8.4): untrusted wrapping, control/ANSI stripping and

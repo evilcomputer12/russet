@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask sweep`: keeps the cargo target slots under their cap (QA-24; PLAN §0 rule 7; AGENTS.md §6).

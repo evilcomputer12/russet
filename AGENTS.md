@@ -1,5 +1,5 @@
 <!--
-SPDX-License-Identifier: GPL-3.0-or-later
+SPDX-License-Identifier: AGPL-3.0-only
 SPDX-FileCopyrightText: 2026 Russet contributors
 -->
 
@@ -125,6 +125,6 @@ redacted fixtures. Real owner artifacts may be read only by local, env-gated tes
 - New methods are registered in `russet-protocol` and the schemas regenerated (`cargo xtask schema`).
 - New errors have a code in your family file, a hint and a docs anchor.
 - Environment-dependent features have a doctor check; CLI commands support `--json`.
-- SPDX headers on every file (`GPL-3.0-or-later`; `MIT` or `MIT OR Apache-2.0` in layer F), no Apple files, no
+- SPDX headers on every file (`AGPL-3.0-only`; `0BSD` for templates and fixtures), no Apple files, no
   secrets in logs (canary test).
 - The area design doc is updated where behaviour differs from it.

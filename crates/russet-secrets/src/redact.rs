@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Redaction helpers (ARCHITECTURE §12.2 "Logs"; core §12) [D 13] for the logging layer (W2, CORE-13), the bug

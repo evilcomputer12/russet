@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Hardware-in-the-loop tests (device.md §15.4; PLAN §4.4 tests): lane A only, so every test is `#[ignore]`d and a

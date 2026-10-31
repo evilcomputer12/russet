@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: AGPL-3.0-only */
 /* Only VS Code theme variables; no hard-coded colours (ide.md §5.9). */
 :root {
   color-scheme: light dark;

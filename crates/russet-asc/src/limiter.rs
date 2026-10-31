@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The per-key rate limiter (SIGN §5.3): a token bucket of 3,600 requests per hour per key [V2] that also

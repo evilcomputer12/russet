@@ -1,6 +1,6 @@
 # russet-protocol
 
-Layer **L1** (ARCHITECTURE §5.1–§5.2). Licence: GPL-3.0-or-later.
+Layer **L1** (ARCHITECTURE §5.1–§5.2). Licence: AGPL-3.0-only.
 
 - **Owner:** W1 created it. `Cargo.toml`, `src/lib.rs`, `src/registry.rs` and `src/macros.rs` are seam files,
   lead-only after W1 merges (PLAN §0 rule 2).

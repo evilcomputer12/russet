@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet account` (ARCHITECTURE §8.7). Owner: W6 (Wave 1), W12 (Wave 2), W22 (login, anisette; Wave 3).

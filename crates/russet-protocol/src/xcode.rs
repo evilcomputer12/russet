@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `xcode.*`: Xcode-project adaptation (`russet xcode adapt|dump-pif|show-build-settings`, ARCHITECTURE §8.7, K3). Owner: W28 (Wave 6).

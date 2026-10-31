@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 //! `device` error codes (3000–3099, 3200–3299). Owner: W4 (Wave 1), W10 (Wave 2: the 3200 device-services range).
 //!

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The one test that touches the OS keyring (PLAN §4.3, ARCHITECTURE §3.3 item 7) [D 83]. It runs only with

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # DC-28 (PLAN §4.10, §11; gate item 7) [D 62, D 82, D 89]: after the owner-approved reboot (Q33), Russet mounts the

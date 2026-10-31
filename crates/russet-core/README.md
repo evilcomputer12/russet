@@ -1,6 +1,6 @@
 # russet-core
 
-Layer **L0** (ARCHITECTURE §5.1–§5.2). Licence: GPL-3.0-or-later.
+Layer **L0** (ARCHITECTURE §5.1–§5.2). Licence: AGPL-3.0-only.
 
 - **Owner:** W2 (CORE-02). W1 created the skeleton: the `ErrorCode` type, every error-code constant of
   ARCHITECTURE §13.3 and the `rpc` traits (freeze F0).

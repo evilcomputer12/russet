@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! [`ScriptedConnector`]: core's FakeDeviceBackend [D 46], an `io::ServiceConnector` (testability contract T5)

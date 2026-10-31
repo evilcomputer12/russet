@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # The scheduled full run (QA §4.2 `nightly.yml`; ARCHITECTURE [D 77]; PLAN W8, QA-03). Private phase: weekly

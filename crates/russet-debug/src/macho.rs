@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! What identifies a Mach-O build: its `LC_UUID` (how LLDB binds the local file to the device's image; RD §21

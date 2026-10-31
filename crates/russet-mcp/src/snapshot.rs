@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The MCP tool-catalog snapshot (`schemas/mcp/tools.v1.json`), the contract snapshot of ARCHITECTURE §11.4

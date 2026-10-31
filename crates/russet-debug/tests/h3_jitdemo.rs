@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! H3 (RD §23.2, V8): the RX-page demo serviced natively over gdb-remote against `lldb-server`, ported from

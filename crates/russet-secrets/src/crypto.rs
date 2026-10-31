@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Sealing (ARCHITECTURE §12.2) [D 13]: every secret is a file encrypted with XChaCha20-Poly1305 under the

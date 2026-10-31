@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The Mac and GitHub Actions oracle runner (QA §3.4.5); Apple hardware only, read-only on the Mac.

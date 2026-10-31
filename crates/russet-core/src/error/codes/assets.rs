@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 //! `assets` error codes (4100–4119). Owner: W21 (assets), W21b/W28b/W28c (storyboards).
 //!

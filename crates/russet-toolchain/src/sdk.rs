@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The SDK registry probe (ARCHITECTURE §14.8, §16.1; core §10.6): Russet's own imports listed in

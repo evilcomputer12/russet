@@ -4,7 +4,7 @@
   "displayName": "Russet",
   "description": "Build, run and debug iOS apps on your iPhone from Linux and Windows, with the virtual iPhone embedded.",
   "version": "0.6.0",
-  "license": "GPL-3.0-or-later",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/evilcomputer12/russet"

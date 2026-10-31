@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The MCP doctor check (ARCHITECTURE §5.3: `russet-mcp::checks()`), surfaced through russetd's doctor seam.

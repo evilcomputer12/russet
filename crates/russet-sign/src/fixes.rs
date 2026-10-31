@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Fixes before signing (SIGN §8.5): exec bits, the iOS 27 string-pool alignment, stale signature files, and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Errors of the `debug` family (6000–6099, ARCHITECTURE §13.3; RD §22): constructors with their hints, and the

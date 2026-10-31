@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The installer (CORE-11 subset; core §10.5): pinned, verified downloads of `python-shared` and `darwin-tools`.

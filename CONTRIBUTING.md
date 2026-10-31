@@ -1,5 +1,5 @@
 <!--
-SPDX-License-Identifier: GPL-3.0-or-later
+SPDX-License-Identifier: AGPL-3.0-only
 SPDX-FileCopyrightText: 2026 Russet contributors
 -->
 
@@ -55,7 +55,7 @@ fix its findings: [docs/contributing/guards.md](docs/contributing/guards.md).
 - New JSON-RPC methods are registered in `russet-protocol` and the schemas regenerated (`cargo xtask schema`).
 - New errors have a code in their family file, a hint and a docs anchor; CLI commands support `--json`.
 - Environment-dependent features have a doctor check.
-- Every file has SPDX headers (`GPL-3.0-or-later`; `MIT` or `MIT OR Apache-2.0` in layer F; `0BSD` for templates,
+- Every file has SPDX headers (`AGPL-3.0-only`; `0BSD` for templates,
   fixtures and sample apps). Files that cannot carry a comment get a `<file>.license` sidecar.
 - The area design doc is updated where behaviour differs from it.
 
@@ -85,9 +85,9 @@ Signed-off-by: Your Name <your.email@example.org>
 ```
 
 to a commit (`git commit -s`) you certify that you wrote the change or otherwise have the right to submit it under
-the project's licence. Inbound licence equals outbound licence: GPL-3.0-or-later (layer-F crates MIT or
-MIT OR Apache-2.0; 0BSD for `templates/` and `tests/fixtures/`). `cargo xtask guard dco` checks every commit of a
-branch; CI enforces it on pull requests once the repository is public (PLAN §5.9). Until then the repository has
+the project's licence. Inbound licence equals outbound licence: AGPL-3.0-only for all of Russet (0BSD for
+`templates/` and `tests/fixtures/`). There is no CLA, so nobody can relicense a contribution. `cargo xtask guard
+dco` checks every commit of a branch; CI enforces it on pull requests once the repository is public (PLAN §5.9). Until then the repository has
 no outside contributors.
 
 ## No Apple files, no secrets, no device identifiers

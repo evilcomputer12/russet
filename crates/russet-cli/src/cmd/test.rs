@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet test` (ARCHITECTURE §8.7). Owner: W32 (SwiftPM XCTest, Wave 4), W28 (Xcode projects, XCUITest, Wave 6).

@@ -126,11 +126,11 @@ Russet lets anyone develop, build, install, debug, test and ship iOS apps from L
 
 | Binary | Licence | What it is | Wave |
 |---|---|---|---|
-| `russet` | GPL-3.0-or-later | Multi-call: `russet <cmd>` is the CLI; `russet daemon run` (or the file invoked as `russetd`) is the daemon; `russet mcp serve` is the MCP bridge; `russet flutter device <op>` is called by flutter_tools [D 40] | 1 |
-| `russet-tool` | MIT | Multi-call Xcode-tool shims for Swift Build and flutter_tools: `actool`, `ibtool`, `xcstringstool`, `xcrun`, `codesign` (no-op), `ld64.lld` trampoline (`-r` → `llvm-libtool-darwin -static`), and error shims for closed tools (`momc`, `metal`, …) [build §3.1]. Layer F: it may depend only on F crates (§5.2) | 2 |
-| `russet-adi-host` | GPL-3.0-or-later | Sandboxed helper that loads Apple's runtime-downloaded Android ADI libraries; no network; JSON-lines IPC [SIGN §7.5]. Layer L3 binary; depends on F crates and `russet-core` only | 3 |
-| `russet-swb` | MIT (links Apache-2.0 SwiftBuild) | Swift driver over the open SwiftBuild library: JSON PIF in, JSON-lines events out; built in CI per Swift minor version [build §7.4] | 6 |
-| `russet-ide` | MIT (Code-OSS) + Russet overlay | The IDE launcher; bundles `russet` under `resources/app/bin/` [IDE §3.8] | 4 |
+| `russet` | AGPL-3.0-only | Multi-call: `russet <cmd>` is the CLI; `russet daemon run` (or the file invoked as `russetd`) is the daemon; `russet mcp serve` is the MCP bridge; `russet flutter device <op>` is called by flutter_tools [D 40] | 1 |
+| `russet-tool` | AGPL-3.0-only | Multi-call Xcode-tool shims for Swift Build and flutter_tools: `actool`, `ibtool`, `xcstringstool`, `xcrun`, `codesign` (no-op), `ld64.lld` trampoline (`-r` → `llvm-libtool-darwin -static`), and error shims for closed tools (`momc`, `metal`, …) [build §3.1]. Layer F: it may depend only on F crates (§5.2) | 2 |
+| `russet-adi-host` | AGPL-3.0-only | Sandboxed helper that loads Apple's runtime-downloaded Android ADI libraries; no network; JSON-lines IPC [SIGN §7.5]. Layer L3 binary; depends on F crates and `russet-core` only | 3 |
+| `russet-swb` | AGPL-3.0-only (links Apache-2.0 SwiftBuild) | Swift driver over the open SwiftBuild library: JSON PIF in, JSON-lines events out; built in CI per Swift minor version [build §7.4] | 6 |
+| `russet-ide` | Code-OSS (MIT) + Russet overlay (AGPL-3.0-only) | The IDE launcher; bundles `russet` under `resources/app/bin/` [IDE §3.8] | 4 |
 
 **Why one multi-call `russet` binary** [D 1]: the CLI and daemon of one install can never be different builds; there is one artifact to sign and package; `--no-daemon` and tests reuse the daemon code in-process [core §3.1].
 
@@ -224,45 +224,45 @@ russet/
 
 ### 5.1 Crate table
 
-Layers: **F** = format/protocol libraries (permissive, no `russet-*` dependency except other F crates, upstreamable); **L0–L4** as in [core §4.3]. "Owner" is the workstream that creates the crate; later waves may hand it on (PLAN §3).
+Layers: **F** = format/protocol libraries (no `russet-*` dependency except other F crates; their third-party dependencies stay permissive); **L0–L4** as in [core §4.3]. "Owner" is the workstream that creates the crate; later waves may hand it on (PLAN §3).
 
 | Crate | Layer | Licence | Owner | Responsibility | Key deps |
 |---|---|---|---|---|---|
-| `russet-plist` | F | MIT | W5 | XML and binary plist I/O; OpenStep reader/writer; Xcode build-setting macro expansion | plist 1.10.1 |
-| `russet-macho` | F | MIT | W6 | Mach-O parse (thin/fat), `LC_BUILD_VERSION`, rpaths, load commands, UUID, `LC_SYMTAB` string-pool alignment check and fix, code-signature blob parse, in-place rpath delete, thin; last-resort sdk patch for foreign binaries [D 20] | goblin 0.10.7 or object 0.40.0 |
-| `russet-ipa` | F | MIT | W5 | Deterministic IPA writer/reader: sorted entries, fixed mtimes, Unix modes from Mach-O magic, symlinks, Zip64, `dev` (stored) and `store` (deflate-6) modes, `SwiftSupport/` [D 19] | zip 9.0.1 |
-| `russet-gdbremote` | F | MIT OR Apache-2.0 | W7 | gdb-remote codec, stop-reply parser, async `GdbClient`, interposer hooks | tokio, tokio-util |
-| `russet-car`, `russet-assets` | F | MIT | W21 | BOM/CoreUI CAR writer/reader; `.xcassets` model, icon expansion, partial Info.plist, asset symbols | image, resvg, lzfse |
-| `russet-xcstrings`, `russet-ib` | F | MIT | W21 (B10, B12); `russet-ib` then W21b (B21a), W28b (B21b) and W28c (B21c) [D 90] | `.xcstrings` compile and symbols. `russet-ib`: storyboard/XIB reader, launch-screen converter (B12), NIBArchive codec (coder version 10, the iOS `LNE\0` trailer with `IBUINibLNEVersionKey`, class fallback entries) and the storyboard/XIB → `.storyboardc`/`.nib` compiler (B21a–c) [D 75] | — |
-| `russet-xcodeproj`, `russet-pif` | F | MIT | W28 | pbxproj / JSON `.xcproj` / workspace / scheme / xcconfig parsing and settings resolver; PIF emitter | — |
-| `russet-xar` | F | MIT | W16b | Read-only Apple container formats for SDK and DDI import [D 62, D 69]: xar (zlib TOC, heap, SHA-1 TOC checksum; `.xip` and flat `.pkg`); the xar RSA signature, which is **prehashed** (a PKCS#1 v1.5 SHA-1 DigestInfo over the raw TOC checksum) and is chained to the runtime-pinned Apple Root CA (§16.6), never to the embedded root, ignoring leaf expiry; pbzx (16 MiB chunks, each XZ or stored) and gzip payload streams; `cpio` (odc/newc; hardlinks by (dev, ino)); UDIF (`koly` trailer, `blkx` tables; raw, zero-fill and zlib chunks, with bzip2 and lzfse optional because neither Apple DDI image uses them); a read-only HFS+/HFSX reader (DDIs need no decmpfs). Contract: streaming, with bounded in-order parallel pbzx decoding (at most threads × 2 × 16 MiB in flight); rejects absolute and `..` names; never writes through a link; output and size caps; cargo-fuzz targets | flate2, lzma-rust2 0.21.0 (pure Rust XZ; `liblzma` cannot join the workspace next to apple-codesign [D 95]), quick-xml, sha1, sha2, rsa 0.9 (verify only: RUSTSEC-2023-0071 concerns private-key operations and is ignored in `deny.toml` for this crate with that reason), x509-cert; `cms` optional; `udif` 0.4.2 and `hfsplus` 0.4.0 (MIT) optional, pinned exactly; `apple-xar` and `cpio-archive` (MPL-2.0) only as dev-dependency oracles |
-| `russet-tool` (binary) | F | MIT | W16 (`ibtool` compile and link modes: W21b) | The multi-call shim binary of §3.1 | F crates only |
-| `russet-core` | L0 | GPL-3.0-or-later | W1/W2 | Errors and codes, ids, `RussetDirs`, fs helpers, processes (`CommandRunner`), progress and event sinks, clock and entropy, endpoints, secret wrappers, platform, build info, supervised tasks, `rpc` traits | thiserror, serde, schemars, secrecy, tokio, process-wrap, fs4 |
-| `russet-protocol` | L1 | GPL-3.0-or-later | W1 (+ each area owns its namespace module; `Cargo.toml` is lead-owned after W1) | Every wire DTO; `rpc_method!`/`rpc_notification!`; `PROTOCOL`; `registry()`; schema and TS export [D 31] | serde, schemars, ts-rs |
-| `russet-ipc` | L2 | GPL-3.0-or-later | W2 | JSON-RPC engine: LSP codec, `Peer`, `Router`, `Authorizer`, Unix/pipe/TCP transports, in-process duplex, autostart client | tokio, tokio-util, windows-sys |
-| `russet-config` | L2 | GPL-3.0-or-later | W3 | Typed config structs, layering, comment-preserving editor, schemas, watcher | toml 1.1.8, toml_edit 0.25.17, notify |
-| `russet-secrets` | L2 | GPL-3.0-or-later | W3 | `SecretStore` over keyring-core master key + sealed files, passphrase file store, env store, memory store; redaction helpers [D 13] | keyring-core 1.0.0 + store crates, chacha20poly1305, argon2, zeroize |
-| `russet-toolchain` | L2 | GPL-3.0-or-later | W3 | Pin manifest, probes, resolver with env contract, installer, GC, SDK registry probe (`SdkInfo`) | reqwest (rustls-no-provider), sha2, pgp, minisign-verify, tar, zstd, goblin |
-| `russet-doctor` | L2 | GPL-3.0-or-later | W3 | `Check` trait, registry, report model, host checks | — |
-| `russet-agent-config` | L2 | GPL-3.0-or-later | W13 | Writes MCP registrations for 9 agent clients (plan/apply/detect) [IDE §6.6] | toml_edit, jsonc edits |
-| `russet-device` | L3 | GPL-3.0-or-later | W4 | idevice integration: mux, pairing, tunnel, RSD, DDI status and mount (from a directory in W4; imported DDIs in W10), apps, launch, forwards, logs, screen/mirror/HID, files, crash pull, perf, symbols service client, pymobiledevice3 fallback, `io::ServiceConnector` seam | idevice =0.1.68 (ring; patched, [D 22]), jktcp =0.1.7, russet-ipa |
-| `russet-sdk` | L3 | GPL-3.0-or-later | W5 | SDK facts (`SdkFacts`), platform view, toolsets, SDK and DDI import (`import`, W16b) [D 58, D 62, D 69] | russet-toolchain, russet-plist, russet-xar |
-| `russet-build` | L3 | GPL-3.0-or-later | W5 | Build orchestrator: project model and detection (was `russet-project`), stack adapters (SwiftPM now; Flutter, Xcode, RN, MAUI later), Info.plist synthesis, bundle assembly, lints, metadata policy | russet-sdk, russet-macho, russet-ipa, russet-plist |
-| `russet-sign` | L3 | GPL-3.0-or-later | W6 | Bundle walk, provisioning profiles, entitlements merge, signing through apple-codesign, verify, lints | apple-codesign 0.29.0 (`default-features = false`), x509-certificate 0.24.0 (`KeyInfoSigner`, [D 92]), russet-macho |
-| `russet-asc` | L3 | GPL-3.0-or-later (licence open, §21) | W6 | Async typed App Store Connect client: ES256 JWT, scoped GET tokens, rate limiter, open enums, pluggable `Auth` (JWT, DS2) | reqwest, p256 |
-| `russet-account` | L3 | GPL-3.0-or-later | W6 | Accounts, identities (CSR, p12, xtool import), `DevPortal`, provisioning planner/applier, free-team policy | russet-sign, russet-asc, russet-secrets, rsa, x509-cert, p12-keystore |
-| `russet-gsa`, `russet-anisette` | L3 | GPL-3.0-or-later | W22 | GrandSlam auth, 2FA, DS2; anisette providers and library acquisition | num-bigint, aes-gcm, tokio-tungstenite (RemoteV3) |
-| `russet-adi-host` (binary) | L3 | GPL-3.0-or-later | W22 | The sandboxed ADI helper of §3.1 | F crates, russet-core |
-| `russet-debug` | L3 | GPL-3.0-or-later | W7 | Sessions, launch strategies, broker, JIT servicer, LLDB plans and overlay, DAP hub, symbols, crash store and symbolication, logs view, Flutter run/debug | russet-device, russet-build, russet-gdbremote, russet-toolchain, symbolic |
-| `russet-ship` | L3 | GPL-3.0-or-later | W12/W23 | Archive, dSYMs, store IPA, validation, metadata stamping, upload, TestFlight, metadata, Apple-hardware mode | russet-build, russet-sign, russet-account, russet-asc, russet-ipa |
-| `russet-xctest` | L3 | GPL-3.0-or-later | W32 (SwiftPM XCTest, Wave 4), W28 (XCUITest, Xcode projects) | XCTest/XCUITest runs, JUnit | russet-device |
-| `russetd` | L4 | GPL-3.0-or-later | W2 (+ one handler file per namespace per area; `Cargo.toml` is lead-owned after W1) | The daemon: lifecycle, ctx, handlers, pipelines, permissions, approvals, jobs, leases, subscriptions, web endpoint, audit | everything |
-| `russet-mcp` | L4 | GPL-3.0-or-later | W13 | MCP server on rmcp 3.5.x: tool catalog, stdio bridge, HTTP service mounted by `russetd` | rmcp 3.5.1, russet-ipc, russet-protocol |
-| `russet-cli` | L4 | GPL-3.0-or-later | W2 (+ one command module per area; `Cargo.toml` is lead-owned after W1) | The `russet` binary: multi-call dispatch, clap tree, renderers, `--json`; `russet mcp serve` calls `russet_mcp::serve_stdio` | clap 4.6, indicatif, anstream, russetd, russet-mcp |
-| `russet-testkit` | dev | GPL-3.0-or-later | W8 (`src/debug/` W7) | Scripted/replay/recording `ServiceConnector`s, mock usbmuxd, cassettes, HTTP fakes, temp-home daemon fixture, RDT traces. Tests of an L3 crate that use the testkit are **integration tests** under that crate's `tests/`, never `#[cfg(test)]` unit modules: the testkit ↔ crate dev-dependency cycle would otherwise compile two copies of the crate's types | — |
-| `russet-golden`, `russet-oracle` | dev | GPL-3.0-or-later | W16 | Normalizers and comparison; Mac/GHA oracle runner | — |
-| `russet-lab` (`tests/lab`) | dev | GPL-3.0-or-later | W9 (lane A) | Device-in-the-loop harness and suites | — |
-| `xtask` | dev | GPL-3.0-or-later | W1 (`main.rs` and `Cargo.toml` are seam files; module files: W2 `schema`, W3 `pins` in Wave 1 then W26, W8 `guard`/`disk_guard`/`ci`/`ci_budget`/`sweep`, W9 `lab`, W15 `traces`/`contracts`, W16 `golden`, W26 `release`/`legal`/`docs`) | Code generation and repository gates | cargo_metadata |
+| `russet-plist` | F | AGPL-3.0-only | W5 | XML and binary plist I/O; OpenStep reader/writer; Xcode build-setting macro expansion | plist 1.10.1 |
+| `russet-macho` | F | AGPL-3.0-only | W6 | Mach-O parse (thin/fat), `LC_BUILD_VERSION`, rpaths, load commands, UUID, `LC_SYMTAB` string-pool alignment check and fix, code-signature blob parse, in-place rpath delete, thin; last-resort sdk patch for foreign binaries [D 20] | goblin 0.10.7 or object 0.40.0 |
+| `russet-ipa` | F | AGPL-3.0-only | W5 | Deterministic IPA writer/reader: sorted entries, fixed mtimes, Unix modes from Mach-O magic, symlinks, Zip64, `dev` (stored) and `store` (deflate-6) modes, `SwiftSupport/` [D 19] | zip 9.0.1 |
+| `russet-gdbremote` | F | AGPL-3.0-only | W7 | gdb-remote codec, stop-reply parser, async `GdbClient`, interposer hooks | tokio, tokio-util |
+| `russet-car`, `russet-assets` | F | AGPL-3.0-only | W21 | BOM/CoreUI CAR writer/reader; `.xcassets` model, icon expansion, partial Info.plist, asset symbols | image, resvg, lzfse |
+| `russet-xcstrings`, `russet-ib` | F | AGPL-3.0-only | W21 (B10, B12); `russet-ib` then W21b (B21a), W28b (B21b) and W28c (B21c) [D 90] | `.xcstrings` compile and symbols. `russet-ib`: storyboard/XIB reader, launch-screen converter (B12), NIBArchive codec (coder version 10, the iOS `LNE\0` trailer with `IBUINibLNEVersionKey`, class fallback entries) and the storyboard/XIB → `.storyboardc`/`.nib` compiler (B21a–c) [D 75] | — |
+| `russet-xcodeproj`, `russet-pif` | F | AGPL-3.0-only | W28 | pbxproj / JSON `.xcproj` / workspace / scheme / xcconfig parsing and settings resolver; PIF emitter | — |
+| `russet-xar` | F | AGPL-3.0-only | W16b | Read-only Apple container formats for SDK and DDI import [D 62, D 69]: xar (zlib TOC, heap, SHA-1 TOC checksum; `.xip` and flat `.pkg`); the xar RSA signature, which is **prehashed** (a PKCS#1 v1.5 SHA-1 DigestInfo over the raw TOC checksum) and is chained to the runtime-pinned Apple Root CA (§16.6), never to the embedded root, ignoring leaf expiry; pbzx (16 MiB chunks, each XZ or stored) and gzip payload streams; `cpio` (odc/newc; hardlinks by (dev, ino)); UDIF (`koly` trailer, `blkx` tables; raw, zero-fill and zlib chunks, with bzip2 and lzfse optional because neither Apple DDI image uses them); a read-only HFS+/HFSX reader (DDIs need no decmpfs). Contract: streaming, with bounded in-order parallel pbzx decoding (at most threads × 2 × 16 MiB in flight); rejects absolute and `..` names; never writes through a link; output and size caps; cargo-fuzz targets | flate2, lzma-rust2 0.21.0 (pure Rust XZ; `liblzma` cannot join the workspace next to apple-codesign [D 95]), quick-xml, sha1, sha2, rsa 0.9 (verify only: RUSTSEC-2023-0071 concerns private-key operations and is ignored in `deny.toml` for this crate with that reason), x509-cert; `cms` optional; `udif` 0.4.2 and `hfsplus` 0.4.0 (MIT) optional, pinned exactly; `apple-xar` and `cpio-archive` (MPL-2.0) only as dev-dependency oracles |
+| `russet-tool` (binary) | F | AGPL-3.0-only | W16 (`ibtool` compile and link modes: W21b) | The multi-call shim binary of §3.1 | F crates only |
+| `russet-core` | L0 | AGPL-3.0-only | W1/W2 | Errors and codes, ids, `RussetDirs`, fs helpers, processes (`CommandRunner`), progress and event sinks, clock and entropy, endpoints, secret wrappers, platform, build info, supervised tasks, `rpc` traits | thiserror, serde, schemars, secrecy, tokio, process-wrap, fs4 |
+| `russet-protocol` | L1 | AGPL-3.0-only | W1 (+ each area owns its namespace module; `Cargo.toml` is lead-owned after W1) | Every wire DTO; `rpc_method!`/`rpc_notification!`; `PROTOCOL`; `registry()`; schema and TS export [D 31] | serde, schemars, ts-rs |
+| `russet-ipc` | L2 | AGPL-3.0-only | W2 | JSON-RPC engine: LSP codec, `Peer`, `Router`, `Authorizer`, Unix/pipe/TCP transports, in-process duplex, autostart client | tokio, tokio-util, windows-sys |
+| `russet-config` | L2 | AGPL-3.0-only | W3 | Typed config structs, layering, comment-preserving editor, schemas, watcher | toml 1.1.8, toml_edit 0.25.17, notify |
+| `russet-secrets` | L2 | AGPL-3.0-only | W3 | `SecretStore` over keyring-core master key + sealed files, passphrase file store, env store, memory store; redaction helpers [D 13] | keyring-core 1.0.0 + store crates, chacha20poly1305, argon2, zeroize |
+| `russet-toolchain` | L2 | AGPL-3.0-only | W3 | Pin manifest, probes, resolver with env contract, installer, GC, SDK registry probe (`SdkInfo`) | reqwest (rustls-no-provider), sha2, pgp, minisign-verify, tar, zstd, goblin |
+| `russet-doctor` | L2 | AGPL-3.0-only | W3 | `Check` trait, registry, report model, host checks | — |
+| `russet-agent-config` | L2 | AGPL-3.0-only | W13 | Writes MCP registrations for 9 agent clients (plan/apply/detect) [IDE §6.6] | toml_edit, jsonc edits |
+| `russet-device` | L3 | AGPL-3.0-only | W4 | idevice integration: mux, pairing, tunnel, RSD, DDI status and mount (from a directory in W4; imported DDIs in W10), apps, launch, forwards, logs, screen/mirror/HID, files, crash pull, perf, symbols service client, pymobiledevice3 fallback, `io::ServiceConnector` seam | idevice =0.1.68 (ring; patched, [D 22]), jktcp =0.1.7, russet-ipa |
+| `russet-sdk` | L3 | AGPL-3.0-only | W5 | SDK facts (`SdkFacts`), platform view, toolsets, SDK and DDI import (`import`, W16b) [D 58, D 62, D 69] | russet-toolchain, russet-plist, russet-xar |
+| `russet-build` | L3 | AGPL-3.0-only | W5 | Build orchestrator: project model and detection (was `russet-project`), stack adapters (SwiftPM now; Flutter, Xcode, RN, MAUI later), Info.plist synthesis, bundle assembly, lints, metadata policy | russet-sdk, russet-macho, russet-ipa, russet-plist |
+| `russet-sign` | L3 | AGPL-3.0-only | W6 | Bundle walk, provisioning profiles, entitlements merge, signing through apple-codesign, verify, lints | apple-codesign 0.29.0 (`default-features = false`), x509-certificate 0.24.0 (`KeyInfoSigner`, [D 92]), russet-macho |
+| `russet-asc` | L3 | AGPL-3.0-only (licence open, §21) | W6 | Async typed App Store Connect client: ES256 JWT, scoped GET tokens, rate limiter, open enums, pluggable `Auth` (JWT, DS2) | reqwest, p256 |
+| `russet-account` | L3 | AGPL-3.0-only | W6 | Accounts, identities (CSR, p12, xtool import), `DevPortal`, provisioning planner/applier, free-team policy | russet-sign, russet-asc, russet-secrets, rsa, x509-cert, p12-keystore |
+| `russet-gsa`, `russet-anisette` | L3 | AGPL-3.0-only | W22 | GrandSlam auth, 2FA, DS2; anisette providers and library acquisition | num-bigint, aes-gcm, tokio-tungstenite (RemoteV3) |
+| `russet-adi-host` (binary) | L3 | AGPL-3.0-only | W22 | The sandboxed ADI helper of §3.1 | F crates, russet-core |
+| `russet-debug` | L3 | AGPL-3.0-only | W7 | Sessions, launch strategies, broker, JIT servicer, LLDB plans and overlay, DAP hub, symbols, crash store and symbolication, logs view, Flutter run/debug | russet-device, russet-build, russet-gdbremote, russet-toolchain, symbolic |
+| `russet-ship` | L3 | AGPL-3.0-only | W12/W23 | Archive, dSYMs, store IPA, validation, metadata stamping, upload, TestFlight, metadata, Apple-hardware mode | russet-build, russet-sign, russet-account, russet-asc, russet-ipa |
+| `russet-xctest` | L3 | AGPL-3.0-only | W32 (SwiftPM XCTest, Wave 4), W28 (XCUITest, Xcode projects) | XCTest/XCUITest runs, JUnit | russet-device |
+| `russetd` | L4 | AGPL-3.0-only | W2 (+ one handler file per namespace per area; `Cargo.toml` is lead-owned after W1) | The daemon: lifecycle, ctx, handlers, pipelines, permissions, approvals, jobs, leases, subscriptions, web endpoint, audit | everything |
+| `russet-mcp` | L4 | AGPL-3.0-only | W13 | MCP server on rmcp 3.5.x: tool catalog, stdio bridge, HTTP service mounted by `russetd` | rmcp 3.5.1, russet-ipc, russet-protocol |
+| `russet-cli` | L4 | AGPL-3.0-only | W2 (+ one command module per area; `Cargo.toml` is lead-owned after W1) | The `russet` binary: multi-call dispatch, clap tree, renderers, `--json`; `russet mcp serve` calls `russet_mcp::serve_stdio` | clap 4.6, indicatif, anstream, russetd, russet-mcp |
+| `russet-testkit` | dev | AGPL-3.0-only | W8 (`src/debug/` W7) | Scripted/replay/recording `ServiceConnector`s, mock usbmuxd, cassettes, HTTP fakes, temp-home daemon fixture, RDT traces. Tests of an L3 crate that use the testkit are **integration tests** under that crate's `tests/`, never `#[cfg(test)]` unit modules: the testkit ↔ crate dev-dependency cycle would otherwise compile two copies of the crate's types | — |
+| `russet-golden`, `russet-oracle` | dev | AGPL-3.0-only | W16 | Normalizers and comparison; Mac/GHA oracle runner | — |
+| `russet-lab` (`tests/lab`) | dev | AGPL-3.0-only | W9 (lane A) | Device-in-the-loop harness and suites | — |
+| `xtask` | dev | AGPL-3.0-only | W1 (`main.rs` and `Cargo.toml` are seam files; module files: W2 `schema`, W3 `pins` in Wave 1 then W26, W8 `guard`/`disk_guard`/`ci`/`ci_budget`/`sweep`, W9 `lab`, W15 `traces`/`contracts`, W16 `golden`, W26 `release`/`legal`/`docs`) | Code generation and repository gates | cargo_metadata |
 
 Rejected crate names from QA's map (`russet-proto`, `russet-daemon`, `russet-package`, `russet-flutter`, `russet-mirror`, `russet-profile`, `russet-strings`, `russet-device-proto`, `russet-project`) are mapped in §20 [D 31, D 32].
 
@@ -270,7 +270,7 @@ Rejected crate names from QA's map (`russet-proto`, `russet-daemon`, `russet-pac
 
 ```text
 F   russet-{plist,macho,ipa,gdbremote,car,assets,xcstrings,ib,xcodeproj,pif,xar}, russet-tool (bin)
-                                                      (only F deps; permissive licences)
+                                                      (only F deps; permissive third-party licences)
 L0  russet-core
 L1  russet-protocol                                   → L0
 L2  russet-{ipc,config,secrets,toolchain,doctor,agent-config}  → L0–L1 (toolchain → config)
@@ -289,7 +289,7 @@ dev russet-testkit, russet-golden, russet-oracle, russet-lab, xtask → anything
 - Domain crates take `&dyn ProgressSink` / `EventSink` and a `CancellationToken`, and return `russet_core::Result`.
 - Domain crates never open sockets to clients; transport lives in `russet-ipc` and `russetd`.
 - L2 crates never depend on `russet-doctor`: that would be an L2 → L2 edge, and the only one allowed is toolchain → config. Their doctor checks live in `russetd` (§5.3, doctor seam) [D 100].
-- MIT/Apache crates (layer F) may depend only on permissively licensed crates; xtask verifies this from `cargo metadata` [core §18]. `check-layers` reads the layer of every package, binaries included, from `.config/workstreams.toml`, so `russet-tool` and `russet-adi-host` are checked like libraries.
+- Layer-F crates' third-party dependencies are permissively licensed; xtask verifies this from `cargo metadata` [core §18]. `check-layers` reads the layer of every package, binaries included, from `.config/workstreams.toml`, so `russet-tool` and `russet-adi-host` are checked like libraries.
 - **Wire enums** (every DTO in `russet-protocol`) [D 72]:
   - unit-only enums: `#[serde(rename_all = "kebab-case")]`;
   - enums that carry data: internally tagged, `#[serde(tag = "kind", rename_all = "kebab-case")]`, with struct variants only (serde cannot internally tag tuple variants), and camelCase fields inside. No variant has a field named `kind`: serde_derive rejects a field that has the tag's name, so such a field gets a qualified name (`JobEvent`'s `artifact` carries `artifactKind`, §9.2) [D 96];
@@ -554,7 +554,7 @@ pub struct BuiltApp { pub app: Utf8PathBuf, pub executable: Utf8PathBuf, pub uui
                       pub sdk_path: Utf8PathBuf, pub swift_module_dirs: Vec<Utf8PathBuf>, pub flutter_framework: Option<Utf8PathBuf> }  // consumed by russet-debug
 ```
 
-**`russet-macho`** (MIT; union of [build §4.7] and [SIGN §8.5])
+**`russet-macho`** (AGPL-3.0-only; union of [build §4.7] and [SIGN §8.5])
 
 ```rust
 pub struct MachO { /* parsed view; thin or fat */ }
@@ -2240,15 +2240,15 @@ Wave 1 fallback: `--attach-mode legacy-async` runs the M1-verified async connect
 ## 19. Licensing, Apple files and trademarks
 
 - **Licences.**
-  - Russet is **GPL-3.0-or-later**. Layer-F crates and `russet-tool` are **MIT** (or MIT OR Apache-2.0 for `russet-gdbremote`), so they can go upstream.
+  - Russet is **AGPL-3.0-only**: every crate and binary (layer F and `russet-tool` included), the IDE extension and the Windows host. The owner's decision (2026-10-31): strong copyleft, so nobody can ship a closed fork, or run a modified Russet as a service, without giving its users the source. Contributions come in under the same licence with a DCO sign-off and no CLA, so nobody can relicense them (CONTRIBUTING.md).
   - Templates, fixtures, sample apps and any code injected into user apps (Runner scene delegate, probes) are **0BSD**; the Flutter Runner keeps BSD-3 [QA §9 L9].
-- **cargo-deny allowlist:** MIT, MIT-0, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2/3-Clause, ISC, Zlib, 0BSD, CC0-1.0, Unicode-3.0, BSL-1.0, MPL-2.0, GPL-3.0-or-later.
+- **cargo-deny allowlist:** MIT, MIT-0, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2/3-Clause, ISC, Zlib, 0BSD, CC0-1.0, Unicode-3.0, BSL-1.0, MPL-2.0, GPL-3.0-or-later (combinable with AGPL-3.0 by its section 13), AGPL-3.0-only.
   - LGPL and anything else only as a per-crate exception after written review [D 48].
-  - **Approved per-crate exceptions** (W1's written review in `deny.toml`; lead sign-off at W1's merge, 2026-10-11) [D 99]. All three are permissive, not copyleft, and compatible with distributing a GPL-3.0 work; `about.toml` accepts them, and W26's notices list them with their texts:
+  - **Approved per-crate exceptions** (W1's written review in `deny.toml`; lead sign-off at W1's merge, 2026-10-11) [D 99]. All three are permissive, not copyleft, and compatible with distributing an AGPL-3.0 work; `about.toml` accepts them, and W26's notices list them with their texts:
     - `BlueOak-1.0.0` for `minicbor` and `minicbor-derive`, unconditional dependencies of apple-codesign 0.29.0;
     - `CDLA-Permissive-2.0` for `webpki-roots`, Mozilla's root list as data, pulled in by idevice, by hyper-rustls under both reqwest majors and by tokio-tungstenite;
-    - `bzip2-1.0.6` for `libbz2-rs-sys`, the default backend of bzip2 0.6, which `udif` 0.4.2 (russet-xar's optional UDIF reader) needs. It also counts as permissive for layer F (`.config/workstreams.toml` `[layer-rules] permissive`); dropping `udif` and reading UDIF in russet-xar itself would remove it.
-  - AGPL code (xcross ≥ 2.0, StikDebug) and unlicensed repositories (android-loader, anisette-v3-server) are reference only, never code.
+    - `bzip2-1.0.6` for `libbz2-rs-sys`, the default backend of bzip2 0.6, which `udif` 0.4.2 (russet-xar's optional UDIF reader) needs. It also counts as permissive for layer F's third-party dependencies (`.config/workstreams.toml` `[layer-rules] permissive`); dropping `udif` and reading UDIF in russet-xar itself would remove it.
+  - AGPL code (xcross ≥ 2.0, StikDebug) is licence-compatible since Russet became AGPL-3.0-only but stays reference only until a written review admits it; unlicensed repositories (android-loader, anisette-v3-server) are reference only, never code.
   - pymobiledevice3 (GPL-3.0) and netmuxd (LGPL-2.1) run only as user-installed subprocesses.
 - **REUSE.** Every source file has SPDX headers; `REUSE.toml` covers generated files; `reuse lint` runs in CI.
 - **No Apple files** [K4].
@@ -2299,7 +2299,7 @@ Each row names the disagreeing documents, the decision, and the reason. Rows are
 | 17 | Metadata stamping default | build: `sdk` including `DTXcode`/`DTXcodeBuild`; SIGN: off, two tiers; QA: opt-in | Link-time `sdk 27.0` always; default `sdk` DT facts without Xcode identity; `xcode-compat` opt-in with committed consent and a visible marker | Truthful by default; Xcode identity claims need the user's informed consent (owner Q2) |
 | 18 | Free-account bundle IDs | build: team-suffix default; SIGN: undecided | `auto` = exact (paid) / team-suffix (free); xtool-prefix opt-in | Paid exact IDs are binding; free IDs must be unique across teams |
 | 19 | IPA writer | device, build and SIGN each had one | One `russet-ipa` crate | Symlinks, modes and determinism done once |
-| 20 | `russet-macho` | build: MIT lints; SIGN: GPL patcher | One MIT crate with the union API; lints live in russet-build and russet-sign | Shared parser; upstreamable |
+| 20 | `russet-macho` | build: MIT lints; SIGN: GPL patcher | One crate with the union API; lints live in russet-build and russet-sign | Shared parser; upstreamable |
 | 21 | Crypto provider | core: aws-lc-rs; device: ring | ring only; aws-lc banned | apple-codesign already needs ring [V lead]; simpler Windows and cross builds |
 | 22 | idevice source | device: git rev 3854a5df; QA: exact crates.io; critique 2026-10-11: unchecked `u32 - 16` in `usbmuxd/mod.rs`; review: cryptexd sends `nonce_persistence` as `persistence` | crates.io `=0.1.68` with a `[patch.crates-io]` to a reviewed Russet fork rev: upstream 3854a5d (short-packet check, `Send` listen stream) plus one Russet commit with the cryptexd persistence fix and, since review round 2, a 16 MiB cap on declared usbmuxd packet sizes (3854a5d still allocates up to about 4 GiB), with a `deny.toml` `allow-git` entry (§16.7). W4 carries it and DEV-23 files the upstream PRs; the patch goes once a release carries every fix | Reproducible supply chain; QA's mock-usbmuxd fuzzing would hit the panic; DDI installs should send Xcode's values |
 | 23 | Device namespace overlaps | device: `debug.start`, `crash.*`, `symbols.fetch`, `ui.elements`, `device.register` (SIGN) | `debug.*`, `crash.*`, symbols → run/debug; `ui.elements` → `screen.elements` (`ui.*` is the daemon→client callback namespace); SIGN's `device.register` → `portal.devices.register` | Namespaces must not mean two things |
@@ -2446,7 +2446,7 @@ Each question has a **default** that the plan uses until you answer, and the wor
 | Q7 | Self-hosted lab runner on the desktop, or manual `cargo xtask lab` runs by the device-lane agent? **Answered 2026-10-11** (decisions.md): no always-on self-hosted runner; device suites run on demand, triggered by an agent in the working session, and device access stays serialized | Manual runs by lane A, under the live-device lock (§3.3 item 7) | W9 onward |
 | Q8 | Windows code signing (SignPath Foundation vs an OV certificate) and MSI tooling (WiX v3.14 vs v7 with OSMF EULA vs msitools `wixl`)? | Unsigned; WiX v3.14 | W25, W27c |
 | Q9 | apple-codesign compiles Apple's public CA certificates into the binary: accept (listed in NOTICE), or patch to fetch at runtime with pinned hashes? | Accept and list | W26 legal gate |
-| Q10 | Licence of `russet-asc`: GPL-3.0-or-later, or MIT/Apache-2.0 for reuse? | GPL-3.0-or-later | — |
+| Q10 | Licence of `russet-asc`: GPL-3.0-or-later, or MIT/Apache-2.0 for reuse? | AGPL-3.0-only | — |
 | Q11 | Reverse-DNS app id (`io.github.evilcomputer12.Russet`?), Open VSX namespace `russet`, icon designer and palette | Placeholders | W25 |
 | Q12 | Update checks: `notify` (weekly anonymous GET, CLI only) or `off`? | `notify` for standalone public releases; off while private | W26 |
 | Q13 | Device symbols: allow an opt-in multi-GB download, with a 20 GiB cache quota? | Opt-in, 20 GiB | W11 |

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The device methods of ARCHITECTURE §8.2 over a [`DeviceManager`]: params DTO in, result DTO out. russetd's

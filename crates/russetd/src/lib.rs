@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russetd`, the per-user daemon (ARCHITECTURE §3, §5.3 `russetd`, §6): lifecycle, [`DaemonCtx`], handlers,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Finds the host LLDB tools for the H1–H3 harnesses: `lldb`, `lldb-server` and `lldb-dap` from the Swift

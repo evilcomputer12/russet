@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Computes the build id `<version>+g<sha>[-dirty]` (ARCHITECTURE §3.3 item 3) for `russet_core::build_info`.

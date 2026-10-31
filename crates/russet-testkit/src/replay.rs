@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! [`ReplayConnector`]: an [`io::ServiceConnector`] that serves a recorded [`Trace`] with no sockets and no

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `doctor.*`: environment checks (ARCHITECTURE §8.1; core §11). Owner: W3 (area checks register through

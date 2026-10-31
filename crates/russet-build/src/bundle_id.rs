@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Bundle-ID policies (ARCHITECTURE §16.5; build §4.5) [D 18]: the effective `CFBundleIdentifier` of the app and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask guard [CHECK…]`: the repository guards (QA-02; ARCHITECTURE §12.2, §19; PLAN W8).

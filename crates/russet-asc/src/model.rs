@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! JSON:API documents and the typed attributes of the resources Russet reads (SIGN §5.3–§5.4). Every enum is

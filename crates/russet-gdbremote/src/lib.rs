@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! gdb-remote client for debugserver (ARCHITECTURE §5.3 `russet-gdbremote`, RD §17.1): the [`codec`], the
 //! [`stop`]-reply parser, the async [`GdbClient`], the [`interpose`] relay with hooks and the [`arm64`]
 //! helpers. It has no device knowledge, so it can go upstream.
 //!
-//! Layer F (MIT OR Apache-2.0). Owner: W7 (RD-01).
+//! Layer F. Owner: W7 (RD-01).
 
 // Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
 const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");

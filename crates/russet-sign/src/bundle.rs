@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The bundle model (SIGN §8.2): an app and its nested bundles (extensions, App Clips, Watch apps, frameworks)

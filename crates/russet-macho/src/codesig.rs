@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The embedded code-signature superblob (`LC_CODE_SIGNATURE`): code directories, requirements, entitlements

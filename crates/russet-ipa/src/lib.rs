@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Deterministic IPA writer and reader (ARCHITECTURE §5.3 `russet-ipa`, build §4.8) [D 19].
@@ -13,7 +13,7 @@
 //! - **Compression:** [`IpaMode::Dev`] stores entries for fast installs; [`IpaMode::Store`] deflates at level 6.
 //!   Zip64 is used for files of 4 GiB or more.
 //!
-//! The `zip` and `unzip` binaries are never invoked. Layer F (MIT).
+//! The `zip` and `unzip` binaries are never invoked. Layer F.
 
 // Shared cargo target slots: recompile this crate after another worktree built in the slot (AGENTS.md §6).
 const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");

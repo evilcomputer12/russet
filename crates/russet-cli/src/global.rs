@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Global flags (ARCHITECTURE §8.7): `--json --device --project -v/-q --color --no-daemon --yes`.

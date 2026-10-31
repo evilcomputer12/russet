@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Loose numeric versions (`6.4`, `6.4.0`, `21.1.6`, `3.12.15`) and requirements (`6.4`, `>=23.1.3`, `=1.1.0`).

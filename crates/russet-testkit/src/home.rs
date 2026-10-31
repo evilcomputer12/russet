@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! [`TempHome`]: a fresh, private `RUSSET_HOME` per test (ARCHITECTURE §3.3 item 7, §14.9, §15; testability

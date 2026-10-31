@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask ci`, `cargo xtask test` and `cargo xtask build`: the CI gates locally and the cargo wrappers

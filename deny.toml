@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # cargo-deny 0.20 (core §18; ARCHITECTURE §16.6, §19). Gate: `cargo deny check licenses bans sources`; the
@@ -36,13 +36,14 @@ allow = [
     "BSL-1.0",
     "MPL-2.0",
     "GPL-3.0-or-later",
+    "AGPL-3.0-only",
 ]
 confidence-threshold = 0.93
 # The allowlist is binding policy (ARCHITECTURE §19), not tuned to today's graph.
 unused-allowed-license = "allow"
 # Per-crate exceptions after a written review [D 48]. Review by W1 (2026-10-11); each needs the lead's sign-off
 # (docs/decisions.md, or a contract-change PR adding it to ARCHITECTURE §19) before W1 merges. Licence texts were
-# read in the registry sources; all three are permissive (no copyleft) and compatible with GPL-3.0-or-later.
+# read in the registry sources; all three are permissive (no copyleft) and compatible with AGPL-3.0-only.
 # - BlueOak-1.0.0 (Blue Oak Model License 1.0.0; OSI-approved): copyright and patent grant, keep the notice.
 #   minicbor 0.25.1 and minicbor-derive 0.15.3 are unconditional dependencies of apple-codesign 0.29.0
 #   (ARCHITECTURE §16.7), so russet-sign cannot avoid them.
@@ -63,7 +64,7 @@ exceptions = [
 ]
 
 [licenses.private]
-# The workspace crates are `publish = false` and carry GPL-3.0-or-later or MIT headers (REUSE).
+# The workspace crates are `publish = false` and carry AGPL-3.0-only headers (REUSE).
 ignore = true
 
 [bans]

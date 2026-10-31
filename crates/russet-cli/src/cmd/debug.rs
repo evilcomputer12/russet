@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet debug` (ARCHITECTURE §7.6, §8.7, §17.1; RD §20). Owner: W7 (Wave 1), W18 (`jit-bench`, Wave 3).

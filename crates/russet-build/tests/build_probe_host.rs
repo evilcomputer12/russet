@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! PLAN §4.5 tests on this host: RussetProbe builds with Russet's SwiftPM backend (`xtool` hidden from `PATH`),

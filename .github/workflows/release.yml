@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # Stub (QA-03; PLAN W8). The release workflow of QA §4.2 and §5: on a `v*` tag, the build matrix (an

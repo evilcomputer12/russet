@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! H6 (RD §23.2, V5): LLDB on the `remote-ios` platform connects through the broker to the fake iOS debugserver

@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
-//! XML and binary plist I/O and Xcode build-setting macro expansion (build B01). Layer F: permissive, and no
-//! `russet-*` dependency except other F crates (ARCHITECTURE §5.2).
+//! XML and binary plist I/O and Xcode build-setting macro expansion (build B01). Layer F: permissive third-party
+//! dependencies only, and no `russet-*` dependency except other F crates (ARCHITECTURE §5.2).
 //!
 //! - Reading goes through the [`plist`] crate, which keeps dictionary order (and reads OpenStep too).
 //! - Writing is Russet's own, so that a value read from an Apple-written file re-serializes byte for byte: the

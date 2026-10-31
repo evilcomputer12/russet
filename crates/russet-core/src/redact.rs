@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Redaction for logs, the audit log and bug reports (ARCHITECTURE §12.2 "Logs", core §12; CORE-13).

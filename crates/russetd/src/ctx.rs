@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! [`DaemonCtx`]: what every handler gets (ARCHITECTURE §5.3) [D 86]. Every field is cheap to clone.

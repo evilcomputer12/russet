@@ -2,7 +2,7 @@
 
 `cargo xtask <subcommand>`: code generation and repository gates (ARCHITECTURE §4).
 
-- Layer **dev** (may depend on anything). Licence: GPL-3.0-or-later.
+- Layer **dev** (may depend on anything). Licence: AGPL-3.0-only.
 - **Owner:** W1 created it. `Cargo.toml` and `src/main.rs` are seam files (lead-only after W1 merges, PLAN §0
   rule 2): every subcommand is registered in `main.rs` and calls its own module file, so owners only fill their
   module (and add flags to its `Args`).

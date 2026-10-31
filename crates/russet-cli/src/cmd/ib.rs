@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `russet ib` (ARCHITECTURE §8.7). Owner: W21 (convert-launch-screen), W21b (compile, dump), W28b, W28c.

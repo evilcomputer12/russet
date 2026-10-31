@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Lease and subscription ids for the device plane: prefixed ULIDs (`lse_…`, `sub_…`; ARCHITECTURE §7.3).

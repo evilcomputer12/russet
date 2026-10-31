@@ -42,7 +42,7 @@
     - Linux: tarball, `.deb`, `.rpm` and an Arch PKGBUILD. An AppImage exists only for the IDE.
     - Windows: zip, per-user MSI and winget. `dist` cannot publish to winget [S 9], so komac does that.
     - Package-managed installs never update themselves.
-    - Licensing: GPL-3.0-or-later, a cargo-deny allow-list, one crypto provider (aws-lc-rs, whose licence expression is GPL-compatible [V]), SPDX headers and a CI gate against Apple files.
+    - Licensing: AGPL-3.0-only, a cargo-deny allow-list, one crypto provider (aws-lc-rs, whose licence expression is GPL-compatible [V]), SPDX headers and a CI gate against Apple files.
 
 ---
 
@@ -74,7 +74,7 @@ This document owns the generic machinery. The area design docs own their domain 
 | Never ship Apple files. Disk is tight: SDK bundle 6.8 GB [V], swift.org tarball 1.12 GB, Windows Swift installer 2.1 GB, LLVM Linux 1.19–2.0 GB [V] | Reuse existing installs, check free space before every download or import, and garbage-collect old toolchains. |
 | Linux first, then Windows on a physical PC | A cfg-gated platform layer from day one, and Windows CI from the first week. |
 | Agents get the same powers through MCP | Permission classes, per-client profiles and confirmation callbacks (section 7.5). |
-| GPL-3.0-or-later; pieces meant for upstream may be MIT | cargo-deny allow-list. MIT crates must not depend on GPL crates (section 18). |
+| AGPL-3.0-only for every crate | cargo-deny allow-list. Layer F's third-party dependencies stay permissive (section 18). |
 
 ---
 
@@ -223,7 +223,7 @@ members = ["crates/*", "xtask"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-only"
 repository = "https://github.com/evilcomputer12/russet"
 
 [workspace.lints.rust]
@@ -261,7 +261,7 @@ Versions and licences come from the crates.io API on 2026-10-11 [V]. Pin minor v
 | MCP | rmcp 3.5.1 (Apache-2.0; features `server`, `macros`, `schemars`, `transport-io`, `transport-streamable-http-server`, `elicitation`) |
 | Updates | axoupdater 0.10.2 (MIT/Apache-2.0); self-replace 1.5.0 (Apache-2.0) |
 | Tests | insta 1.49.0 (Apache-2.0); proptest 1.12.0; assert_cmd 2.2.2; predicates 3.1.4; wiremock 0.6.5 |
-| Dev tools (not linked) | cargo-nextest 0.9.148; cargo-deny 0.20.2; cargo-about 0.9.2; cargo-auditable 0.7.7; cargo-cyclonedx 0.5.9; dist 0.32.0; cargo-deb 3.8.0; cargo-generate-rpm 0.21.0; cargo-wix 0.3.9; cargo-xwin 0.23.1; komac 2.16.0 (GPL-3.0-or-later); cargo-machete 0.9.2; cargo-llvm-cov 0.9.1 |
+| Dev tools (not linked) | cargo-nextest 0.9.148; cargo-deny 0.20.2; cargo-about 0.9.2; cargo-auditable 0.7.7; cargo-cyclonedx 0.5.9; dist 0.32.0; cargo-deb 3.8.0; cargo-generate-rpm 0.21.0; cargo-wix 0.3.9; cargo-xwin 0.23.1; komac 2.16.0 (AGPL-3.0-only); cargo-machete 0.9.2; cargo-llvm-cov 0.9.1 |
 | Extension side (npm) | vscode-jsonrpc 9.0.3 (MIT) [V] |
 
 **Considered and rejected:**
@@ -1723,10 +1723,10 @@ The windows-gnu cross-check was verified here [V]:
 
 ## 18. Licensing hygiene
 
-- **Workspace licence:** GPL-3.0-or-later. Every source file starts with:
+- **Workspace licence:** AGPL-3.0-only. Every source file starts with:
 
   ```text
-  // SPDX-License-Identifier: GPL-3.0-or-later
+  // SPDX-License-Identifier: AGPL-3.0-only
   // SPDX-FileCopyrightText: 2026 Russet contributors
   ```
 
@@ -1737,7 +1737,7 @@ The windows-gnu cross-check was verified here [V]:
 [licenses]
 version = 2
 allow = ["MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
-         "ISC", "Zlib", "0BSD", "CC0-1.0", "Unicode-3.0", "BSL-1.0", "MPL-2.0", "GPL-3.0-or-later"]
+         "ISC", "Zlib", "0BSD", "CC0-1.0", "Unicode-3.0", "BSL-1.0", "MPL-2.0", "GPL-3.0-or-later", "AGPL-3.0-only"]
 confidence-threshold = 0.93
 exceptions = []           # e.g. LGPL-2.1-or-later or GPL-3.0-only: add only after a written review
 [licenses.private]

@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Mach-O parsing and in-place edits (ARCHITECTURE §5.3 `russet-macho`, the union of build §4.7 and SIGN §8.5)
 //! [D 20]: thin and fat files, `LC_BUILD_VERSION`, rpaths, load commands, UUID, the iOS 27 `LC_SYMTAB`
 //! string-pool alignment rule, code-signature blobs, and a last-resort SDK patch for foreign binaries.
 //!
-//! Layer F (MIT): no `russet-*` dependency. Every read is bounds-checked, so malformed input gives
+//! Layer F: no `russet-*` dependency. Every read is bounds-checked, so malformed input gives
 //! [`MachOError::Malformed`] and never a panic. Little-endian images only (every Apple arm64 and x86_64 binary);
 //! fat headers and code signatures are big-endian, as on disk.
 //!

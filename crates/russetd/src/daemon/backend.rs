@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The device backend (ARCHITECTURE §3.3 item 7, §14.9 `RUSSET_DEVICE_BACKEND`) and the live-backend policy of

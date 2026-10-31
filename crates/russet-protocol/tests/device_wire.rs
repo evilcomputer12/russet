@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The wire shapes of W4's namespaces against ARCHITECTURE §8.2 and §9.1: field names, enum strings, the

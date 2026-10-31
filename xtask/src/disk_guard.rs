@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask disk-guard`: measures free space against the tiers RED < 8 GiB, AMBER 8–25, GREEN 25–45,

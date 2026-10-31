@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `run` handlers (ARCHITECTURE §8.5). Owner: W7 (Wave 1: `run.start`, `run.list`, `run.subscribe`,

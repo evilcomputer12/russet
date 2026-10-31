@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `daemon.*` (ARCHITECTURE §8.1, §9.1): ping, status, shutdown (refused with active work unless forced),

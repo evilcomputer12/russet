@@ -2,7 +2,7 @@
 
 Async typed App Store Connect client: ES256 JWT, scoped tokens, rate limiter, pluggable auth.
 
-- Layer **L3** (domain crate; may depend on F and L0–L2 except russet-ipc, and on the L3 edges of ARCHITECTURE §5.2) (ARCHITECTURE §5.1–§5.2). Licence: GPL-3.0-or-later.
+- Layer **L3** (domain crate; may depend on F and L0–L2 except russet-ipc, and on the L3 edges of ARCHITECTURE §5.2) (ARCHITECTURE §5.1–§5.2). Licence: AGPL-3.0-only.
 - **Owner:** W6 (SA-02, GET-only in Wave 1); `src/ds2.rs` is W22's. W1 created the crate as a compiling stub (freeze F0, PLAN §12).
 - Key dependencies: reqwest 0.13 with `rustls-no-provider` (the ring provider is installed on first use), p256.
 

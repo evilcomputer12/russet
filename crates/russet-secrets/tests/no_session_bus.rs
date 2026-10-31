@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Passphrase mode works with `DBUS_SESSION_BUS_ADDRESS` unset (SA-01, PLAN §4.3): the parent test re-runs this

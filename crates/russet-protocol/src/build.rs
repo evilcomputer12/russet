@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `build.*`: builds (ARCHITECTURE §8.3). Owner: W5 (Wave 1), W16 (build.settings).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! `cargo xtask check-layers`: enforces ARCHITECTURE §5.2 from `cargo metadata` and `.config/workstreams.toml`.
@@ -8,8 +8,8 @@
 //!   `l3-never`, and L3 → L3 only along the transitive closure of the listed grants; packages under `only` (for
 //!   example `russet-adi-host`, `russet-mcp`, `russet-cli`) use only what they list; `russetd` and dev packages
 //!   use anything; nothing but dev packages uses a dev package.
-//! - Layer F is permissive: its own licence and the licence of every package it depends on (transitively, normal
-//!   and build dependencies) must be permissive.
+//! - Layer F's third-party dependencies are permissive: every package it depends on (transitively, normal and
+//!   build dependencies) that is not a Russet crate must be. Russet's own crates are all AGPL-3.0-only (LICENSE).
 //!
 //! Normal and build dependencies count; dev-dependencies do not (tests may use the testkit, ARCHITECTURE §5.1).
 //! The graph is resolved with **all features** of every workspace package, so optional dependencies (for
@@ -142,7 +142,8 @@ impl fmt::Display for Violation {
             }
             Self::NotPermissive { f_crate, package, license } => write!(
                 f,
-                "{f_crate} is layer F (permissive) but depends on {package}, licensed `{license}` (ARCHITECTURE §5.2)"
+                "{f_crate} is layer F, whose third-party dependencies are permissive, but depends on {package}, \
+                 licensed `{license}` (ARCHITECTURE §5.2)"
             ),
         }
     }
@@ -174,16 +175,11 @@ pub fn check(graph: &Graph, cfg: &Workstreams) -> Vec<Violation> {
             }
         }
         if from_layer == "F" {
-            let own = p.license.clone().unwrap_or_default();
-            if !is_permissive(&own, &cfg.layer_rules.permissive) {
-                out.insert(Violation::NotPermissive {
-                    f_crate: p.name.clone(),
-                    package: p.name.clone(),
-                    license: display_license(&p.license),
-                });
-            }
             for id in transitive_deps(graph, dep_ids(graph, p)) {
                 let dep = &graph.packages[&id];
+                if dep.workspace {
+                    continue; // Russet's own crates are AGPL-3.0-only; the layer edges limit them.
+                }
                 let license = dep.license.clone().unwrap_or_default();
                 if !is_permissive(&license, &cfg.layer_rules.permissive) {
                     out.insert(Violation::NotPermissive {
@@ -524,6 +520,10 @@ l3-never = ["russet-ipc"]
         let g = graph(&[("russet-ipa", "zip"), ("zip", "copyleft-thing")], &[("copyleft-thing", "GPL-3.0-only")]);
         let v = check(&g, &cfg());
         assert!(matches!(v.as_slice(), [Violation::NotPermissive { f_crate, .. }] if f_crate == "russet-ipa"), "{v:?}");
+        // Russet's own crates are AGPL-3.0-only: an F crate on another F crate is fine.
+        let agpl = [("russet-ipa", "AGPL-3.0-only"), ("russet-plist", "AGPL-3.0-only")];
+        let v = check(&graph(&[("russet-ipa", "russet-plist")], &agpl), &cfg());
+        assert!(v.is_empty(), "{v:?}");
         let g = graph(&[("russet-ipa", "russet-core")], &[("russet-core", "GPL-3.0-or-later")]);
         let v = check(&g, &cfg());
         assert!(v.iter().any(|v| matches!(v, Violation::Edge { from, .. } if from == "russet-ipa")), "{v:?}");

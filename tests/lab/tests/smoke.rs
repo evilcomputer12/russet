@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! The lab `smoke` suite (QA §3.9, PLAN §4.9): E2E-01, 02, 03, 04, 06 and 14 on the iPhone, adapted to the Wave-1

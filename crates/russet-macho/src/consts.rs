@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 
 //! Mach-O and code-signing constants (`<mach-o/loader.h>`, `<mach-o/fat.h>`, `<kern/cs_blobs.h>` field values,

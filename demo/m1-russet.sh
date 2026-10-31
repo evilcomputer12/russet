@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Russet contributors
 #
 # The Wave-1 exit script (PLAN §4.10, gate items 1-6; DC-02, DC-03, DC-05): `russet` builds, signs, installs,
