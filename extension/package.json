@@ -1272,6 +1272,14 @@
           "default": "auto",
           "description": "Native Apple ID sign-in. Russet never stores your password in settings or in the IDE."
         },
+        "russet.project.organizationIdentifier": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "pattern": "^$|^[A-Za-z][A-Za-z0-9-]*(\\.[A-Za-z0-9-]+)+$",
+          "patternErrorMessage": "Use reverse-DNS, like com.yourname.",
+          "markdownDescription": "Your reverse-DNS prefix for new apps' bundle IDs, like `com.yourname` (Xcode calls it the organization identifier). Russet asks for it the first time it needs it and saves it here. Apple never registers `com.example`."
+        },
         "russet.account.anisetteServer": {
           "type": "string",
           "default": "",
