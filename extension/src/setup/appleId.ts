@@ -11,6 +11,10 @@
 //
 // Credentials: the password is passed straight from the page to
 // `account.appleId.begin` and never stored, logged or kept on this object.
+//
+// Identity (anisette): this PC's own local ADI by default, or the remote
+// server in `russet.account.anisetteServer` (user settings only), sent as
+// `anisette: {remote: url}`; the remote path skips the local libraries.
 
 import type { Account } from "../generated/protocol";
 
@@ -120,13 +124,21 @@ export interface SignInError {
   code?: string;
 }
 
-/** Map a daemon error (ARCHITECTURE §13) to what the page tells the user. */
-export function classifySignInError(err: unknown): SignInError {
-  const e = err as { code?: unknown; message?: unknown; data?: { russetCode?: unknown; hint?: unknown } };
+/**
+ * Map a daemon error (ARCHITECTURE §13) to what the page tells the user.
+ * `identityServer` is the remote anisette host in use, if any.
+ */
+export function classifySignInError(err: unknown, ctx: { identityServer?: string } = {}): SignInError {
+  const e = err as {
+    code?: unknown;
+    message?: unknown;
+    data?: { russetCode?: unknown; hint?: unknown; details?: { ec?: unknown; httpStatus?: unknown } };
+  };
   const num = typeof e?.code === "number" ? e.code : undefined;
   const code = typeof e?.data?.russetCode === "string" ? e.data.russetCode : undefined;
   const hint = typeof e?.data?.hint === "string" ? e.data.hint : undefined;
   const raw = typeof e?.message === "string" ? e.message : String(err);
+  const ec = e?.data?.details?.ec;
   const withCode = (kind: SignInErrorKind, message: string): SignInError => ({
     kind,
     message,
@@ -144,8 +156,18 @@ export function classifySignInError(err: unknown): SignInError {
   if (num === 5252 || code === "gsa.locked") {
     return withCode("locked", hint ?? "This Apple ID is locked. Unlock it at iforgot.apple.com, then try again.");
   }
-  if (num === 5253 || code === "gsa.identityRejected") {
-    return withCode("identityRejected", hint ?? "Apple did not accept this computer's sign-in identity. Try again later.");
+  if (num === 5253 || code === "gsa.identityRejected" || ec === -80045 || ec === -80046 || /\(-8004[56]\)/.test(raw)) {
+    // GrandSlam refuses a client identity that does not match the anisette in use (-80045 at init, -80046 at
+    // two-factor). A remote identity server presents its own matching identity.
+    return withCode(
+      "identityRejected",
+      ctx.identityServer
+        ? `Apple did not accept the sign-in identity from ${ctx.identityServer}. Try again later, or choose another identity server.`
+        : "Apple did not accept this computer's own sign-in identity. You can sign in through an identity server instead (setting Russet › Account: Anisette Server).",
+    );
+  }
+  if (e?.data?.details?.httpStatus === 503) {
+    return withCode("serviceUnavailable", "Apple's sign-in service is busy (HTTP 503). Try again in a few minutes.");
   }
   if (num === 5254 || code === "gsa.codeRateLimited") {
     return withCode("rateLimited", "Apple is not sending more codes right now. Wait a while, then try again.");
@@ -180,11 +202,47 @@ export interface SignedInSummary {
   teamId?: string;
 }
 
+/** `russet.account.anisetteServer`: empty for this PC's own (local) identity, else an https URL. */
+export type IdentityServer =
+  | { kind: "local" }
+  | { kind: "remote"; url: string; host: string }
+  | { kind: "invalid"; message: string };
+
+export function parseIdentityServer(value: unknown): IdentityServer {
+  const v = typeof value === "string" ? value.trim() : "";
+  if (!v) {
+    return { kind: "local" };
+  }
+  const invalid: IdentityServer = {
+    kind: "invalid",
+    message:
+      "The identity server setting (Russet › Account: Anisette Server) must be an https:// URL such as https://server.example, or empty.",
+  };
+  let url: URL;
+  try {
+    url = new URL(v);
+  } catch {
+    return invalid;
+  }
+  if (url.protocol !== "https:" || !url.hostname || url.username || url.password) {
+    return invalid;
+  }
+  return { kind: "remote", url: v, host: url.host };
+}
+
 export type SignInView =
   | { screen: "checking" }
-  | { screen: "unavailable"; message: string; code?: string }
+  | { screen: "unavailable"; message: string; code?: string; suggestServer?: boolean }
   | { screen: "consent"; librariesPresent: boolean; busy: boolean; error?: string }
-  | { screen: "credentials"; busy: boolean; error?: string }
+  | {
+      screen: "credentials";
+      busy: boolean;
+      error?: string;
+      /** The remote identity server's host, when one is configured. */
+      identityServer?: string;
+      /** Offer the identity-server setting (local identity rejected or unsupported). */
+      suggestServer?: boolean;
+    }
   | {
       screen: "code";
       via: TwoFactorVia;
@@ -204,6 +262,8 @@ export interface SignInControllerDeps {
   mode: () => SignInMode;
   consentGiven: () => boolean;
   rememberConsent: () => void | Thenable<void>;
+  /** The raw `russet.account.anisetteServer` value from user (machine) settings only. */
+  identityServer: () => unknown;
 }
 
 const CODE = /^\d{6}$/;
@@ -213,6 +273,7 @@ export class SignInController {
   private sessionId?: string;
   private numbers: TrustedNumber[] = [];
   private librariesPresent = true;
+  private server: IdentityServer = { kind: "local" };
   private readonly listeners = new Set<(view: SignInView) => void>();
   private readonly signedIn = new Set<(account: Account) => void>();
 
@@ -243,6 +304,22 @@ export class SignInController {
     return "busy" in this.current && this.current.busy;
   }
 
+  private remoteHost(): string | undefined {
+    return this.server.kind === "remote" ? this.server.host : undefined;
+  }
+
+  /** The Apple ID form, always naming the identity server when one is in use. */
+  private credentials(extra: { busy?: boolean; error?: string; suggestServer?: boolean } = {}): SignInView {
+    const host = this.remoteHost();
+    return {
+      screen: "credentials",
+      busy: extra.busy ?? false,
+      ...(extra.error ? { error: extra.error } : {}),
+      ...(host ? { identityServer: host } : {}),
+      ...(extra.suggestServer && !host ? { suggestServer: true } : {}),
+    };
+  }
+
   /** Check the engine and the sign-in libraries, then show consent or the form. */
   async start(): Promise<void> {
     this.sessionId = undefined;
@@ -255,13 +332,23 @@ export class SignInController {
       });
       return;
     }
+    this.server = parseIdentityServer(this.deps.identityServer());
+    if (this.server.kind === "invalid") {
+      this.set({ screen: "unavailable", message: this.server.message, code: "russet.account.anisetteServer" });
+      return;
+    }
+    if (this.server.kind === "remote") {
+      // The identity comes from the remote server: no local ADI libraries, provisioning or their consent.
+      this.set(this.credentials());
+      return;
+    }
     this.set({ screen: "checking" });
     try {
       const status = await this.deps.api.anisetteStatus();
       this.librariesPresent = !!status.librariesPresent;
       if (status.localSupported === false && mode !== "on") {
         const e = classifySignInError({ code: 5276, data: { russetCode: "anisette.unsupported" } });
-        this.set({ screen: "unavailable", message: e.message, code: "anisette.unsupported" });
+        this.set({ screen: "unavailable", message: e.message, code: "anisette.unsupported", suggestServer: true });
         return;
       }
     } catch (err) {
@@ -270,14 +357,19 @@ export class SignInController {
         // Forced on: the engine may sign in before its anisette status exists.
         this.librariesPresent = true;
       } else {
-        this.set({ screen: "unavailable", message: e.message, ...(e.code ? { code: e.code } : {}) });
+        this.set({
+          screen: "unavailable",
+          message: e.message,
+          ...(e.code ? { code: e.code } : {}),
+          ...(e.kind === "unsupported" ? { suggestServer: true } : {}),
+        });
         return;
       }
     }
     if (!this.librariesPresent || !this.deps.consentGiven()) {
       this.set({ screen: "consent", librariesPresent: this.librariesPresent, busy: false });
     } else {
-      this.set({ screen: "credentials", busy: false });
+      this.set(this.credentials());
     }
   }
 
@@ -288,14 +380,14 @@ export class SignInController {
     }
     await this.deps.rememberConsent();
     if (this.librariesPresent) {
-      this.set({ screen: "credentials", busy: false });
+      this.set(this.credentials());
       return;
     }
     this.set({ screen: "consent", librariesPresent: false, busy: true });
     try {
       await this.deps.api.fetchLibraries();
       this.librariesPresent = true;
-      this.set({ screen: "credentials", busy: false });
+      this.set(this.credentials());
     } catch (err) {
       this.set({ screen: "consent", librariesPresent: false, busy: false, error: classifySignInError(err).message });
     }
@@ -308,19 +400,26 @@ export class SignInController {
     }
     const id = appleId.trim();
     if (!id || !password) {
-      this.set({ screen: "credentials", busy: false, error: "Enter your Apple ID and password." });
+      this.set(this.credentials({ error: "Enter your Apple ID and password." }));
       return;
     }
-    this.set({ screen: "credentials", busy: true });
+    // Read the setting again: it may have changed since the form opened.
+    this.server = parseIdentityServer(this.deps.identityServer());
+    if (this.server.kind === "invalid") {
+      this.set(this.credentials({ error: this.server.message }));
+      return;
+    }
+    const anisette: AppleIdBeginParams["anisette"] = this.server.kind === "remote" ? { remote: this.server.url } : "local";
+    this.set(this.credentials({ busy: true }));
     let result: AppleIdBeginResult;
     try {
-      result = await this.deps.api.begin({ appleId: id, password, anisette: "local" });
+      result = await this.deps.api.begin({ appleId: id, password, anisette });
     } catch (err) {
       this.failCredentials(err);
       return;
     }
     if (!result || typeof result.sessionId !== "string") {
-      this.set({ screen: "credentials", busy: false, error: "The Russet engine returned an unexpected answer." });
+      this.set(this.credentials({ error: "The Russet engine returned an unexpected answer." }));
       return;
     }
     this.sessionId = result.sessionId;
@@ -349,27 +448,28 @@ export class SignInController {
     } else if (canText) {
       await this.textMe(this.numbers[0].id);
     } else {
-      this.set({ screen: "credentials", busy: false, error: "Apple asked for a two-factor code but offered no way to send one." });
+      this.set(this.credentials({ error: "Apple asked for a two-factor code but offered no way to send one." }));
     }
   }
 
   /** Errors on the code screens: an expired sign-in goes back to the form. */
   private failCode(err: unknown, fallback: SignInView): void {
-    const e = classifySignInError(err);
-    if (e.kind === "expired") {
+    const e = classifySignInError(err, { identityServer: this.remoteHost() });
+    if (e.kind === "expired" || e.kind === "identityRejected") {
+      // -80046 rejects the identity at two-factor: the session is over either way.
       this.sessionId = undefined;
-      this.set({ screen: "credentials", busy: false, error: e.message });
+      this.set(this.credentials({ error: e.message, suggestServer: e.kind === "identityRejected" }));
       return;
     }
     this.set({ ...fallback, error: e.message } as SignInView);
   }
 
   private failCredentials(err: unknown): void {
-    const e = classifySignInError(err);
+    const e = classifySignInError(err, { identityServer: this.remoteHost() });
     if (e.kind === "notImplemented") {
       this.set({ screen: "unavailable", message: e.message, ...(e.code ? { code: e.code } : {}) });
     } else {
-      this.set({ screen: "credentials", busy: false, error: e.message });
+      this.set(this.credentials({ error: e.message, suggestServer: e.kind === "identityRejected" || e.kind === "unsupported" }));
     }
   }
 
@@ -455,7 +555,7 @@ export class SignInController {
   back(): void {
     this.sessionId = undefined;
     this.numbers = [];
-    this.set({ screen: "credentials", busy: false });
+    this.set(this.credentials());
   }
 
   private async finish(account?: Account): Promise<void> {

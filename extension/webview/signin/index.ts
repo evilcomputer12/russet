@@ -13,9 +13,9 @@ import pageCss from "./signin.css?inline";
 
 type View =
   | { screen: "checking" }
-  | { screen: "unavailable"; message: string; code?: string }
+  | { screen: "unavailable"; message: string; code?: string; suggestServer?: boolean }
   | { screen: "consent"; librariesPresent: boolean; busy: boolean; error?: string }
-  | { screen: "credentials"; busy: boolean; error?: string }
+  | { screen: "credentials"; busy: boolean; error?: string; identityServer?: string; suggestServer?: boolean }
   | { screen: "code"; via: "trustedDevice" | "sms"; phone?: string; canText: boolean; busy: boolean; error?: string; info?: string }
   | { screen: "phones"; numbers: Array<{ id: string; masked: string }>; busy: boolean; error?: string }
   | { screen: "done"; account: { label: string; kind: string; teamId?: string } };
@@ -43,7 +43,10 @@ function render(view: View): void {
         h("div", { class: "alert info", role: "status" }, view.message, view.code ? h("span", { class: "muted" }, ` (${view.code})`) : ""),
         h("p", {}, "You can add an App Store Connect API key instead; it works with paid developer accounts."),
         h("div", { class: "row buttons" },
-          h("button", { onclick: () => post({ kind: "addKey" }) }, "Add App Store Connect API key…"),
+          view.suggestServer
+            ? h("button", { onclick: () => post({ kind: "openIdentitySetting" }) }, "Use an identity server…")
+            : "",
+          h("button", { class: view.suggestServer ? "secondary" : "", onclick: () => post({ kind: "addKey" }) }, "Add App Store Connect API key…"),
           h("button", { class: "secondary", onclick: () => post({ kind: "restart" }) }, "Try again")),
       );
       break;
@@ -174,6 +177,16 @@ function renderCredentials(view: Extract<View, { screen: "credentials" }>): HTML
     h("label", { for: "password" }, "Password"),
     pw,
     h("p", { class: "muted small", id: "privacy" }, "Sent once to the Russet engine on this PC. Russet never stores your password in the IDE or in settings."),
+    view.identityServer
+      ? h("p", { class: "muted small identity", role: "note" },
+          "Sign-in identity from ", h("strong", {}, view.identityServer),
+          ". Its operator sees this computer's Apple device-identity requests, not your password or codes. ",
+          h("button", { type: "button", class: "link", onclick: () => post({ kind: "openIdentitySetting" }) }, "Change"))
+      : "",
+    view.suggestServer
+      ? h("p", { class: "small" },
+          h("button", { type: "button", class: "link", onclick: () => post({ kind: "openIdentitySetting" }) }, "Use an identity server…"))
+      : "",
     h("div", { class: "row buttons" },
       h("button", { type: "submit", disabled: view.busy }, view.busy ? "Signing in…" : "Sign In"),
       h("button", { type: "button", class: "link", onclick: () => post({ kind: "openExternal", target: "iforgot" }) }, "Forgot Apple ID or password?")),

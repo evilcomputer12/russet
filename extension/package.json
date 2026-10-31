@@ -1272,6 +1272,14 @@
           "default": "auto",
           "description": "Native Apple ID sign-in. Russet never stores your password in settings or in the IDE."
         },
+        "russet.account.anisetteServer": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "pattern": "^$|^https://S+$",
+          "patternErrorMessage": "Use an https:// URL, or leave empty to use this PC's own identity.",
+          "markdownDescription": "The Apple device-identity (anisette) server used when you sign in with an Apple ID. Empty: this PC creates its own identity locally. An `https://` URL (for example `https://mac-ani.jkcoxson.com`): that server provides the identity instead, and **its operator sees this computer's Apple device-identity requests** — not your Apple ID password or two-factor codes. Set in user settings only; a workspace cannot change it."
+        },
         "russet.debug.adapter": {
           "type": "string",
           "enum": [

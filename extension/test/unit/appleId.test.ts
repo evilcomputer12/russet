@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Russet contributors
 import { describe, expect, it, vi } from "vitest";
-import { AppleIdApi, classifySignInError, SignInController, type CallFn, type SignInMode, type SignInView } from "../../src/setup/appleId";
+import {
+  AppleIdApi,
+  classifySignInError,
+  parseIdentityServer,
+  SignInController,
+  type CallFn,
+  type SignInMode,
+  type SignInView,
+} from "../../src/setup/appleId";
 
 const CANARY_PASSWORD = "canary-Pa55word-7d1f";
 const APPLE_ID = "synthetic.developer@example.invalid";
@@ -13,7 +21,7 @@ function rpcError(code: number, russetCode?: string, message = "error"): Error {
 
 type Handlers = Record<string, (params: unknown) => unknown>;
 
-function harness(handlers: Handlers, opts: { mode?: SignInMode; consent?: boolean } = {}) {
+function harness(handlers: Handlers, opts: { mode?: SignInMode; consent?: boolean; server?: string } = {}) {
   const calls: Array<{ method: string; params: unknown }> = [];
   const call: CallFn = async (method, params) => {
     calls.push({ method, params });
@@ -31,6 +39,7 @@ function harness(handlers: Handlers, opts: { mode?: SignInMode; consent?: boolea
     rememberConsent: () => {
       consent = true;
     },
+    identityServer: () => opts.server ?? "",
   });
   const views: SignInView[] = [];
   controller.onDidChange((v) => views.push(v));
@@ -259,5 +268,109 @@ describe("Apple ID sign-in", () => {
     expect(classifySignInError(rpcError(5107)).kind).toBe("serviceUnavailable");
     expect(classifySignInError(new Error("Russet daemon is not connected.")).kind).toBe("offline");
     expect(classifySignInError(rpcError(1003, "core.io", "disk")).kind).toBe("other");
+  });
+});
+
+const SERVER = "https://ani.example.test";
+
+describe("Apple ID sign-in through a remote identity server", () => {
+  it("validates the setting: empty is local, only https URLs without user info are remote", () => {
+    expect(parseIdentityServer("")).toEqual({ kind: "local" });
+    expect(parseIdentityServer(undefined)).toEqual({ kind: "local" });
+    expect(parseIdentityServer(`  ${SERVER}  `)).toEqual({ kind: "remote", url: SERVER, host: "ani.example.test" });
+    expect(parseIdentityServer("https://ani.example.test:8443/v3")).toMatchObject({ kind: "remote", host: "ani.example.test:8443" });
+    for (const bad of ["http://ani.example.test", "ani.example.test", "https://user:pw@ani.example.test", "file:///c:/x"]) {
+      expect(parseIdentityServer(bad)).toMatchObject({ kind: "invalid", message: expect.stringContaining("https://") });
+    }
+  });
+
+  it("sends {remote: url}, skips the local identity checks and consent, and names the server on the form", async () => {
+    const { controller, calls } = harness(w22Handlers(), { server: SERVER, consent: false });
+    await controller.start();
+    expect(controller.view).toEqual({ screen: "credentials", busy: false, identityServer: "ani.example.test" });
+    await controller.submitCredentials(APPLE_ID, CANARY_PASSWORD);
+    expect(calls.map((c) => c.method)).toEqual(["account.appleId.begin"]);
+    expect(calls[0].params).toEqual({ appleId: APPLE_ID, password: CANARY_PASSWORD, anisette: { remote: SERVER } });
+    expect(controller.view).toMatchObject({ screen: "code", via: "trustedDevice" });
+    await controller.submitCode("123456");
+    expect(controller.view).toMatchObject({ screen: "done", account: { label: APPLE_ID } });
+  });
+
+  it("refuses a non-https setting with a clear message and sends nothing", async () => {
+    const { controller, calls } = harness(w22Handlers(), { server: "http://ani.example.test" });
+    await controller.start();
+    expect(controller.view).toMatchObject({
+      screen: "unavailable",
+      code: "russet.account.anisetteServer",
+      message: expect.stringContaining("must be an https:// URL"),
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("does not use the local libraries' status for the remote path", async () => {
+    const { controller } = harness(w22Handlers({
+      "account.anisette.status": () => ({ kind: "local", librariesPresent: false, provisioned: false, localSupported: false }),
+    }), { server: SERVER });
+    await controller.start();
+    expect(controller.view).toMatchObject({ screen: "credentials", identityServer: "ani.example.test" });
+  });
+
+  it("names the server when Apple rejects its identity, without suggesting the setting again", async () => {
+    const { controller } = harness(w22Handlers({
+      "account.appleId.begin": () => {
+        throw Object.assign(rpcError(5253, "gsa.identityRejected"), { data: { russetCode: "gsa.identityRejected", details: { ec: -80045, stage: "init" } } });
+      },
+    }), { server: SERVER });
+    await controller.start();
+    await controller.submitCredentials(APPLE_ID, CANARY_PASSWORD);
+    expect(controller.view).toEqual({
+      screen: "credentials",
+      busy: false,
+      identityServer: "ani.example.test",
+      error: expect.stringContaining("from ani.example.test"),
+    });
+  });
+});
+
+describe("Apple ID sign-in with this PC's own identity", () => {
+  it("suggests the identity-server setting when GrandSlam rejects the local identity at init (-80045)", async () => {
+    const { controller } = harness(w22Handlers({
+      "account.appleId.begin": () => {
+        throw Object.assign(rpcError(5253), { data: { russetCode: "gsa.identityRejected", details: { ec: -80045, stage: "init" } } });
+      },
+    }));
+    await controller.start();
+    await controller.submitCredentials(APPLE_ID, CANARY_PASSWORD);
+    expect(controller.view).toEqual({
+      screen: "credentials",
+      busy: false,
+      suggestServer: true,
+      error: expect.stringMatching(/identity server/),
+    });
+  });
+
+  it("returns to the form with the suggestion when the identity is rejected at two-factor (-80046)", async () => {
+    const { controller } = harness(w22Handlers({
+      "account.appleId.submitCode": () => {
+        throw rpcError(1000, undefined, "Apple refused this client identity at two-factor (-80046): x");
+      },
+    }));
+    await controller.start();
+    await controller.submitCredentials(APPLE_ID, CANARY_PASSWORD);
+    await controller.submitCode("123456");
+    expect(controller.view).toMatchObject({ screen: "credentials", suggestServer: true, error: expect.stringMatching(/identity server/) });
+  });
+
+  it("suggests the setting where local anisette cannot run", async () => {
+    const { controller } = harness(w22Handlers({
+      "account.anisette.status": () => ({ kind: "local", librariesPresent: false, provisioned: false, localSupported: false }),
+    }));
+    await controller.start();
+    expect(controller.view).toMatchObject({ screen: "unavailable", code: "anisette.unsupported", suggestServer: true });
+  });
+
+  it("maps GrandSlam's bare 503 to a busy message", () => {
+    const busy = Object.assign(rpcError(5255), { data: { russetCode: "gsa.protocol", details: { httpStatus: 503 } } });
+    expect(classifySignInError(busy).kind).toBe("serviceUnavailable");
   });
 });

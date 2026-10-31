@@ -140,6 +140,12 @@ export function installExperience(
     mode: signInMode,
     consentGiven: () => context.globalState.get<boolean>("russet.account.appleIdConsent", false),
     rememberConsent: () => context.globalState.update("russet.account.appleIdConsent", true),
+    // Machine-scoped in the manifest; read only the user-settings value as well, so a workspace can never
+    // redirect sign-in to another identity server.
+    identityServer: () => {
+      const i = vscode.workspace.getConfiguration("russet").inspect<string>("account.anisetteServer");
+      return i?.globalValue ?? i?.defaultValue ?? "";
+    },
   });
   const signInPanel = new SignInPanel(context.extensionUri, signIn);
   subs.push(
@@ -198,6 +204,14 @@ export function installExperience(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("russet.account.appleIdSignIn")) {
         setup.notify();
+      }
+      // A changed identity server applies to the next sign-in; restart a page that has not signed in yet.
+      const screen = signIn.view.screen;
+      if (
+        (e.affectsConfiguration("russet.account.anisetteServer") || e.affectsConfiguration("russet.account.appleIdSignIn")) &&
+        (screen === "unavailable" || screen === "consent" || screen === "credentials")
+      ) {
+        void signIn.start();
       }
     }),
     { dispose: () => refreshTimer && clearTimeout(refreshTimer) },
