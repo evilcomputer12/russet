@@ -8,6 +8,7 @@
 
 import * as vscode from "vscode";
 import type { DebugPrepareResult } from "../generated/protocol";
+import type { WindowsBackend, BackendRelay } from "../daemon/windowsBackend";
 
 const prepared = new Map<string, DebugPrepareResult>();
 let counter = 0;
@@ -33,9 +34,23 @@ export function dropPrepared(token: string | undefined): void {
 }
 
 export class RussetDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory {
-  createDebugAdapterDescriptor(
+  private readonly relays = new Map<string, BackendRelay>();
+
+  constructor(private readonly backend?: WindowsBackend) {}
+
+  release(sessionId: string): void {
+    this.relays.get(sessionId)?.dispose();
+    this.relays.delete(sessionId);
+  }
+
+  dispose(): void {
+    for (const relay of this.relays.values()) relay.dispose();
+    this.relays.clear();
+  }
+
+  async createDebugAdapterDescriptor(
     session: vscode.DebugSession,
-  ): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+  ): Promise<vscode.DebugAdapterDescriptor> {
     const token = (session.configuration as { __russetToken?: string }).__russetToken;
     const result = takePrepared(token);
     if (!result) {
@@ -44,10 +59,22 @@ export class RussetDebugAdapterFactory implements vscode.DebugAdapterDescriptorF
 
     // Preferred: the daemon's DAP hub over a named pipe / unix socket.
     if (result.dap) {
+      if (this.backend && result.dap.transport === "unix") {
+        this.release(session.id);
+        const relay = await this.backend.open(result.dap.path, "dap");
+        this.relays.set(session.id, relay);
+        return new vscode.DebugAdapterNamedPipeServer(relay.endpoint);
+      }
+      if (process.platform === "win32" && result.dap.transport === "unix") {
+        throw new Error("Russet: the Linux debugger endpoint needs a managed Windows backend relay.");
+      }
       return new vscode.DebugAdapterNamedPipeServer(result.dap.path);
     }
 
     // Fallback: launch lldb-dap directly with the environment the daemon reported.
+    if (this.backend) {
+      throw new Error("Russet: the managed backend did not provide a DAP hub endpoint.");
+    }
     const tool = result.lldbDap;
     const configured = vscode.workspace
       .getConfiguration("russet")

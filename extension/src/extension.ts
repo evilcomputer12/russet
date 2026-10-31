@@ -7,6 +7,7 @@
 
 import * as vscode from "vscode";
 import { RussetClient } from "./daemon/client";
+import { WindowsBackend } from "./daemon/windowsBackend";
 import { Store } from "./state/store";
 import { installContextKeys } from "./state/contextKeys";
 import {
@@ -45,12 +46,15 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
   logger.info(`Russet extension ${context.extension.packageJSON.version} activating`);
 
   const config = vscode.workspace.getConfiguration("russet");
+  const backend = WindowsBackend.fromEnvironment();
+  if (backend) context.subscriptions.push(backend);
   const client = new RussetClient(
     {
       socketPath: config.get<string>("daemon.socketPath") || undefined,
       binDir: config.get<string>("binDir", ""),
       autoStart: config.get<boolean>("daemon.autoStart", true),
       clientVersion: String(context.extension.packageJSON.version),
+      backend,
     },
     logger,
   );
@@ -96,6 +100,8 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
 
   // Debug type `russet`.
   const configProvider = new RussetDebugConfigProvider(client, store);
+  const adapterFactory = new RussetDebugAdapterFactory(backend);
+  context.subscriptions.push(adapterFactory, vscode.debug.onDidTerminateDebugSession((session) => adapterFactory.release(session.id)));
   context.subscriptions.push(
     vscode.debug.registerDebugConfigurationProvider("russet", configProvider),
     vscode.debug.registerDebugConfigurationProvider(
@@ -103,7 +109,7 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
       configProvider,
       vscode.DebugConfigurationProviderTriggerKind.Dynamic,
     ),
-    vscode.debug.registerDebugAdapterDescriptorFactory("russet", new RussetDebugAdapterFactory()),
+    vscode.debug.registerDebugAdapterDescriptorFactory("russet", adapterFactory),
     vscode.debug.registerDebugAdapterTrackerFactory("russet", new RussetDebugTrackerFactory(client, store)),
   );
 
@@ -133,6 +139,12 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
 
   // Connect.
   void client.start();
+  if (backend && !context.globalState.get<boolean>("windowsSetupShown", false)) {
+    void vscode.commands.executeCommand("russet.openSetup").then(
+      () => context.globalState.update("windowsSetupShown", true),
+      () => logger.warn("Could not open the setup walkthrough."),
+    );
+  }
 
   const api: RussetApi = {
     apiVersion: 1,
