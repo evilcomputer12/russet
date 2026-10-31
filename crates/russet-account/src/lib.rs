@@ -25,6 +25,7 @@ use russet_core::time::Clock;
 use russet_secrets::SecretStore;
 use russet_sign::Distribution;
 
+mod csr;
 mod doctor;
 pub mod free;
 mod fsutil;

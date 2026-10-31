@@ -229,7 +229,9 @@ impl Pipeline {
                 codes::perm::APPROVAL_REQUIRED,
                 format!("provisioning needs {} Apple-side change(s)", provisioned.mutations),
             )
-            .with_hint("Review the plan with `russet provision --dry-run`; applying mutations lands with W12."));
+            .with_hint(
+                "Review the plan with `russet provision --dry-run`; Run cannot ask for the approval to apply it yet.",
+            ));
         }
         cancelled(cancel)?;
 

@@ -137,6 +137,16 @@ pub trait DevPortal: Send + Sync {
     async fn delete_profile(&self, _id: &str, _approval: &ApprovalRef) -> Result<()> {
         Err(mutations_later())
     }
+    /// Creates a certificate of `certificate_type` (`DEVELOPMENT`, `DISTRIBUTION`) for a PEM CSR; the answer
+    /// carries the issued certificate's DER.
+    async fn create_certificate(
+        &self,
+        _certificate_type: &str,
+        _csr_pem: &str,
+        _approval: &ApprovalRef,
+    ) -> Result<CertInfo> {
+        Err(mutations_later())
+    }
     /// Revokes a certificate by its portal id (`portal.certificates.revoke`, typed confirmation).
     async fn revoke_certificate(&self, _id: &str, _approval: &ApprovalRef) -> Result<()> {
         Err(mutations_later())
@@ -360,6 +370,20 @@ impl DevPortal for AscPortal {
 
     async fn delete_profile(&self, id: &str, _approval: &ApprovalRef) -> Result<()> {
         self.mut_client.delete(&format!("/v1/profiles/{id}")).await
+    }
+
+    async fn create_certificate(
+        &self,
+        certificate_type: &str,
+        csr_pem: &str,
+        _approval: &ApprovalRef,
+    ) -> Result<CertInfo> {
+        let body = serde_json::json!({
+            "data": {"type": "certificates", "attributes": {"certificateType": certificate_type, "csrContent": csr_pem}}
+        });
+        let doc: russet_asc::model::Document<Resource<CertificateAttributes>> =
+            self.mut_client.post_json("/v1/certificates", &body).await?;
+        Ok(cert_info(doc.data))
     }
 
     async fn revoke_certificate(&self, id: &str, _approval: &ApprovalRef) -> Result<()> {
