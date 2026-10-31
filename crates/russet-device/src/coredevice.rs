@@ -31,6 +31,7 @@ pub mod service {
     pub const APP_SERVICE: &str = "com.apple.coredevice.appservice";
     pub const OPEN_STDIO_SOCKET: &str = "com.apple.coredevice.openstdiosocket";
     pub const DT_SERVICE_HUB: &str = "com.apple.instruments.dtservicehub";
+    pub const SCREEN_CAPTURE: &str = "com.apple.coredevice.screencaptureservice";
     pub const CRYPTEXD: &str = "com.apple.security.cryptexd.remote";
     pub const DEBUG_PROXY: &str = "com.apple.internal.dt.remote.debugproxy";
 }
