@@ -269,7 +269,7 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `screen.screenshot` | read |  | plain | `Unspecified` | `Unspecified` |
+| `screen.screenshot` | read |  | plain | `ScreenScreenshotParams` | `ScreenScreenshotResult` |
 | `screen.mirror.start` | device (per call) |  | plain | `Unspecified` | `Unspecified` |
 | `screen.mirror.stop` | read |  | plain | `Unspecified` | `Unspecified` |
 | `screen.elements` | read |  | plain | `Unspecified` | `Unspecified` |

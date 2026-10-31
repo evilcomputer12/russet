@@ -3,16 +3,79 @@
 
 //! `screen.*`: screenshots, the live mirror and UI elements. Owner: W10.
 //!
-//! F0 stub (W1): every name of ARCHITECTURE §8.2 is registered here with placeholder DTOs
-//! ([`Unspecified`]). Replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
+//! `screen.screenshot` has its DTOs. The other names of ARCHITECTURE §8.2 are still F0 stubs with placeholder DTOs
+//! ([`Unspecified`]): replace each `…Params`/`…Result` alias with a struct deriving `Serialize, Deserialize,
 //! JsonSchema, TS` (camelCase; the wire-enum rules of ARCHITECTURE §5.2), keeping the names so call sites stay.
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{ConnInfo, MethodInfo, NotificationInfo, Ownership, Permission, RpcMethod, RpcNotification, Unspecified};
 
+/// An image encoding.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImageFormat {
+    #[default]
+    Png,
+    Jpeg,
+}
+
+/// Which way up the screen is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum Orientation {
+    Portrait,
+    Landscape,
+}
+
 /// Params of `screen.screenshot`: `{udid?, format?: png|jpeg, maxDimension?, scale?, quality?, toFile?} → {imageBase64?|path?, format, width, height, orientation}`.
-pub type ScreenScreenshotParams = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenScreenshotParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub udid: Option<String>,
+    /// The encoding (default `png`). The device's screenshot service answers PNG only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub format: Option<ImageFormat>,
+    /// The longest side, in pixels (downscaling; not available yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_dimension: Option<u32>,
+    /// A scale factor in (0, 1] (downscaling; not available yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scale: Option<f64>,
+    /// JPEG quality, 1–100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub quality: Option<u8>,
+    /// Write the image to this absolute path instead of returning it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub to_file: Option<String>,
+}
+
 /// Result of `screen.screenshot`.
-pub type ScreenScreenshotResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenScreenshotResult {
+    /// The image, base64 (absent with `toFile`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub image_base64: Option<String>,
+    /// The file written (with `toFile`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub path: Option<String>,
+    pub format: ImageFormat,
+    pub width: u32,
+    pub height: u32,
+    pub orientation: Orientation,
+}
 crate::rpc_method!(
     /// `screen.screenshot` (class `read`). W10 (Wave 2).
     ScreenScreenshot,

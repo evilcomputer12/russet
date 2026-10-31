@@ -1936,6 +1936,11 @@ team?: string, };
 export type IdentityListResult = { identities: Array<SigningIdentity>, };
 
 /**
+ * An image encoding.
+ */
+export type ImageFormat = "png" | "jpeg";
+
+/**
  * Params of `initialize` (ARCHITECTURE §7.4).
  */
 export type InitializeParams = { protocol: ProtocolVersion, client: ClientDescriptor, capabilities: ClientCapabilities, workspace?: Workspace, 
@@ -2523,6 +2528,11 @@ export type MessageLevel = "info" | "warning" | "error";
  * The kind of an account change.
  */
 export type MutationKind = "create-certificate" | "register-device" | "register-bundle-id" | "enable-capability" | "create-profile" | "delete-profile";
+
+/**
+ * Which way up the screen is.
+ */
+export type Orientation = "portrait" | "landscape";
 
 /**
  * Which output entries `run.output.query` returns.
@@ -3188,6 +3198,44 @@ export type RunSubscribeParams = { sessionId?: SessionId, };
  * Result of `run.subscribe`; then `run.state`, `run.output`, `run.exited` (and `run.jit`, W18).
  */
 export type RunSubscribeResult = { subscriptionId: SubscriptionId, };
+
+/**
+ * Params of `screen.screenshot`: `{udid?, format?: png|jpeg, maxDimension?, scale?, quality?, toFile?} → {imageBase64?|path?, format, width, height, orientation}`.
+ */
+export type ScreenScreenshotParams = { udid?: string, 
+/**
+ * The encoding (default `png`). The device's screenshot service answers PNG only.
+ */
+format?: ImageFormat, 
+/**
+ * The longest side, in pixels (downscaling; not available yet).
+ */
+maxDimension?: number, 
+/**
+ * A scale factor in (0, 1] (downscaling; not available yet).
+ */
+scale?: number, 
+/**
+ * JPEG quality, 1–100.
+ */
+quality?: number, 
+/**
+ * Write the image to this absolute path instead of returning it.
+ */
+toFile?: string, };
+
+/**
+ * Result of `screen.screenshot`.
+ */
+export type ScreenScreenshotResult = { 
+/**
+ * The image, base64 (absent with `toFile`).
+ */
+imageBase64?: string, 
+/**
+ * The file written (with `toFile`).
+ */
+path?: string, format: ImageFormat, width: number, height: number, orientation: Orientation, };
 
 /**
  * A Darwin SDK known to the registry (Russet imports and xtool bundles).
@@ -4110,7 +4158,7 @@ export interface Methods {
   "forward.list": { params: ForwardListParams; result: ForwardListResult };
   "logs.subscribe": { params: LogsSubscribeParams; result: LogsSubscribeResult };
   "logs.tail": { params: LogsTailParams; result: LogsTailResult };
-  "screen.screenshot": { params: Unspecified; result: Unspecified };
+  "screen.screenshot": { params: ScreenScreenshotParams; result: ScreenScreenshotResult };
   "screen.mirror.start": { params: Unspecified; result: Unspecified };
   "screen.mirror.stop": { params: Unspecified; result: Unspecified };
   "screen.elements": { params: Unspecified; result: Unspecified };

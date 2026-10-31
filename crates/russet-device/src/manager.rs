@@ -501,7 +501,7 @@ impl DeviceHandle {
     }
 
     pub async fn screenshot(&self) -> Result<Screenshot> {
-        Err(wave2("screen.screenshot"))
+        crate::screen::screenshot(self).await
     }
 
     pub async fn mirror(&self, o: MirrorOptions) -> Result<MirrorHandle> {

@@ -5226,6 +5226,14 @@
       ],
       "type": "object"
     },
+    "ImageFormat": {
+      "description": "An image encoding.",
+      "enum": [
+        "png",
+        "jpeg"
+      ],
+      "type": "string"
+    },
     "InitializeParams": {
       "description": "Params of `initialize` (ARCHITECTURE §7.4).",
       "properties": {
@@ -7087,6 +7095,14 @@
       ],
       "type": "string"
     },
+    "Orientation": {
+      "description": "Which way up the screen is.",
+      "enum": [
+        "portrait",
+        "landscape"
+      ],
+      "type": "string"
+    },
     "OutputFilter": {
       "description": "Which output entries `run.output.query` returns.",
       "properties": {
@@ -8761,6 +8777,105 @@
       },
       "required": [
         "subscriptionId"
+      ],
+      "type": "object"
+    },
+    "ScreenScreenshotParams": {
+      "description": "Params of `screen.screenshot`: `{udid?, format?: png|jpeg, maxDimension?, scale?, quality?, toFile?} → {imageBase64?|path?, format, width, height, orientation}`.",
+      "properties": {
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImageFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The encoding (default `png`). The device's screenshot service answers PNG only."
+        },
+        "maxDimension": {
+          "description": "The longest side, in pixels (downscaling; not available yet).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "quality": {
+          "description": "JPEG quality, 1–100.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scale": {
+          "description": "A scale factor in (0, 1] (downscaling; not available yet).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "toFile": {
+          "description": "Write the image to this absolute path instead of returning it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ScreenScreenshotResult": {
+      "description": "Result of `screen.screenshot`.",
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/ImageFormat"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "imageBase64": {
+          "description": "The image, base64 (absent with `toFile`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "orientation": {
+          "$ref": "#/$defs/Orientation"
+        },
+        "path": {
+          "description": "The file written (with `toFile`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "width",
+        "height",
+        "orientation"
       ],
       "type": "object"
     },
@@ -13011,11 +13126,11 @@
       "longRunning": false,
       "namespace": "screen",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ScreenScreenshotParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ScreenScreenshotResult"
       }
     },
     "sdk.deviceSupport.check": {

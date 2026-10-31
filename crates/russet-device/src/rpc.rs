@@ -14,7 +14,7 @@ use russet_core::Result;
 use russet_core::error::codes;
 use russet_core::ids::LeaseId;
 use russet_core::progress::ProgressSink;
-use russet_protocol::{app as pa, common, device as pd, forward as pf, logs as pl, process as pp};
+use russet_protocol::{app as pa, common, device as pd, forward as pf, logs as pl, process as pp, screen as ps};
 
 use crate::debug::{BindSpec, ForwardHandle};
 use crate::error::{device_error, invalid_argument};
@@ -201,6 +201,41 @@ pub async fn app_terminate(m: &DeviceManager, c: &Caller, p: pa::AppTerminatePar
         h.signal(pid, 9).await?;
     }
     Ok(pa::AppTerminateResult {})
+}
+
+/// `screen.screenshot`: a PNG of the screen, returned as base64 or written to an absolute `toFile`.
+pub async fn screen_screenshot(m: &DeviceManager, p: ps::ScreenScreenshotParams) -> Result<ps::ScreenScreenshotResult> {
+    if p.format == Some(ps::ImageFormat::Jpeg) || p.quality.is_some() {
+        return Err(invalid_argument("the device's screenshot service answers PNG only: ask for png, without quality"));
+    }
+    if p.max_dimension.is_some() || p.scale.is_some() {
+        return Err(invalid_argument("downscaling screenshots is not available yet: omit maxDimension and scale"));
+    }
+    let to_file = p.to_file.as_deref().map(PathBuf::from);
+    if let Some(path) = to_file.as_ref().filter(|p| !p.is_absolute()) {
+        return Err(invalid_argument(format!("{path:?} is not an absolute path (ARCHITECTURE §7.3)")));
+    }
+    let shot = handle(m, p.udid.as_deref())?.screenshot().await?;
+    let (image_base64, path) = match to_file {
+        Some(path) => {
+            std::fs::write(&path, &shot.png).map_err(|e| {
+                russet_core::Error::new(codes::core::IO, format!("cannot write {}: {e}", path.display()))
+            })?;
+            (None, Some(path.display().to_string()))
+        }
+        None => {
+            use base64::Engine as _;
+            (Some(base64::engine::general_purpose::STANDARD.encode(&shot.png)), None)
+        }
+    };
+    Ok(ps::ScreenScreenshotResult {
+        image_base64,
+        path,
+        format: ps::ImageFormat::Png,
+        width: shot.width,
+        height: shot.height,
+        orientation: if shot.width > shot.height { ps::Orientation::Landscape } else { ps::Orientation::Portrait },
+    })
 }
 
 pub async fn process_list(m: &DeviceManager, p: pp::ProcessListParams) -> Result<pp::ProcessListResult> {

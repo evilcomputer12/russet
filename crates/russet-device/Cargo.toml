@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+base64 = "0.22.1" # screen.screenshot's imageBase64 (the version russet-gsa and russet-anisette use)
 futures.workspace = true
 idevice.workspace = true
 jktcp.workspace = true
