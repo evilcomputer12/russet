@@ -49,6 +49,84 @@ const twoFactorHandlers = (overrides: Handlers = {}): Handlers => ({
   ...overrides,
 });
 
+// W22's wire shapes (russet-protocol account.rs on ws/w22-apple-signin).
+const w22Handlers = (overrides: Handlers = {}): Handlers => ({
+  "account.anisette.status": () => ({ kind: "local", librariesPresent: true, apkVersion: "4.9.6", provisioned: true, localSupported: true, pinned: true }),
+  "account.appleId.begin": () => ({
+    sessionId: "s-22",
+    step: "two-factor",
+    twoFactor: {
+      via: ["trusted-device", "sms"],
+      codeSentTo: "trusted-device",
+      phoneNumbers: [{ id: 2, number: "(•••) •••-••34" }],
+      codeLength: 6,
+    },
+  }),
+  "account.appleId.requestCode": (p) => {
+    const via = (p as { via?: string }).via;
+    if (via !== "trusted-device" && via !== "sms") {
+      throw rpcError(-32602, undefined, "unknown variant");
+    }
+    return {};
+  },
+  "account.appleId.submitCode": () => ACCOUNT,
+  ...overrides,
+});
+
+describe("Apple ID sign-in against W22's shapes", () => {
+  it("uses the code the engine already pushed, and texts with the kebab-case wire values", async () => {
+    const { controller, calls } = harness(w22Handlers());
+    await controller.start();
+    await controller.submitCredentials(APPLE_ID, CANARY_PASSWORD);
+    expect(controller.view).toEqual({ screen: "code", via: "trustedDevice", canText: true, busy: false });
+    expect(calls.map((c) => c.method)).toEqual(["account.anisette.status", "account.appleId.begin"]);
+    controller.choosePhone();
+    expect(controller.view).toEqual({ screen: "phones", numbers: [{ id: "2", masked: "(•••) •••-••34" }], busy: false });
+    await controller.textMe("2");
+    expect(calls.at(-1)).toEqual({ method: "account.appleId.requestCode", params: { sessionId: "s-22", via: "sms", phoneId: 2 } });
+    await controller.useTrustedDevice();
+    expect(calls.at(-1)?.params).toEqual({ sessionId: "s-22", via: "trusted-device" });
+    expect(controller.view).toMatchObject({ screen: "code", via: "trustedDevice", busy: false });
+    expect(controller.view).not.toHaveProperty("error");
+    await controller.submitCode("654321");
+    expect(controller.view).toMatchObject({ screen: "done", account: { label: APPLE_ID, teamId: "SYNTHTEAM1" } });
+  });
+
+  it("finishes with the account begin returns when Apple asks for no code", async () => {
+    const { controller, calls } = harness(w22Handlers({
+      "account.appleId.begin": () => ({ sessionId: "s-23", step: "done", account: ACCOUNT }),
+    }));
+    await controller.start();
+    await controller.submitCredentials(APPLE_ID, CANARY_PASSWORD);
+    expect(controller.view).toMatchObject({ screen: "done", account: { label: APPLE_ID } });
+    expect(calls.map((c) => c.method)).not.toContain("account.list");
+  });
+
+  it("returns to the form when the sign-in session timed out", async () => {
+    const { controller } = harness(w22Handlers({
+      "account.appleId.submitCode": () => {
+        throw rpcError(5258, "gsa.loginExpired");
+      },
+    }));
+    await controller.start();
+    await controller.submitCredentials(APPLE_ID, CANARY_PASSWORD);
+    await controller.submitCode("123456");
+    expect(controller.view).toEqual({ screen: "credentials", busy: false, error: expect.stringMatching(/timed out/) });
+  });
+
+  it("explains a host where local anisette cannot run", async () => {
+    const { controller } = harness(w22Handlers({
+      "account.anisette.status": () => ({ kind: "local", librariesPresent: false, provisioned: false, localSupported: false }),
+    }));
+    await controller.start();
+    expect(controller.view).toMatchObject({ screen: "unavailable", code: "anisette.unsupported" });
+  });
+
+  it("classifies W22's rate limit", () => {
+    expect(classifySignInError(rpcError(5254, "gsa.codeRateLimited")).kind).toBe("rateLimited");
+  });
+});
+
 describe("Apple ID sign-in", () => {
   it("signs in with a trusted-device code and shows the account and team", async () => {
     const { controller, calls } = harness(twoFactorHandlers());
@@ -71,7 +149,7 @@ describe("Apple ID sign-in", () => {
       "account.appleId.submitCode",
     ]);
     expect(calls[1].params).toEqual({ appleId: APPLE_ID, password: CANARY_PASSWORD, anisette: "local" });
-    expect(calls[2].params).toEqual({ sessionId: "s-1", via: "trustedDevice" });
+    expect(calls[2].params).toEqual({ sessionId: "s-1", via: "trusted-device" });
     expect(calls[3].params).toEqual({ sessionId: "s-1", code: "123456" });
   });
 

@@ -3,16 +3,20 @@
 //
 // Native Apple ID sign-in (SIGN §13.1, ide.md §5.8) over the daemon's
 // `account.appleId.*` and `account.anisette.*` methods (ARCHITECTURE §8,
-// W22). The generated protocol still types them `Unspecified`, so the shapes
-// below are local copies of the ARCHITECTURE table; swap them for the generated
-// types when W22 lands.
+// W22). This branch's generated protocol still types them `Unspecified`, so
+// the shapes below are local copies of W22's DTOs (russet-protocol account.rs
+// on ws/w22-apple-signin); swap them for the generated types when W22 merges.
+// The ARCHITECTURE draft shapes (`via` as one string, `numbers[{id, masked}]`)
+// are still read.
 //
 // Credentials: the password is passed straight from the page to
 // `account.appleId.begin` and never stored, logged or kept on this object.
 
 import type { Account } from "../generated/protocol";
 
+/** The page's names; on the wire W22 writes `trusted-device` (kebab-case). */
 export type TwoFactorVia = "trustedDevice" | "sms";
+type WireVia = "trusted-device" | "sms";
 
 export interface TrustedNumber {
   id: string;
@@ -27,16 +31,34 @@ export interface AppleIdBeginParams {
 
 export interface AppleIdBeginResult {
   sessionId: string;
-  /** ARCHITECTURE writes `two-factor`, SIGN §12 `twoFactor`; both are accepted. */
+  /** W22 and ARCHITECTURE write `two-factor`; SIGN §12 drafted `twoFactor`. */
   step: "done" | "two-factor" | "twoFactor";
-  twoFactor?: { via?: TwoFactorVia; numbers?: Array<{ id: string | number; masked: string }> };
+  twoFactor?: {
+    /** W22: every way a code can be requested; the draft had one string. */
+    via?: WireVia | "trustedDevice" | Array<WireVia | "trustedDevice">;
+    /** W22: where the engine already sent the current code. */
+    codeSentTo?: WireVia | "trustedDevice";
+    /** W22: Apple's obfuscated trusted numbers. */
+    phoneNumbers?: Array<{ id: number | string; number: string }>;
+    /** The ARCHITECTURE draft's name for the same list. */
+    numbers?: Array<{ id: string | number; masked: string }>;
+    codeLength?: number;
+  };
+  /** W22: with `step: "done"`, the account that was added. */
+  account?: Account;
 }
 
 export interface AnisetteStatus {
   kind: string;
   librariesPresent: boolean;
-  apkVersion?: string;
+  apkVersion?: string | null;
   provisioned: boolean;
+  /** W22: false when local ADI cannot run on this host. */
+  localSupported?: boolean;
+}
+
+function fromWire(via: unknown): TwoFactorVia | undefined {
+  return via === "trusted-device" || via === "trustedDevice" ? "trustedDevice" : via === "sms" ? "sms" : undefined;
 }
 
 export type CallFn = (method: string, params: unknown) => Promise<unknown>;
@@ -62,7 +84,7 @@ export class AppleIdApi {
   requestCode(sessionId: string, via: TwoFactorVia, phoneId?: string): Promise<unknown> {
     return this.call("account.appleId.requestCode", {
       sessionId,
-      via,
+      via: via === "trustedDevice" ? "trusted-device" : "sms",
       ...(phoneId === undefined ? {} : { phoneId: /^\d+$/.test(phoneId) ? Number(phoneId) : phoneId }),
     });
   }
@@ -86,6 +108,9 @@ export type SignInErrorKind =
   | "notAllowed"
   | "librariesMissing"
   | "serviceUnavailable"
+  | "rateLimited"
+  | "expired"
+  | "unsupported"
   | "offline"
   | "other";
 
@@ -122,7 +147,16 @@ export function classifySignInError(err: unknown): SignInError {
   if (num === 5253 || code === "gsa.identityRejected") {
     return withCode("identityRejected", hint ?? "Apple did not accept this computer's sign-in identity. Try again later.");
   }
-  if (num === 5270 || code === "anisette.libsMissing") {
+  if (num === 5254 || code === "gsa.codeRateLimited") {
+    return withCode("rateLimited", "Apple is not sending more codes right now. Wait a while, then try again.");
+  }
+  if (num === 5258 || code === "gsa.loginExpired") {
+    return withCode("expired", "The sign-in timed out. Enter your Apple ID and password again.");
+  }
+  if (num === 5276 || code === "anisette.unsupported") {
+    return withCode("unsupported", "Apple ID sign-in cannot identify this computer to Apple yet (local anisette is not supported here).");
+  }
+  if (num === 5270 || num === 5273 || code === "anisette.libsMissing" || code === "anisette.consentRequired") {
     return withCode("librariesMissing", "The Apple sign-in libraries are missing. Download them to continue.");
   }
   if (num === 5107 || code === "account.appleServiceUnavailable") {
@@ -225,6 +259,11 @@ export class SignInController {
     try {
       const status = await this.deps.api.anisetteStatus();
       this.librariesPresent = !!status.librariesPresent;
+      if (status.localSupported === false && mode !== "on") {
+        const e = classifySignInError({ code: 5276, data: { russetCode: "anisette.unsupported" } });
+        this.set({ screen: "unavailable", message: e.message, code: "anisette.unsupported" });
+        return;
+      }
     } catch (err) {
       const e = classifySignInError(err);
       if (e.kind === "notImplemented" && mode === "on") {
@@ -286,17 +325,43 @@ export class SignInController {
     }
     this.sessionId = result.sessionId;
     if (result.step === "done") {
-      await this.finish();
+      await this.finish(result.account);
       return;
     }
-    this.numbers = (result.twoFactor?.numbers ?? [])
-      .filter((n) => n && (typeof n.id === "string" || typeof n.id === "number") && typeof n.masked === "string")
-      .map((n) => ({ id: String(n.id), masked: n.masked }));
-    if (result.twoFactor?.via === "sms" && this.numbers.length > 0) {
+    const tf = result.twoFactor ?? {};
+    const phones: Array<{ id: unknown; masked: unknown }> = [
+      ...(tf.phoneNumbers ?? []).map((n) => ({ id: n?.id, masked: n?.number })),
+      ...(tf.numbers ?? []).map((n) => ({ id: n?.id, masked: n?.masked })),
+    ];
+    this.numbers = phones
+      .filter((n) => (typeof n.id === "string" || typeof n.id === "number") && typeof n.masked === "string")
+      .map((n) => ({ id: String(n.id), masked: n.masked as string }));
+    const offered = (Array.isArray(tf.via) ? tf.via : tf.via ? [tf.via] : []).map(fromWire);
+    const sentTo = fromWire(tf.codeSentTo);
+    const canText = this.numbers.length > 0;
+    if (sentTo === "trustedDevice") {
+      // The engine already asked Apple to push a code; requesting again would send a second one.
+      this.set({ screen: "code", via: "trustedDevice", canText, busy: false });
+    } else if (sentTo === "sms") {
+      this.set({ screen: "code", via: "sms", ...(this.numbers[0] ? { phone: this.numbers[0].masked } : {}), canText, busy: false });
+    } else if (offered.length === 0 || offered.includes("trustedDevice")) {
+      await this.useTrustedDevice();
+    } else if (canText) {
       await this.textMe(this.numbers[0].id);
+    } else {
+      this.set({ screen: "credentials", busy: false, error: "Apple asked for a two-factor code but offered no way to send one." });
+    }
+  }
+
+  /** Errors on the code screens: an expired sign-in goes back to the form. */
+  private failCode(err: unknown, fallback: SignInView): void {
+    const e = classifySignInError(err);
+    if (e.kind === "expired") {
+      this.sessionId = undefined;
+      this.set({ screen: "credentials", busy: false, error: e.message });
       return;
     }
-    await this.useTrustedDevice();
+    this.set({ ...fallback, error: e.message } as SignInView);
   }
 
   private failCredentials(err: unknown): void {
@@ -319,7 +384,7 @@ export class SignInController {
       await this.deps.api.requestCode(this.sessionId, "trustedDevice");
       this.set({ screen: "code", via: "trustedDevice", canText, busy: false });
     } catch (err) {
-      this.set({ screen: "code", via: "trustedDevice", canText, busy: false, error: classifySignInError(err).message });
+      this.failCode(err, { screen: "code", via: "trustedDevice", canText, busy: false });
     }
   }
 
@@ -348,7 +413,7 @@ export class SignInController {
         info: `A code was sent to ${phone.masked}.`,
       });
     } catch (err) {
-      this.set({ screen: "phones", numbers: this.numbers, busy: false, error: classifySignInError(err).message });
+      this.failCode(err, { screen: "phones", numbers: this.numbers, busy: false });
     }
   }
 
@@ -382,8 +447,7 @@ export class SignInController {
       const account = await this.deps.api.submitCode(this.sessionId, trimmed);
       await this.finish(account);
     } catch (err) {
-      const e = classifySignInError(err);
-      this.set({ ...view, busy: false, info: undefined, error: e.message });
+      this.failCode(err, { ...view, busy: false, info: undefined });
     }
   }
 
