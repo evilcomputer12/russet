@@ -5468,14 +5468,18 @@ dependencies = [
  "p12-keystore",
  "p256 0.14.0",
  "plist",
+ "reqwest 0.13.5",
  "ring",
  "rsa",
+ "russet-anisette",
  "russet-asc",
  "russet-core",
  "russet-doctor",
+ "russet-gsa",
  "russet-macho",
  "russet-secrets",
  "russet-sign",
+ "rustls",
  "secrecy",
  "serde",
  "serde_json",
@@ -5484,6 +5488,7 @@ dependencies = [
  "time",
  "tokio",
  "toml 1.1.8+spec-1.1.0",
+ "tracing",
  "url",
  "wiremock",
  "x509-cert 0.2.5",
@@ -5494,7 +5499,12 @@ dependencies = [
 name = "russet-adi-host"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "libc",
  "russet-core",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
