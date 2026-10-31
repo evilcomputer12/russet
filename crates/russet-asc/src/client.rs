@@ -609,6 +609,13 @@ pub fn map_status(status: u16, body: &[u8], path_and_query: &str) -> Error {
                 .with_hint("This is a Russet bug: report it with `russet bugreport`.")
                 .with_details(details)
         }
+        // Apple's terms changed: no key or role helps until the account holder accepts them on the web
+        // (developer services send PLA_NOT_ACCEPTED, the App Store Connect API REQUIRED_AGREEMENTS_…).
+        403 if apple_code.contains("PLA_NOT_ACCEPTED") || apple_code.contains("REQUIRED_AGREEMENTS") => {
+            Error::new(codes::account::ASC_FORBIDDEN, msg("Apple requires an updated developer agreement"))
+                .with_hint("The account holder must accept the latest Apple Developer Program License Agreement: sign in at https://developer.apple.com/account, accept it, then retry.")
+                .with_details(details)
+        }
         403 => Error::new(codes::account::ASC_FORBIDDEN, msg("App Store Connect refused the request"))
             .with_hint("The key's role lacks this permission: use an Admin or App Manager key with access to Certificates, Identifiers & Profiles.")
             .with_details(details),
@@ -659,6 +666,13 @@ mod tests {
         let scope = br#"{"errors":[{"code":"FORBIDDEN.REQUEST_DOES_NOT_MATCH_SCOPE","detail":"no"}]}"#;
         assert_eq!(map_status(403, scope, "/v1/devices").code(), codes::account::ASC_SCOPE);
         assert_eq!(map_status(403, b"{}", "/v1/devices").code(), codes::account::ASC_FORBIDDEN);
+        for agreement in ["FORBIDDEN_ERROR.PLA_NOT_ACCEPTED", "FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED"] {
+            let body = format!(r#"{{"errors":[{{"code":"{agreement}","detail":"agree first"}}]}}"#);
+            let e = map_status(403, body.as_bytes(), "/v1/devices");
+            assert_eq!(e.code(), codes::account::ASC_FORBIDDEN);
+            assert!(e.hint().is_some_and(|h| h.contains("License Agreement")), "{agreement}");
+        }
+        assert!(!map_status(403, b"{}", "/v1/devices").hint().is_some_and(|h| h.contains("License Agreement")));
         assert_eq!(map_status(401, b"", "/v1/devices").code(), codes::account::ASC_UNAUTHORIZED);
         assert_eq!(map_status(404, b"", "/v1/devices").code(), codes::core::NOT_FOUND);
         assert_eq!(map_status(429, b"", "/v1/devices").code(), codes::account::ASC_RATE_LIMITED);
