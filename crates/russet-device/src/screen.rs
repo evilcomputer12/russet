@@ -561,7 +561,12 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 struct Hid {
     touch: Option<UniversalHidServiceClient<Box<dyn ReadWrite>>>,
     keys: Option<IndigoHidClient<Box<dyn ReadWrite>>>,
+    /// When the current touch went down.
+    down: Option<std::time::Instant>,
 }
+
+/// The shortest touch the device takes as a tap (device.md §6.8.3: contact, three samples over 120 ms, release).
+const TAP_HOLD: Duration = Duration::from_millis(120);
 
 impl Hid {
     async fn open(conn: &Arc<dyn ServiceConnector>, udid: &Udid) -> Self {
@@ -578,14 +583,30 @@ impl Hid {
         for e in [touch.as_ref().err(), keys.as_ref().err()].into_iter().flatten() {
             tracing::warn!(reason = %e.message(), "a mirror input service is unavailable");
         }
-        Self { touch: touch.ok(), keys: keys.ok() }
+        Self { touch: touch.ok(), keys: keys.ok(), down: None }
     }
 
     async fn apply(&mut self, e: InputEvent) {
         let done = match (e, self.touch.as_mut(), self.keys.as_mut()) {
             (InputEvent::Touch { phase, x, y }, Some(touch), _) => {
-                let state = if phase == TouchPhase::Up { TOUCHSCREEN_STATE_RELEASE } else { TOUCHSCREEN_STATE_CONTACT };
-                touch.send_touchscreen(state, x, y, None).await
+                if phase == TouchPhase::Down {
+                    self.down = Some(std::time::Instant::now());
+                }
+                if phase != TouchPhase::Up {
+                    touch.send_touchscreen(TOUCHSCREEN_STATE_CONTACT, x, y, None).await
+                } else {
+                    // A quick click becomes the tap recipe: more contact samples until the touch has lasted TAP_HOLD.
+                    let held = self.down.take().map_or(TAP_HOLD, |t| t.elapsed());
+                    let mut done = Ok(());
+                    if held < TAP_HOLD {
+                        let step = (TAP_HOLD - held) / 2;
+                        for _ in 0..2 {
+                            tokio::time::sleep(step).await;
+                            done = done.and(touch.send_touchscreen(TOUCHSCREEN_STATE_CONTACT, x, y, None).await);
+                        }
+                    }
+                    done.and(touch.send_touchscreen(TOUCHSCREEN_STATE_RELEASE, x, y, None).await)
+                }
             }
             (InputEvent::Button { button, action }, _, Some(keys)) => press(keys, button, action).await,
             (InputEvent::Key { usage, down }, _, Some(keys)) => {
