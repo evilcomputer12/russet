@@ -32,6 +32,7 @@ pub struct GsaClient {
     anisette: Arc<dyn AnisetteProvider>,
     profile: ClientProfile,
     urls: tokio::sync::Mutex<Option<LookupUrls>>,
+    retry_delay: std::time::Duration,
 }
 
 impl std::fmt::Debug for GsaClient {
@@ -89,28 +90,51 @@ fn identity_rejected(detail: &str) -> Error {
         .retryable(true)
 }
 
-/// The error of a GrandSlam `Status` (`ec != 0`), if any.
-fn status_error(status: &plist::Dictionary) -> Option<Error> {
+/// How long the one retry of a login answered with a bare 503 waits (back-to-back SRP logins; 5–15 s works).
+pub const BUSY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// GrandSlam's front end answered a bare 503 (no plist).
+fn busy(e: &Error) -> bool {
+    e.details().and_then(|d| d.get("httpStatus")).and_then(serde_json::Value::as_u64) == Some(503)
+}
+
+/// The error of a GrandSlam `Status` (`ec != 0`) at `stage`, if any.
+fn status_error(status: &plist::Dictionary, stage: &str) -> Option<Error> {
     let ec = status.get("ec").and_then(as_i64).unwrap_or(0);
     if ec == 0 {
         return None;
     }
     let em = scrub(status.get("em").and_then(plist::Value::as_string).unwrap_or_default());
     Some(match ec {
+        // Since 2026-10-12 GrandSlam refuses a client info that does not match the platform of the anisette data
+        // (-80045 at init), and Android-identifying clients at two-factor (-80046).
+        -80045 | -80046 => Error::new(
+            codes::gsa::IDENTITY_REJECTED,
+            format!("Apple refused this client identity at {stage} ({ec}): {em}"),
+        )
+        .with_hint("GrandSlam rejects a client identity that does not match the anisette in use. Update Russet (it refreshes gsa-profile.json); a remote anisette server presents its own matching identity.")
+        .with_details(serde_json::json!({"ec": ec, "stage": stage})),
         -22406 => bad_credentials(),
         -20209 | -20283 | -22421 | -20751 => {
             Error::new(codes::gsa::LOCKED, format!("Apple reports this Apple ID is locked ({ec}): {em}"))
                 .with_hint("Unlock it at https://iforgot.apple.com, then sign in again.")
         }
-        -36607 | -45061 | -45054 => identity_rejected(&format!("{ec}: {em}")),
-        _ => protocol(format!("Apple refused the sign-in ({ec}): {em}")),
+        -36607 | -45061 | -45054 => identity_rejected(&format!("{ec} at {stage}: {em}")),
+        _ => protocol(format!("Apple refused the sign-in at {stage} ({ec}): {em}"))
+            .with_details(serde_json::json!({"ec": ec, "stage": stage})),
     })
 }
 
 impl GsaClient {
     /// A client over `http` (see [`russet_anisette::apple_tls::gsa_client`]) for GrandSlam at `base`.
     pub fn new(http: reqwest::Client, base: Url, anisette: Arc<dyn AnisetteProvider>, profile: ClientProfile) -> Self {
-        Self { http, base, anisette, profile, urls: tokio::sync::Mutex::new(None) }
+        Self { http, base, anisette, profile, urls: tokio::sync::Mutex::new(None), retry_delay: BUSY_RETRY_DELAY }
+    }
+
+    /// Waits `delay` before the one retry of a login GrandSlam answered with a bare 503 (tests use zero).
+    pub fn with_retry_delay(mut self, delay: std::time::Duration) -> Self {
+        self.retry_delay = delay;
+        self
     }
 
     pub fn profile(&self) -> &ClientProfile {
@@ -121,16 +145,15 @@ impl GsaClient {
         &self.anisette
     }
 
-    /// `X-Mme-Client-Info`: the profile's override, else the anisette provider's.
-    async fn client_info(&self) -> Result<String> {
-        match &self.profile.anisette_client_info_override {
-            Some(c) => Ok(c.clone()),
-            None => self.anisette.client_info().await,
-        }
-    }
-
+    /// The identity every GrandSlam request presents: the anisette provider's `X-Mme-Client-Info` and akd
+    /// `User-Agent` (GrandSlam refuses a client info that does not match the platform the anisette data comes
+    /// from, `-80045`), with the profile's client-info override.
     async fn identity(&self) -> Result<ClientIdentity> {
-        Ok(ClientIdentity { client_info: self.client_info().await?, user_agent: self.profile.user_agent.clone() })
+        let mut id = self.anisette.identity().await?;
+        if let Some(c) = &self.profile.anisette_client_info_override {
+            id.client_info = c.clone();
+        }
+        Ok(id)
     }
 
     /// The service URLs (`lookup`, once).
@@ -144,7 +167,7 @@ impl GsaClient {
         Ok(u)
     }
 
-    fn cpd(h: &AnisetteHeaders) -> plist::Value {
+    fn cpd(h: &AnisetteHeaders, id: &ClientIdentity) -> plist::Value {
         let mut d = plist::Dictionary::new();
         d.insert("bootstrap".into(), true.into());
         d.insert("icscrec".into(), true.into());
@@ -155,13 +178,33 @@ impl GsaClient {
         for (k, v) in h.pairs() {
             d.insert(k.into(), v.into());
         }
+        // Working clients repeat the client info inside cpd (xtool's DeviceInfo, anisette-v3 clients).
+        d.insert("X-MMe-Client-Info".into(), id.client_info.clone().into());
         plist::Value::Dictionary(d)
     }
 
-    /// POSTs `{Header:{Version:"1.0.1"}, Request}` to `gsService` and returns `Response` (status not checked).
-    async fn gs_post(&self, request: plist::Dictionary) -> Result<plist::Dictionary> {
+    /// POSTs `{Header:{Version:"1.0.1"}, Request}` to `gsService` for `stage` and returns `Response` (its
+    /// `Status` is logged at debug level, not checked). Logs name headers and `cpd` keys, never their values.
+    async fn gs_post(
+        &self,
+        stage: &'static str,
+        request: plist::Dictionary,
+        id: &ClientIdentity,
+    ) -> Result<plist::Dictionary> {
         let urls = self.urls().await?;
         Endpoints::check(&urls.gs_service)?;
+        let cpd_keys: Vec<String> = request
+            .get("cpd")
+            .and_then(plist::Value::as_dictionary)
+            .map(|d| d.keys().cloned().collect())
+            .unwrap_or_default();
+        tracing::debug!(
+            stage,
+            platform = russet_anisette::platform_of(&id.client_info),
+            headers = ?["Content-Type", "Accept", "User-Agent", "X-Mme-Client-Info", "Connection"],
+            cpd = ?cpd_keys,
+            "gsa: request"
+        );
         let mut header = plist::Dictionary::new();
         header.insert("Version".into(), "1.0.1".into());
         let mut root = plist::Dictionary::new();
@@ -175,44 +218,70 @@ impl GsaClient {
             .post(urls.gs_service.clone())
             .header(reqwest::header::CONTENT_TYPE, "text/x-xml-plist")
             .header(reqwest::header::ACCEPT, "*/*")
-            .header(reqwest::header::USER_AGENT, &self.profile.user_agent)
-            .header("X-Mme-Client-Info", self.client_info().await?)
+            .header(reqwest::header::USER_AGENT, &id.user_agent)
+            .header("X-Mme-Client-Info", &id.client_info)
             .header(reqwest::header::CONNECTION, "close")
             .body(body)
             .send()
             .await
-            .map_err(|e| unavailable(format!("GrandSlam is unreachable: {}", e.without_url())))?;
+            .map_err(|e| unavailable(format!("GrandSlam is unreachable at {stage}: {}", e.without_url())))?;
         let status = resp.status().as_u16();
         let bytes = resp.bytes().await.map_err(|e| unavailable(e.without_url().to_string()))?;
-        if status == 429 || status == 503 {
-            return Err(identity_rejected(&format!("HTTP {status}")));
-        }
-        if status >= 500 {
-            return Err(unavailable(format!("GrandSlam answered HTTP {status}")));
-        }
-        let v: plist::Value = plist::from_bytes(&bytes)
-            .map_err(|_| protocol(format!("GrandSlam's answer is not a plist (HTTP {status})")))?;
-        v.as_dictionary()
-            .and_then(|d| d.get("Response"))
-            .and_then(plist::Value::as_dictionary)
-            .cloned()
-            .ok_or_else(|| protocol("GrandSlam's answer has no Response"))
+        // An error status still carries a plist Status (ec/em) when GrandSlam itself refused; only a bare answer
+        // (an HTML 503 from the front end) is judged by its HTTP status.
+        let response = plist::from_bytes::<plist::Value>(&bytes)
+            .ok()
+            .and_then(|v| v.as_dictionary()?.get("Response")?.as_dictionary().cloned());
+        let Some(response) = response else {
+            tracing::debug!(stage, http = status, "gsa: response without a plist");
+            return Err(match status {
+                429 | 503 => identity_rejected(&format!("HTTP {status} at {stage}"))
+                    .with_details(serde_json::json!({"httpStatus": status, "stage": stage})),
+                s if s >= 500 => unavailable(format!("GrandSlam answered HTTP {s} at {stage}")),
+                s => protocol(format!("GrandSlam's answer to {stage} is not a plist (HTTP {s})")),
+            });
+        };
+        let st = response.get("Status").and_then(plist::Value::as_dictionary);
+        let field = |k: &str| st.and_then(|s| s.get(k)).and_then(as_i64).unwrap_or(0);
+        tracing::debug!(
+            stage,
+            http = status,
+            hsc = field("hsc"),
+            ec = field("ec"),
+            em = %scrub(st.and_then(|s| s.get("em")).and_then(plist::Value::as_string).unwrap_or_default()),
+            au = st.and_then(|s| s.get("au")).and_then(plist::Value::as_string).unwrap_or_default(),
+            "gsa: response"
+        );
+        Ok(response)
     }
 
-    /// SRP login (`init` + `complete`). Apple ID matching is case-insensitive; the lowercase form is sent.
+    /// SRP login (`init` + `complete`). Apple ID matching is case-insensitive; the lowercase form is sent. A bare
+    /// HTTP 503 (GrandSlam's answer to back-to-back logins) is retried once after a pause.
     pub async fn login(&self, apple_id: &str, password: &[u8]) -> Result<LoginState> {
+        match self.login_once(apple_id, password).await {
+            Err(e) if busy(&e) => {
+                tracing::debug!(delay_ms = self.retry_delay.as_millis() as u64, "gsa: busy; retrying the login once");
+                tokio::time::sleep(self.retry_delay).await;
+                self.login_once(apple_id, password).await
+            }
+            other => other,
+        }
+    }
+
+    async fn login_once(&self, apple_id: &str, password: &[u8]) -> Result<LoginState> {
         let user = apple_id.trim().to_lowercase();
+        let id = self.identity().await?;
         let anisette = self.anisette.headers().await?;
         let srp = SrpClient::new(Group::gsa());
 
         let mut init = plist::Dictionary::new();
         init.insert("A2k".into(), plist::Value::Data(srp.a_pub()));
-        init.insert("cpd".into(), Self::cpd(&anisette));
+        init.insert("cpd".into(), Self::cpd(&anisette, &id));
         init.insert("o".into(), "init".into());
         init.insert("ps".into(), plist::Value::Array(vec!["s2k".into(), "s2k_fo".into()]));
         init.insert("u".into(), user.clone().into());
-        let r = self.gs_post(init).await?;
-        if let Some(e) = r.get("Status").and_then(plist::Value::as_dictionary).and_then(status_error) {
+        let r = self.gs_post("init", init, &id).await?;
+        if let Some(e) = r.get("Status").and_then(plist::Value::as_dictionary).and_then(|s| status_error(s, "init")) {
             return Err(e);
         }
         let sp = r.get("sp").and_then(plist::Value::as_string).unwrap_or("s2k").to_owned();
@@ -237,12 +306,12 @@ impl GsaClient {
         let mut complete = plist::Dictionary::new();
         complete.insert("M1".into(), plist::Value::Data(proof.m1.clone()));
         complete.insert("c".into(), c);
-        complete.insert("cpd".into(), Self::cpd(&anisette));
+        complete.insert("cpd".into(), Self::cpd(&anisette, &id));
         complete.insert("o".into(), "complete".into());
         complete.insert("u".into(), user.into());
-        let r = self.gs_post(complete).await?;
+        let r = self.gs_post("complete", complete, &id).await?;
         let status = r.get("Status").and_then(plist::Value::as_dictionary).cloned().unwrap_or_default();
-        if let Some(e) = status_error(&status) {
+        if let Some(e) = status_error(&status, "complete") {
             return Err(e);
         }
         let m2 = data(r.get("M2")).ok_or_else(|| protocol("complete has no M2"))?;
@@ -270,12 +339,13 @@ impl GsaClient {
 
     /// The headers of the two-factor requests.
     async fn second_factor_headers(&self, s: &GsSession, json: bool) -> Result<reqwest::header::HeaderMap> {
+        let id = self.identity().await?;
         let mut pairs: Vec<(String, String)> = vec![
             ("X-Apple-Identity-Token".into(), s.identity_token().to_string()),
             ("X-Apple-App-Info".into(), self.profile.app_info.clone()),
             ("X-Xcode-Version".into(), self.profile.xcode_version.clone()),
-            ("X-Mme-Client-Info".into(), self.client_info().await?),
-            ("User-Agent".into(), "Xcode".into()),
+            ("X-Mme-Client-Info".into(), id.client_info),
+            ("User-Agent".into(), id.user_agent),
             ("Accept-Language".into(), "en-us".into()),
         ];
         if json {
@@ -286,6 +356,7 @@ impl GsaClient {
             pairs.push(("Accept".into(), "text/x-xml-plist".into()));
         }
         pairs.extend(self.anisette.headers().await?.pairs().into_iter().map(|(k, v)| (k.to_owned(), v)));
+        tracing::debug!(headers = ?pairs.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), "gsa: second-factor request");
         header_map(&pairs)
     }
 
@@ -329,6 +400,7 @@ impl GsaClient {
         }
         .map_err(|e| unavailable(format!("cannot request a two-factor code: {}", e.without_url())))?;
         let status = resp.status().as_u16();
+        tracing::debug!(stage = "requestCode", http = status, "gsa: response");
         match status {
             200..=299 => Ok(()),
             423 | 429 => Err(rate_limited()),
@@ -407,12 +479,15 @@ impl GsaClient {
         req.insert("app".into(), plist::Value::Array(vec![app.clone().into()]));
         req.insert("c".into(), s.c.to_plist());
         req.insert("checksum".into(), plist::Value::Data(app_token_checksum(&s.sk, &s.adsid, &[&app])));
-        req.insert("cpd".into(), Self::cpd(&anisette));
+        let id = self.identity().await?;
+        req.insert("cpd".into(), Self::cpd(&anisette, &id));
         req.insert("o".into(), "apptokens".into());
         req.insert("t".into(), s.idms_token.as_str().into());
         req.insert("u".into(), s.adsid.clone().into());
-        let r = self.gs_post(req).await?;
-        if let Some(e) = r.get("Status").and_then(plist::Value::as_dictionary).and_then(status_error) {
+        let r = self.gs_post("apptokens", req, &id).await?;
+        if let Some(e) =
+            r.get("Status").and_then(plist::Value::as_dictionary).and_then(|st| status_error(st, "apptokens"))
+        {
             return Err(if e.code() == codes::gsa::BAD_CREDENTIALS { session_expired() } else { e });
         }
         let et = data(r.get("et")).ok_or_else(|| protocol("apptokens has no et"))?;
@@ -448,7 +523,7 @@ impl GsaClient {
             ("X-Apple-GS-Token".into(), token.token.to_string()),
             ("X-Apple-App-Info".into(), self.profile.app_info.clone()),
             ("X-Xcode-Version".into(), self.profile.xcode_version.clone()),
-            ("X-Mme-Client-Info".into(), self.client_info().await?),
+            ("X-Mme-Client-Info".into(), self.identity().await?.client_info),
         ];
         pairs.extend(self.anisette.headers().await?.pairs().into_iter().map(|(k, v)| (k.to_owned(), v)));
         Ok(pairs)
@@ -584,12 +659,16 @@ mod tests {
             let mut d = plist::Dictionary::new();
             d.insert("ec".into(), plist::Value::Integer(ec.into()));
             d.insert("em".into(), "Your someone@example.com account".into());
-            status_error(&d).map(|e| (e.code(), e.message().to_owned()))
+            status_error(&d, "init").map(|e| (e.code(), e.message().to_owned()))
         };
         assert_eq!(st(0), None);
         assert_eq!(st(-22406).map(|e| e.0), Some(codes::gsa::BAD_CREDENTIALS));
         assert_eq!(st(-20209).map(|e| e.0), Some(codes::gsa::LOCKED));
         assert_eq!(st(-36607).map(|e| e.0), Some(codes::gsa::IDENTITY_REJECTED));
+        let mismatch = st(-80045).expect("an error");
+        assert_eq!(mismatch.0, codes::gsa::IDENTITY_REJECTED);
+        assert!(mismatch.1.contains("at init (-80045)"), "{}", mismatch.1);
+        assert_eq!(st(-80046).map(|e| e.0), Some(codes::gsa::IDENTITY_REJECTED));
         let other = st(-1).expect("an error");
         assert_eq!(other.0, codes::gsa::PROTOCOL);
         assert!(!other.1.contains("someone@example.com"), "{}", other.1);

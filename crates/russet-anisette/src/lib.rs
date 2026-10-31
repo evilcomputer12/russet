@@ -121,14 +121,30 @@ pub trait AnisetteProvider: Send + Sync {
     fn kind(&self) -> AnisetteKind;
     /// Fresh headers for one request (provisions the machine first when needed).
     async fn headers(&self) -> Result<AnisetteHeaders>;
-    /// The `X-Mme-Client-Info` these headers belong with.
-    async fn client_info(&self) -> Result<String>;
+    /// The client identity these headers belong with: GrandSlam rejects a login whose `X-Mme-Client-Info` (and
+    /// akd `User-Agent`) does not match the platform the anisette data comes from (`-80045` since 2026-10-12).
+    async fn identity(&self) -> Result<ClientIdentity>;
     /// Erases the provisioning (ADI DSID -2) so the next request provisions again.
     async fn reset(&self) -> Result<()>;
 }
 
 /// A shared provider.
 pub type SharedProvider = Arc<dyn AnisetteProvider>;
+
+/// The platform an `X-Mme-Client-Info` claims (`windows`, `android`, `macos`, `other`): what Russet logs instead of
+/// the string itself.
+pub fn platform_of(client_info: &str) -> &'static str {
+    let c = client_info.to_ascii_lowercase();
+    if c.contains("<windows;") {
+        "windows"
+    } else if c.contains("<android;") {
+        "android"
+    } else if c.contains("<macos;") || c.contains("<mac os x;") {
+        "macos"
+    } else {
+        "other"
+    }
+}
 
 /// Whether local ADI runs on this host: Apple's Android libraries exist for x86_64 and arm64, and the loader and
 /// sandbox of `russet-adi-host` are Linux-only until W27c (Windows reaches them through the engine's WSL

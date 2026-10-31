@@ -39,8 +39,11 @@ impl AnisetteFake {
     }
 }
 
-/// The client info fakes present (a synthetic model, not a real Mac).
-pub const FAKE_CLIENT_INFO: &str = "<RussetFake1,1> <macOS;27.0;26A0000> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
+/// The client info fakes present: the platform GrandSlam accepts with Android ADI data (a synthetic PC).
+pub const FAKE_CLIENT_INFO: &str = "<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
+
+/// The akd user agent fakes present.
+pub const FAKE_USER_AGENT: &str = "akd/1.0 CFNetwork/808.1.4";
 
 #[async_trait]
 impl AnisetteProvider for AnisetteFake {
@@ -63,8 +66,8 @@ impl AnisetteProvider for AnisetteFake {
         })
     }
 
-    async fn client_info(&self) -> Result<String> {
-        Ok(FAKE_CLIENT_INFO.into())
+    async fn identity(&self) -> Result<crate::ClientIdentity> {
+        Ok(crate::ClientIdentity { client_info: FAKE_CLIENT_INFO.into(), user_agent: FAKE_USER_AGENT.into() })
     }
 
     async fn reset(&self) -> Result<()> {

@@ -13,6 +13,8 @@ const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
 
 use std::sync::{Arc, Mutex};
 
+use base64::Engine as _;
+
 use russet_anisette::fake::AnisetteFake;
 use russet_gsa::fake::{GsaFake, GsaFakeConfig};
 use russet_gsa::{ClientProfile, Ds2Session, GsaClient, LoginState, Qh65b2, TwoFactorVia};
@@ -40,7 +42,11 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn no_secret_reaches_the_log() {
     let logs = Capture::default();
-    let sub = tracing_subscriber::fmt().with_writer(logs.clone()).with_max_level(tracing::Level::TRACE).finish();
+    let sub = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(logs.clone())
+        .with_max_level(tracing::Level::TRACE)
+        .finish();
     tracing::subscriber::set_global_default(sub).unwrap();
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -70,6 +76,19 @@ async fn no_secret_reaches_the_log() {
 
     let text = String::from_utf8_lossy(&logs.0.lock().unwrap()).into_owned();
     assert!(text.contains("gsa: srp complete") && text.contains("session ready"), "the capture works: {text}");
+    // The debug lines name the stage, the Status and the header names, never their values.
+    for line in [
+        "gsa: request",
+        "gsa: response",
+        "stage=\"init\"",
+        "stage=\"complete\"",
+        "ec=0",
+        "platform=\"windows\"",
+        "X-Mme-Client-Info",
+    ] {
+        assert!(text.contains(line), "missing `{line}` in the debug log: {text}");
+    }
+    let identity_token = base64::engine::general_purpose::STANDARD.encode(format!("{}:fake-idms-token", cfg.adsid));
     for secret in [
         cfg.password.as_str(),
         cfg.apple_id.as_str(),
@@ -82,6 +101,9 @@ async fn no_secret_reaches_the_log() {
         "fake-xcode-token",
         "ZmFrZS1vdHAt",
         "cnVzc2V0LWZha2UtbWFjaGluZS1pZA",
+        identity_token.as_str(),
+        "Windows;6.2",
+        "CFNetwork/808",
     ] {
         assert!(!text.contains(secret), "`{secret}` leaked into the log");
     }
