@@ -16,6 +16,7 @@ const _: Option<&str> = option_env!("RUSSET_BUILD_WORKTREE");
 
 use std::sync::Arc;
 
+mod body;
 mod client;
 mod crypto;
 pub mod ds2;

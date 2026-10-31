@@ -352,8 +352,9 @@ impl GsaClient {
             pairs.push(("Content-Type".into(), "application/json".into()));
             pairs.push(("Accept".into(), "application/json, text/javascript".into()));
         } else {
-            pairs.push(("Content-Type".into(), "text/x-xml-plist".into()));
-            pairs.push(("Accept".into(), "text/x-xml-plist".into()));
+            // What working clients send (xtool's GrandSlamTwoFactorRequest); the answer is judged by status.
+            pairs.push(("Content-Type".into(), "application/x-plist".into()));
+            pairs.push(("Accept".into(), "application/x-buddyml".into()));
         }
         pairs.extend(self.anisette.headers().await?.pairs().into_iter().map(|(k, v)| (k.to_owned(), v)));
         tracing::debug!(headers = ?pairs.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), "gsa: second-factor request");
@@ -371,8 +372,18 @@ impl GsaClient {
             .send()
             .await
             .map_err(|e| unavailable(format!("cannot list the trusted phone numbers: {}", e.without_url())))?;
-        let text = resp.text().await.map_err(|e| unavailable(e.without_url().to_string()))?;
-        Ok(parse_trusted_numbers(&text))
+        let status = resp.status().as_u16();
+        let bytes = resp.bytes().await.map_err(|e| unavailable(e.without_url().to_string()))?;
+        let numbers = parse_trusted_numbers(&String::from_utf8_lossy(&bytes));
+        tracing::debug!(
+            stage = "trustedNumbers",
+            http = status,
+            len = bytes.len(),
+            kind = crate::body::kind(&bytes),
+            numbers = numbers.len(),
+            "gsa: response"
+        );
+        Ok(numbers)
     }
 
     /// Asks Apple to send a code: a push to the trusted devices, or an SMS.
@@ -432,21 +443,9 @@ impl GsaClient {
                     .await
                     .map_err(|e| unavailable(format!("cannot check the code: {}", e.without_url())))?;
                 let status = resp.status().as_u16();
-                if status == 429 || status == 423 {
-                    return Err(rate_limited());
-                }
+                let content_type = header_text(resp.headers(), reqwest::header::CONTENT_TYPE);
                 let bytes = resp.bytes().await.map_err(|e| unavailable(e.without_url().to_string()))?;
-                let v: plist::Value = plist::from_bytes(&bytes)
-                    .map_err(|_| protocol(format!("the code check answered HTTP {status}")))?;
-                let d = v.as_dictionary().cloned().unwrap_or_default();
-                let st = d.get("Status").and_then(plist::Value::as_dictionary).cloned().unwrap_or_else(|| d.clone());
-                let ec = st.get("ec").and_then(as_i64).unwrap_or(if status < 300 { 0 } else { -1 });
-                match ec {
-                    0 => Ok(()),
-                    -21669 => Err(bad_code()),
-                    -20209 | -20283 => Err(rate_limited()),
-                    _ => Err(bad_code()),
-                }
+                judge_code(status, &content_type, &bytes, "validate")
             }
             TwoFactorVia::Sms { phone_id } => {
                 let url = self.phone_url("auth/verify/phone/securitycode")?;
@@ -462,11 +461,10 @@ impl GsaClient {
                     .send()
                     .await
                     .map_err(|e| unavailable(format!("cannot check the code: {}", e.without_url())))?;
-                match resp.status().as_u16() {
-                    200..=299 => Ok(()),
-                    423 | 429 => Err(rate_limited()),
-                    _ => Err(bad_code()),
-                }
+                let status = resp.status().as_u16();
+                let content_type = header_text(resp.headers(), reqwest::header::CONTENT_TYPE);
+                let bytes = resp.bytes().await.map_err(|e| unavailable(e.without_url().to_string()))?;
+                judge_code(status, &content_type, &bytes, "validateSms")
             }
         }
     }
@@ -527,6 +525,47 @@ impl GsaClient {
         ];
         pairs.extend(self.anisette.headers().await?.pairs().into_iter().map(|(k, v)| (k.to_owned(), v)));
         Ok(pairs)
+    }
+}
+
+/// A response header as text (empty when absent or not text).
+pub(crate) fn header_text(h: &reqwest::header::HeaderMap, name: reqwest::header::HeaderName) -> String {
+    h.get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned()
+}
+
+/// The `ec` an answer carries (plist `Status.ec` or `ec`; JSON `service_errors[0].code`), if any.
+fn answer_ec(body: &[u8]) -> Option<i64> {
+    if let Some(d) = crate::body::plist_dict(body) {
+        let st = d.get("Status").and_then(plist::Value::as_dictionary).unwrap_or(&d);
+        return st.get("ec").and_then(as_i64);
+    }
+    let j = crate::body::json(body)?;
+    j.get("service_errors")?.as_array()?.first()?.get("code").and_then(|c| match c {
+        serde_json::Value::String(s) => s.parse().ok(),
+        serde_json::Value::Number(n) => n.as_i64(),
+        _ => None,
+    })
+}
+
+/// Judges a code check by its HTTP status, as working clients do (Apple's success answer is not a plist): 2xx
+/// accepts the code unless the body carries a non-zero `ec`; 423/429 are rate limits; other 4xx a wrong code.
+pub(crate) fn judge_code(status: u16, content_type: &str, body: &[u8], stage: &'static str) -> Result<()> {
+    let ec = answer_ec(body);
+    tracing::debug!(
+        stage,
+        http = status,
+        content_type,
+        len = body.len(),
+        kind = crate::body::kind(body),
+        ec = ?ec,
+        "gsa: response"
+    );
+    match (status, ec) {
+        (423 | 429, _) | (_, Some(-20209 | -20283)) => Err(rate_limited()),
+        (200..=299, None | Some(0)) => Ok(()),
+        (200..=299, Some(_)) => Err(bad_code()),
+        (400..=499, _) => Err(bad_code()),
+        (s, _) => Err(unavailable(format!("Apple answered HTTP {s} to the code check"))),
     }
 }
 
@@ -651,6 +690,25 @@ mod tests {
         let html = r#"<html><script type="application/json" class="boot_args">{"direct":{"twoSV":{"phoneNumberVerification":{"trustedPhoneNumbers":[{"id":2,"numberWithDialCode":"+1 (555) 010-0199"}]}}}}</script></html>"#;
         assert_eq!(parse_trusted_numbers(html), vec![TrustedNumber { id: 2, obfuscated: "+• (•••) •••-••99".into() }]);
         assert!(parse_trusted_numbers("nothing").is_empty());
+    }
+
+    #[test]
+    fn code_checks_are_judged_by_status_whatever_the_body() {
+        let buddyml = b"<?xml version=\"1.0\"?><xmlui><page/></xmlui>";
+        let mut d = plist::Dictionary::new();
+        d.insert("ec".into(), plist::Value::Integer((-21669).into()));
+        let mut wrong = Vec::new();
+        plist::to_writer_xml(&mut wrong, &plist::Value::Dictionary(d)).expect("plist");
+        let code = |s, b: &[u8]| judge_code(s, "", b, "validate").err().map(|e| e.code());
+        assert_eq!(code(200, b""), None);
+        assert_eq!(code(200, buddyml), None);
+        assert_eq!(code(204, b""), None);
+        assert_eq!(code(200, &wrong), Some(codes::gsa::BAD_CODE));
+        assert_eq!(code(400, buddyml), Some(codes::gsa::BAD_CODE));
+        assert_eq!(code(401, b""), Some(codes::gsa::BAD_CODE));
+        assert_eq!(code(400, br#"{"service_errors":[{"code":"-21669"}]}"#), Some(codes::gsa::BAD_CODE));
+        assert_eq!(code(429, b""), Some(codes::gsa::CODE_RATE_LIMITED));
+        assert_eq!(code(503, b""), Some(codes::account::APPLE_SERVICE_UNAVAILABLE));
     }
 
     #[test]

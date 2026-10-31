@@ -85,6 +85,10 @@ async fn no_secret_reaches_the_log() {
         "ec=0",
         "platform=\"windows\"",
         "X-Mme-Client-Info",
+        "stage=\"validate\"",
+        "ds2: response",
+        "action=\"listTeams\"",
+        "kind=\"xml-plist\"",
     ] {
         assert!(text.contains(line), "missing `{line}` in the debug log: {text}");
     }

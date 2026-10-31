@@ -41,6 +41,56 @@ pub struct GsaFakeConfig {
     pub token_seconds: i64,
     /// How many `init` requests to answer with a bare HTTP 503 first (GrandSlam's answer to back-to-back logins).
     pub busy_inits: u32,
+    /// How developerservices2 encodes its answers.
+    pub ds2_body: Ds2Body,
+}
+
+/// The shapes a developerservices2 answer can arrive in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Ds2Body {
+    /// An XML plist (`text/x-xml-plist`).
+    #[default]
+    Xml,
+    /// A binary plist.
+    Binary,
+    /// A gzip-compressed XML plist with `Content-Encoding: gzip`, sent without being asked.
+    Gzip,
+    /// An XML plist after a UTF-8 BOM and a newline.
+    BomXml,
+    /// The same keys as JSON.
+    Json,
+    /// An HTML page (what a front end answers when it does not route the request).
+    Html,
+}
+
+/// A developerservices2 answer in `shape`.
+fn ds2_response(v: plist::Value, shape: Ds2Body) -> ResponseTemplate {
+    let ok = ResponseTemplate::new(200);
+    match shape {
+        Ds2Body::Xml => plist_response(v),
+        Ds2Body::Binary => {
+            let mut out = Vec::new();
+            let _ = plist::to_writer_binary(&mut out, &v);
+            ok.insert_header("content-type", "application/x-plist").set_body_bytes(out)
+        }
+        Ds2Body::Gzip => {
+            let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            let _ = std::io::Write::write_all(&mut gz, &plist_bytes(v));
+            ok.insert_header("content-type", "text/x-xml-plist")
+                .insert_header("content-encoding", "gzip")
+                .set_body_bytes(gz.finish().unwrap_or_default())
+        }
+        Ds2Body::BomXml => ok
+            .insert_header("content-type", "text/x-xml-plist")
+            .set_body_bytes([b"\xEF\xBB\xBF\n".as_slice(), &plist_bytes(v)].concat()),
+        Ds2Body::Json => {
+            let json: serde_json::Value = plist::from_value(&v).unwrap_or_default();
+            ok.insert_header("content-type", "application/json").set_body_json(json)
+        }
+        Ds2Body::Html => ok
+            .insert_header("content-type", "text/html; charset=utf-8")
+            .set_body_string("<!DOCTYPE html><html><body>Developer</body></html>"),
+    }
 }
 
 impl Default for GsaFakeConfig {
@@ -58,6 +108,7 @@ impl Default for GsaFakeConfig {
             paid: true,
             token_seconds: 3600,
             busy_inits: 0,
+            ds2_body: Ds2Body::Xml,
         }
     }
 }
@@ -382,12 +433,24 @@ impl GsaFake {
                     return ResponseTemplate::new(401);
                 }
                 st.stats.codes_checked += 1;
+                let accept = req.headers.get("accept").and_then(|v| v.to_str().ok()).unwrap_or_default();
+                if !accept.contains("application/x-buddyml") {
+                    return ResponseTemplate::new(406);
+                }
                 let code = req.headers.get("security-code").and_then(|v| v.to_str().ok()).unwrap_or_default();
                 if code == st.cfg.code {
                     st.trusted = true;
-                    plist_response(dict(vec![("ec", 0.into()), ("em", "".into())]))
+                    // Apple's success answer is a buddyml page, not a plist.
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "application/x-buddyml")
+                        .set_body_string("<?xml version=\"1.0\" encoding=\"UTF-8\"?><xmlui><page><navigationBar title=\"Verified\"/></page></xmlui>")
                 } else {
-                    plist_response(dict(vec![("ec", (-21669).into()), ("em", "Incorrect verification code.".into())]))
+                    ResponseTemplate::new(400).insert_header("content-type", "text/x-xml-plist").set_body_bytes(
+                        plist_bytes(dict(vec![
+                            ("ec", (-21669).into()),
+                            ("em", "Incorrect verification code.".into()),
+                        ])),
+                    )
                 }
             }))
             .mount(&server)
@@ -472,25 +535,29 @@ impl GsaFake {
                 st.stats.team_lists += 1;
                 let membership =
                     if st.cfg.paid { "Apple Developer Program" } else { "Xcode Free Provisioning Program" };
-                plist_response(dict(vec![
-                    ("resultCode", 0.into()),
-                    (
-                        "teams",
-                        plist::Value::Array(vec![dict(vec![
-                            ("teamId", st.cfg.team_id.clone().into()),
-                            ("name", st.cfg.team_name.clone().into()),
-                            ("type", "Individual".into()),
-                            ("status", "active".into()),
-                            (
-                                "memberships",
-                                plist::Value::Array(vec![dict(vec![
-                                    ("name", membership.into()),
-                                    ("platform", "ios".into()),
-                                ])]),
-                            ),
-                        ])]),
-                    ),
-                ]))
+                let shape = st.cfg.ds2_body;
+                ds2_response(
+                    dict(vec![
+                        ("resultCode", 0.into()),
+                        (
+                            "teams",
+                            plist::Value::Array(vec![dict(vec![
+                                ("teamId", st.cfg.team_id.clone().into()),
+                                ("name", st.cfg.team_name.clone().into()),
+                                ("type", "Individual".into()),
+                                ("status", "active".into()),
+                                (
+                                    "memberships",
+                                    plist::Value::Array(vec![dict(vec![
+                                        ("name", membership.into()),
+                                        ("platform", "ios".into()),
+                                    ])]),
+                                ),
+                            ])]),
+                        ),
+                    ]),
+                    shape,
+                )
             }))
             .mount(&server)
             .await;

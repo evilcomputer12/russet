@@ -124,6 +124,26 @@ too, the fallback is `anisette: {"remote": "<macOS anisette-v3 server>"}` (xtool
 `https://mac-ani.jkcoxson.com`), whose operator then sees this machine's ADI identity; Russet configures none by
 default.
 
+## Second live sign-in (owner, 2026-10-31, remote macOS anisette): GrandSlam passes, two answer shapes fixed
+
+With `anisette: {"remote": "https://mac-ani.jkcoxson.com"}` GrandSlam worked end to end (init, complete with
+`trustedDeviceSecondaryAuth`, code push, re-login, `apptokens`, Xcode token). Two answers were misread:
+
+- **Code check:** Apple accepted the code (the next login needed no second factor) but Russet reported a failure:
+  it parsed the `validate` answer as a plist, and Apple's success answer is not one. xtool ignores that body and
+  judges the HTTP status; Russet now does the same (2xx accepts unless a plist/JSON body carries a non-zero `ec`,
+  423/429 rate-limit, other 4xx a wrong code, 5xx unavailable) and sends xtool's `Accept: application/x-buddyml` /
+  `Content-Type: application/x-plist` on the trusted-device requests. The SMS check is judged the same way.
+- **`listTeams`:** developerservices2 answered HTTP 200 with a body that was not an XML plist. Russet's request
+  matches xtool's legacy client (URL, `text/x-xml-plist`, headers, `clientId`/`protocolVersion`/`requestId`/
+  `userLocale`), so the answer is now decoded whatever its encoding: gzip (by `Content-Encoding` or magic), a BOM
+  or leading whitespace, binary or XML plist, or JSON with the same keys; anything else (HTML, empty) fails with
+  `gsa.protocol` naming the action, HTTP status, body kind, length and content type.
+- Debug logs (`RUSSET_LOG=info,russet_gsa=debug,hyper=warn`) now add `gsa: response` for `trustedNumbers`,
+  `validate`/`validateSms` (HTTP status, content type, length, body kind, `ec`) and `ds2: response` for every
+  developerservices2 action (HTTP status, content type and encoding, length, raw and decoded body kind); never a
+  body, token, team ID or the Apple ID (canary-tested).
+
 ## What still needs the owner's live sign-in
 
 Nothing has talked to Apple's sign-in services. These are interoperability facts taken from xtool, isideload,

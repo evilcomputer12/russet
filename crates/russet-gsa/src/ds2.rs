@@ -15,7 +15,7 @@ use russet_core::error::{Error, codes};
 use russet_core::net::Endpoints;
 use url::Url;
 
-use crate::client::{GsaClient, header_map, protocol, session_expired, unavailable};
+use crate::client::{GsaClient, header_map, header_text, protocol, session_expired, unavailable};
 use crate::session::XcodeToken;
 
 /// Xcode's DS2 client id.
@@ -161,16 +161,40 @@ impl Qh65b2 {
             .await
             .map_err(|e| unavailable(format!("developer services are unreachable: {}", e.without_url())))?;
         let status = resp.status().as_u16();
-        let bytes = resp.bytes().await.map_err(|e| unavailable(e.without_url().to_string()))?;
+        let content_type = header_text(resp.headers(), reqwest::header::CONTENT_TYPE);
+        let content_encoding = header_text(resp.headers(), reqwest::header::CONTENT_ENCODING);
+        let raw = resp.bytes().await.map_err(|e| unavailable(e.without_url().to_string()))?;
+        let body = crate::body::decoded(&raw, Some(&content_encoding));
+        let kind = crate::body::kind(&body);
+        tracing::debug!(
+            action,
+            http = status,
+            content_type,
+            content_encoding,
+            len = raw.len(),
+            raw_kind = crate::body::kind(&raw),
+            kind,
+            "ds2: response"
+        );
         if status == 401 || status == 403 {
             return Err(session_expired());
         }
         if status >= 500 {
             return Err(unavailable(format!("developer services answered HTTP {status}")));
         }
-        let v: plist::Value = plist::from_bytes(&bytes)
-            .map_err(|_| protocol(format!("developer services answered HTTP {status} with no plist")))?;
-        let d = v.as_dictionary().cloned().ok_or_else(|| protocol("the DS2 answer is not a dictionary"))?;
+        let d = match crate::body::plist_dict(&body) {
+            Some(d) => d,
+            None => match crate::body::json(&body).map(|j| crate::body::json_to_plist(&j)) {
+                Some(plist::Value::Dictionary(d)) => d,
+                _ => {
+                    return Err(protocol(format!(
+                        "developer services answered {action} with HTTP {status} and {kind} ({} bytes, {}), not a plist",
+                        raw.len(),
+                        if content_type.is_empty() { "no content type" } else { content_type.as_str() }
+                    )));
+                }
+            },
+        };
         let code = match d.get("resultCode") {
             Some(plist::Value::Integer(i)) => i.as_signed().unwrap_or(-1),
             Some(plist::Value::String(s)) => s.parse().unwrap_or(-1),
