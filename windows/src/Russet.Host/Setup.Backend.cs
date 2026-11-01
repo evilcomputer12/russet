@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -82,11 +83,16 @@ internal static partial class Setup
         return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream)) == sha256;
     }
 
+    // Decodes a gzip or brotli Content-Encoding: swift.org sends its PGP keys gzip-encoded whatever
+    // the request asks for, and the saved file must be the keys themselves.
+    static HttpClient Http(TimeSpan timeout) =>
+        new(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All }) { Timeout = timeout };
+
     static async Task<bool> Download(string url, string destination, Action<double> progress)
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromHours(1) };
+            using var http = Http(TimeSpan.FromHours(1));
             using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
             var total = response.Content.Headers.ContentLength ?? 0;

@@ -48,7 +48,7 @@ internal static partial class Setup
         {
             try
             {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+                using var http = Http(TimeSpan.FromSeconds(30));
                 list = await http.GetStringAsync(SwiftReleases);
                 Directory.CreateDirectory(Path.GetDirectoryName(cache)!);
                 File.WriteAllText(cache, list);
