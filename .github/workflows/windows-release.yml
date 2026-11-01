@@ -118,15 +118,35 @@ jobs:
           $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
           if (-not (Test-Path $iscc)) { throw 'Inno Setup is not installed.' }
-      - name: Build the installer
+      - name: Fingerprint each part's source
+        run: |
+          # Git trees of each part's source: a patch update downloads only the parts whose source
+          # changed (extension/src/setup/selfUpdate.ts, windows/src/Russet.Host/Update.cs).
+          function Tree([string]$path) { (git rev-parse "HEAD:$path").Trim() }
+          function Mix([string[]]$items) {
+            $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($items -join ' '))
+            ($digest | ForEach-Object { $_.ToString('x2') }) -join ''
+          }
+          $windowsSource = Tree 'windows/src'
+          [ordered]@{
+            extension = Tree 'extension'
+            host = $windowsSource
+            launcher = $windowsSource
+            backend = Mix @((Tree 'crates'), (Tree 'Cargo.lock'), (Tree 'windows/backend'))
+            editor = Mix @('1.143.17232', (Tree 'docs/design/brand'), (Tree 'windows/scripts'), (Tree 'windows/installer'))
+          } | ConvertTo-Json | Set-Content out/fingerprints.json
+          Get-Content out/fingerprints.json
+      - name: Build the installer and the patch packages
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           windows/scripts/build-release.ps1 -Version $env:VERSION -EditorZip out/editor.zip -ExtensionVsix out/russet.vsix `
             -HostPublish out/host -LauncherPublish out/launcher -Engine engine -Brand docs/design/brand `
-            -Out out/release -Rcedit out/rcedit-x64.exe -Iscc 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+            -Out out/release -Rcedit out/rcedit-x64.exe -Iscc 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            -Fingerprints out/fingerprints.json
           New-Item -ItemType Directory -Force dist | Out-Null
-          Move-Item "out/release/RussetSetup-$env:VERSION.exe", "out/release/RussetSetup-$env:VERSION.exe.sha256" dist/
+          Move-Item "out/release/RussetSetup-$env:VERSION.exe", "out/release/RussetSetup-$env:VERSION.exe.sha256", "out/release/update.json" dist/
+          Move-Item "out/release/russet-*-$env:VERSION.zip" dist/
           Get-ChildItem dist | Format-Table Name, Length
       - name: Install the Rust toolchain (the upload guard)
         run: rustup toolchain install "$env:RUSTUP_TOOLCHAIN" --profile minimal

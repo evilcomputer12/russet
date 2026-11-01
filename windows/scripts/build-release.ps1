@@ -8,15 +8,20 @@ param(
     [Parameter(Mandatory = $true)] [string]$Brand,
     [Parameter(Mandatory = $true)] [string]$Out,
     [string]$Rcedit,
-    [string]$Iscc
+    [string]$Iscc,
+    [string]$Fingerprints
 )
 # Builds Russet's Windows release: VSCodium's pinned editor branded as Russet with Russet's
 # extension inside, the self-contained launcher and host, and the backend payload the setup
 # page installs into WSL (the Linux engine and the backend scripts). With -Iscc it also
 # compiles the installer (installer\russet.iss) and writes its SHA-256 beside it.
 #
-#   $Engine   a folder with the Linux engine (`russet`) and `russet-adi-host`
-#   $Brand    russet-integration\docs\design\brand (make_icons.py --raster output)
+#   $Engine        a folder with the Linux engine (`russet`) and `russet-adi-host`
+#   $Brand         russet-integration\docs\design\brand (make_icons.py --raster output)
+#   $Fingerprints  a JSON file of each part's source fingerprint (extension, host, launcher,
+#                  backend, editor). With it the release also carries patch updates: one
+#                  russet-<part>-<version>.zip per part and update.json, from which an installed
+#                  Russet downloads only the parts whose fingerprint changed (Update.cs).
 $ErrorActionPreference = 'Stop'
 $EditorVersion = '1.143.17232'
 $EditorSha256 = 'a1090868af8ac0ac04c22d79fdd02246fa115a78daf38a741d8db06df1753c1d'
@@ -77,8 +82,39 @@ foreach ($script in 'vphone_component.sh', 'vphone_debug.py', 'xtool_component.s
     Copy-Item -LiteralPath (Join-Path $windows "backend\$script") -Destination $lib
 }
 Copy-Item -Path (Join-Path $windows 'backend\patches\*.patch') -Destination (Join-Path $lib 'patches')
-@{ type = 'release'; version = $Version; editor = $EditorVersion; backend = 'Russet-Dev' } |
-    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'installation.json') -Encoding utf8NoBOM
+$record = [ordered]@{ type = 'release'; version = $Version; editor = $EditorVersion; backend = 'Russet-Dev' }
+$parts = [ordered]@{
+    extension = 'editor\resources\app\extensions\russet'; host = 'host'; launcher = 'Russet.Launcher.exe'; backend = 'backend'
+}
+if ($Fingerprints) {
+    $sources = Get-Content -LiteralPath $Fingerprints -Raw | ConvertFrom-Json -AsHashtable
+    foreach ($name in @($parts.Keys) + 'editor') { if (-not $sources[$name]) { throw "No fingerprint for $name." } }
+    # What this installation is made of, which a patch compares with the next release's.
+    $record.components = [ordered]@{}
+    foreach ($name in @($parts.Keys) + 'editor') { $record.components[$name] = $sources[$name] }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $update = [ordered]@{ version = $Version; editor = $sources.editor; components = [ordered]@{} }
+    foreach ($name in $parts.Keys) {
+        $asset = "russet-$name-$Version.zip"
+        $zip = Join-Path $Out $asset
+        if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
+        $source = Join-Path $stage $parts[$name]
+        if (Test-Path -LiteralPath $source -PathType Container) {
+            [IO.Compression.ZipFile]::CreateFromDirectory($source, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
+        } else {
+            $archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
+            try { [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $source, (Split-Path -Leaf $source)) }
+            finally { $archive.Dispose() }
+        }
+        $update.components[$name] = [ordered]@{
+            source = $sources[$name]; asset = $asset; size = (Get-Item -LiteralPath $zip).Length
+            sha256 = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    $update | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $Out 'update.json') -Encoding utf8NoBOM
+    Write-Output "Patch packages: $(@($update.components.Keys | ForEach-Object { "$_ $([math]::Round($update.components[$_].size / 1MB, 1)) MB" }) -join ', ')"
+}
+$record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage 'installation.json') -Encoding utf8NoBOM
 Write-Output "Staged Russet $Version in $stage"
 
 if ($Iscc) {

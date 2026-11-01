@@ -56,16 +56,25 @@ internal static partial class Setup
             File.Delete(rootfs);
         }
         Progress("Installing Russet's engine", 0.8);
-        var install = await Capture(["--distribution", Distribution, "--user", "root", "--exec", "sh", "-c",
-            "set -e; install -d -m 755 /opt/russet/bin /opt/russet/lib; " +
-            "install -m 755 \"$1/bin/russet-dev\" \"$1/bin/russet-adi-host\" /opt/russet/bin/; " +
-            "cp -R \"$1/lib/.\" /opt/russet/lib/; chmod 755 /opt/russet/lib/*.sh; " +
-            "install -d -m 700 -o russet -g russet /home/russet/.russet", "sh", linuxPayload]);
-        if (install.Exit != 0) return fail("engine", "Russet's engine could not be installed into WSL.", true);
+        if (!await InstallPayload(linuxPayload)) return fail("engine", "Russet's engine could not be installed into WSL.", true);
         Progress("Starting Russet's engine", 0.95);
         if (!await StartDaemon()) return fail("daemon", "Russet's engine was installed but did not start; restart Russet.", true);
         return 0;
     }
+
+    // The engine and backend scripts (a payload folder as WSL sees it) under /opt/russet. A
+    // running daemon keeps its old binary until it stops; the patch applier stops it first.
+    internal static async Task<bool> InstallPayload(string linuxPayload) =>
+        (await Capture(["--distribution", Distribution, "--user", "root", "--exec", "sh", "-c",
+            "set -e; install -d -m 755 /opt/russet/bin /opt/russet/lib; " +
+            "install -m 755 \"$1/bin/russet-dev\" \"$1/bin/russet-adi-host\" /opt/russet/bin/; " +
+            "cp -R \"$1/lib/.\" /opt/russet/lib/; chmod 755 /opt/russet/lib/*.sh; " +
+            "install -d -m 700 -o russet -g russet /home/russet/.russet", "sh", linuxPayload])).Exit == 0;
+
+    // Stops every Russet daemon in the backend (they all run /opt/russet/bin/russet-dev), so the
+    // next start runs a newly installed engine.
+    internal static async Task StopDaemons() =>
+        await Capture(["--distribution", Distribution, "--user", "russet", "--exec", "pkill", "-f", "^/opt/russet/bin/russet-dev daemon run"]);
 
     static async Task<bool> HashMatches(string file)
     {

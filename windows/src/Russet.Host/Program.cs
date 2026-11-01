@@ -10,6 +10,12 @@ if (args.SequenceEqual(new[] { "--device-mux", "stdio" }))
     await DeviceMux.Run();
     return;
 }
+// A patch update, run from a copy outside the installation (Update.cs).
+if (args is ["--apply-update", ..])
+{
+    Environment.ExitCode = await Update.Apply(args);
+    return;
+}
 if (args is ["--setup", .. var setupArguments])
 {
     Environment.ExitCode = await Setup.Run(setupArguments);
