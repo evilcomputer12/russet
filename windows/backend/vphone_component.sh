@@ -3,7 +3,7 @@
 # The IDE's setup page runs these steps; each is re-runnable and skips done work.
 #
 #   prepare-root            (as root) sudo for the managed user, stricter device rules
-#   fetch                   clone the pinned upstream and its submodules (no root)
+#   fetch                   clone upstream main (or PIN) and its submodules, with Russet's patches (no root)
 #   install                 fetch, then setup.sh -y (deps, sources, build, release; uses sudo)
 #   seed-cache DIR          copy IPSWs from a local read-only cache into ~/.cache/vphone
 #   create [ARGS...]        setup/create-vm.sh; default iPhone17,3 / iOS 27.0.1 at 2x
@@ -20,9 +20,10 @@
 #                           RESULT {json} with the sockets for LLDB and lldb-dap in DIR (vphone_debug.py)
 set -Eeuo pipefail
 
-# The first install's commit: upstream main with the WSL2 support (2026-10-30). Updates then
-# follow upstream main (below).
-PIN=${RUSSET_VPHONE_PIN:-c3b9ecdaf621c3b01d66b5397c00a2252b035df9}
+# The newest commit Russet's patches are known to apply to (upstream main, 2026-11-01). A first
+# install takes upstream main, as updates do (below), and this one where the patches do not
+# apply there.
+PIN=${RUSSET_VPHONE_PIN:-888d17ca17268aaecd277c64f2d95385b184744b}
 UPSTREAM=https://github.com/YahiaAngelo/vphone-linux.git
 BRANCH=main
 # Updates: `check` asks GitHub for main's commit, one `git ls-remote`, cheap enough for the IDE
@@ -66,27 +67,48 @@ prepare_root() {
 }
 
 fetch() {
-  # The first install's checkout is at PIN; a build an update made stays at its own commit.
-  case $ROOT in
-    "$VERSIONS"/*) ;;
-    *)
-      if [ ! -d "$ROOT/.git" ]; then
-        log "cloning vphone-linux at $PIN"
-        git clone --no-checkout "$UPSTREAM" "$ROOT"
-      fi
-      git -C "$ROOT" fetch -q origin "$PIN" 2>/dev/null || true
-      git -C "$ROOT" checkout -q "$PIN" ;;
-  esac
+  # A checkout Russet patched before (a build an update made, or the first install's) stays at
+  # its commit and takes only patches new since; updates move it.
+  if [ -f "$ROOT/.russet-patches" ] && apply_patches "$ROOT"; then return 0; fi
+  if [[ $ROOT == "$VERSIONS"/* ]] || built_in "$ROOT"; then
+    die "Russet's patches no longer fit this vphone-linux build; update it from the setup page"
+  fi
+  # Otherwise (a first install, or one a failed fetch left half patched): upstream main, or PIN
+  # where Russet's patches do not apply to main.
+  local head sha targets
+  head=$(upstream_head) || head=$PIN
+  targets=("$head")
+  [ "$head" = "$PIN" ] || targets+=("$PIN")
+  if [ ! -d "$ROOT/.git" ]; then
+    log "cloning vphone-linux"
+    git clone -q --no-checkout "$UPSTREAM" "$ROOT"
+  fi
+  for sha in "${targets[@]}"; do
+    log "checking out vphone-linux ${sha:0:12}"
+    checkout_clean "$sha"
+    apply_patches "$ROOT" && return 0
+  done
+  die "Russet's patches apply to neither upstream main nor ${PIN:0:12}"
+}
+
+# Puts the first install's checkout (never built) at `sha`, its submodules as that commit has
+# them: what an earlier fetch patched or left behind is discarded.
+checkout_clean() {
+  local sha=$1
+  git -C "$ROOT" fetch -q origin "$sha" 2>/dev/null || true
+  git -C "$ROOT" checkout -f -q "$sha"
+  rm -f "$ROOT/.russet-patches"
+  git -C "$ROOT" clean -fdq
   # Single level, as upstream's setup does: reims-vgpu's vendor/qemu is not used.
-  git -C "$ROOT" submodule update --init
-  git -C "$ROOT/qemu" submodule update --init util/mlib
-  apply_patches "$ROOT"
+  git -C "$ROOT" submodule update -q --init --force
+  git -C "$ROOT/qemu" submodule update -q --init --force util/mlib
+  git -C "$ROOT" submodule foreach -q --recursive 'git clean -fdq'
 }
 
 # Russet's local fixes to upstream, until they land there. The tree's .russet-patches lists those
 # applied, by content: a listed one is skipped (a reverse check alone misjudges a patch whose lines
 # a later one changes again); an unlisted one applies, or is in the tree already (upstream took
-# it); one that does neither fails, naming it.
+# it); one that does neither fails (returns 1), naming it.
 apply_patches() {
   local dir=$1 patch sum list
   list=$dir/.russet-patches
@@ -96,7 +118,10 @@ apply_patches() {
     grep -qxF "$sum" "$list" 2>/dev/null && continue
     if ! git -C "$dir" apply --reverse --check "$patch" 2>/dev/null; then
       log "applying $(basename "$patch")"
-      git -C "$dir" apply "$patch" || die "$(basename "$patch") does not apply to $(git -C "$dir" rev-parse --short=12 HEAD)"
+      if ! git -C "$dir" apply "$patch"; then
+        printf 'error: %s does not apply to %s\n' "$(basename "$patch")" "$(git -C "$dir" rev-parse --short=12 HEAD)" >&2
+        return 1
+      fi
     fi
     printf '%s\n' "$sum" >> "$list"
   done
@@ -354,6 +379,18 @@ start() {
   # run-vphone.sh keeps its GPU census under the working directory's runs/.
   # 6 vCPUs: 8, the SEP core and lavapipe's threads oversubscribe the distro's 12 CPUs, and an app
   # launch keeps 2-3 busy (vphone-linux docs/WSL.md and PERFORMANCE.md). RUSSET_VPHONE_SMP overrides.
+  # The same renderer on every PC, Intel, AMD, NVIDIA or a laptop with two: in WSL no vendor's
+  # Vulkan driver reaches the GPU (NVIDIA's WSL driver has none; Mesa's dzn cannot import guest
+  # RAM), so the screen renders on the CPU with lavapipe. run-vphone.sh picks it under WSL only
+  # where it finds no NVIDIA manifest first (NVIDIA's Linux driver, which cannot run in WSL);
+  # lavapipe is named here, with run-vphone.sh's thread cap. VK_DRIVER_FILES overrides.
+  local icd
+  if [ -z "${VK_DRIVER_FILES:-}" ] && grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
+    for icd in /usr/share/vulkan/icd.d/lvp_icd.json /usr/share/vulkan/icd.d/lvp_icd.x86_64.json; do
+      [ -f "$icd" ] && { export VK_DRIVER_FILES=$icd LP_NUM_THREADS=${LP_NUM_THREADS:-4}; break; }
+    done
+    [ -n "${VK_DRIVER_FILES:-}" ] || die "lavapipe (mesa-vulkan-drivers) is missing; run the Virtual iPhone engine step on the setup page again"
+  fi
   ( cd "$ROOT" && GFX=1 SMP=${RUSSET_VPHONE_SMP:-6} WINDOW=${RUSSET_VPHONE_WINDOW:-0} CID=${CID:-3} setsid -f "$ROOT/run-vphone.sh" "$vm" \
       -vnc "127.0.0.1:0,websocket=127.0.0.1:$VNC_WS_PORT" -qmp "unix:$vm/qmp.sock,server=on,wait=off" \
       > "$vm/serial.log" 2>&1 < /dev/null )
