@@ -66,10 +66,10 @@ internal static class Update
                 done.Add(name);
                 Log($"replaced {name}");
             }
-            if (parts.ContainsKey("backend") && FramedPaths.ToLinux(Path.Combine(root, "backend")) is { } payload)
+            if (parts.ContainsKey("backend"))
             {
                 await Setup.StopDaemons();
-                Log(await Setup.InstallPayload(payload)
+                Log(await Setup.InstallPayload(Path.Combine(root, "backend"))
                     ? "installed the new engine into WSL"
                     : "the new engine did not install into WSL; the setup page's backend step repairs it");
             }

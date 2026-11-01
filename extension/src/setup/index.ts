@@ -400,7 +400,7 @@ export function installExperience(
   let requiredShown = false;
   const REQUIRED: Record<string, string> = {
     wsl: "Russet needs the Windows Subsystem for Linux. Install it on the setup page (administrator rights; Windows may restart).",
-    backend: "Russet's backend is not installed yet. Install it on the setup page: Ubuntu in WSL and Russet's engine (a 0.4 GB download).",
+    backend: "Russet's backend needs installing, or its engine in WSL updating to this release's. Run the Russet backend step on the setup page (a first install downloads 0.4 GB of Ubuntu).",
     "wsl-update": "Russet requires WSL's pre-release channel for GPU rendering of the virtual iPhone. Run the WSL pre-release step on the setup page.",
   };
   subs.push(

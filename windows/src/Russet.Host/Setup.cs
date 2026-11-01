@@ -155,12 +155,16 @@ internal static partial class Setup
                 ? $"WSL {wslVersion} from the pre-release channel (Direct3D {direct3d ?? "unknown"})."
                 : $"Russet needs WSL's pre-release channel (now WSL {wslVersion ?? "unknown"}, Direct3D {direct3d ?? "unknown"}) for GPU rendering of the virtual iPhone. Updating asks for administrator rights and stops WSL, the backend and the virtual iPhone for a minute.");
         }
-        var backend = wsl && await BackendReady();
+        var installed = wsl && await BackendReady();
+        // Russet's launcher copies an updated engine in at each start; this catches one it could not.
+        var backend = installed && await PayloadCurrent();
         Add("backend", backend ? "done" : wsl ? "needed" : "unavailable",
-            backend ? "Ready." : BackendPayload() is not null
+            backend ? "Ready." : installed
+                ? "Update Russet's engine in WSL to this release's (under a minute)."
+                : BackendPayload() is not null
                 ? "Install Russet's backend: Ubuntu in WSL (a 0.4 GB download) and Russet's engine."
                 : "Russet's backend is missing; reinstall Russet to restore it.");
-        if (!backend) Add("swift", "unavailable", "Needs the Russet backend.");
+        if (!installed) Add("swift", "unavailable", "Needs the Russet backend.");
         else
         {
             var swift = await SwiftInstalled();
@@ -172,7 +176,7 @@ internal static partial class Setup
         var usb = await AppleDevicesReachable();
         Add("apple-devices", usb ? "done" : "needed", usb ? "Apple Devices is running." : "Install or open Apple Devices from the Microsoft Store.");
         Add("iphone", "unavailable", "Checked in the device picker once the backend is ready.");
-        if (!backend)
+        if (!installed)
         {
             foreach (var id in Order.SkipWhile(id => id != "xtool")) Add(id, "unavailable", "Needs the Russet backend.");
             return steps;

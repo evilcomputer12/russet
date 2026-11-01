@@ -22,6 +22,7 @@ try
     // A first run has no backend yet: the editor opens anyway, and its setup page installs WSL
     // and the backend, then starts the daemon itself.
     var backendInstalled = Installation.BackendInstalled(wsl);
+    if (backendInstalled && release) Installation.SyncBackend(wsl, root);
     // Physical iPhones through Apple Devices; a development engine admits the live backend
     // only with RUSSET_LANE=A, and its host-wide device lock arbitrates with other users.
     System.Diagnostics.Process? bridge = null;

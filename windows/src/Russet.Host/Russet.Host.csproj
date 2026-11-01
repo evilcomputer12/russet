@@ -9,5 +9,6 @@
   <ItemGroup>
     <!-- The backend's secret-store passphrase, shared with the launcher (the setup page starts the daemon too). -->
     <Compile Include="..\Russet.Launcher\BackendSecrets.cs" Link="BackendSecrets.cs" />
+    <Compile Include="..\Russet.Launcher\BackendSync.cs" Link="BackendSync.cs" />
   </ItemGroup>
 </Project>
