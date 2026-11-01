@@ -398,19 +398,26 @@ export function installExperience(
   // Steps Russet requires before anything else: while one is needed, every window opens the
   // setup page on it (once per window) and says why.
   let requiredShown = false;
+  const REQUIRED: Record<string, string> = {
+    wsl: "Russet needs the Windows Subsystem for Linux. Install it on the setup page (administrator rights; Windows may restart).",
+    backend: "Russet's backend is not installed yet. Install it on the setup page: Ubuntu in WSL and Russet's engine (a 0.4 GB download).",
+    "wsl-update": "Russet requires WSL's pre-release channel for GPU rendering of the virtual iPhone. Run the WSL pre-release step on the setup page.",
+  };
   subs.push(
     setup.onDidChange(() => {
-      if (requiredShown || setup.stepState("wsl-update") !== "needed") {
+      // A backend the setup page just installed has its daemon running: connect to it.
+      if (setup.stepState("backend") === "done" && client.state === "stopped") {
+        void client.start();
+      }
+      const required = Object.keys(REQUIRED).find((id) => setup.stepState(id) === "needed");
+      if (requiredShown || !required) {
         return;
       }
       requiredShown = true;
-      setupPanel.show("wsl-update");
+      setupPanel.show(required);
       void vscode.window
-        .showWarningMessage(
-          "Russet requires WSL's pre-release channel for GPU rendering of the virtual iPhone. Run the WSL pre-release step on the setup page.",
-          "Open Setup",
-        )
-        .then((pick) => pick && setupPanel.show("wsl-update"));
+        .showWarningMessage(REQUIRED[required], "Open Setup")
+        .then((pick) => pick && setupPanel.show(required));
     }),
   );
 

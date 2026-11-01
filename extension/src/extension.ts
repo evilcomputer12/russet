@@ -36,6 +36,7 @@ import { installExperience } from "./setup";
 import { applyMinimalDefaults } from "./setup/minimal";
 import { registerAppleFiles } from "./apple";
 import { registerAi } from "./ai";
+import { registerSelfUpdate } from "./setup/selfUpdate";
 import { log, disposeLog } from "./util/log";
 import type { DeviceSummary } from "./generated/protocol";
 
@@ -56,6 +57,7 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
   const backend = WindowsBackend.fromEnvironment();
   if (backend) context.subscriptions.push(backend);
   registerAi(context, backend?.home);
+  registerSelfUpdate(context);
   const client = new RussetClient(
     {
       socketPath: config.get<string>("daemon.socketPath") || undefined,

@@ -1,0 +1,18 @@
+bin/
+obj/
+.runtime/
+artifacts/
+*.pfx
+*.key
+*.wsl
+*.vhdx
+*.tar*
+# Owner-artifact/device experiments stay local (engine AGENTS.md section 8).
+/tests/physical-bridge.mjs
+/tests/physical-debug.mjs
+/tests/physical-dap.mjs
+/tests/lane-a.mjs
+/tests/installed-f5.mjs
+/backend/signing_source_probe.py
+/backend/prepare_physical_probe.py
+/backend/virtual_probe.py

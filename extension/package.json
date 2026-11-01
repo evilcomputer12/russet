@@ -503,6 +503,11 @@
         "command": "russet.apple.openPlist",
         "title": "Open as Property List",
         "category": "Russet"
+      },
+      {
+        "command": "russet.update.check",
+        "title": "Check for Russet Updates",
+        "category": "Russet"
       }
     ],
     "menus": {

@@ -87,3 +87,33 @@ path = ["crates/russet-gdbremote/README.md"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Russet contributors"
 SPDX-License-Identifier = "AGPL-3.0-only"
+
+[[annotations]]
+# The Windows host (launcher, supervisor, managed WSL backend, release packaging), moved in from its
+# own repository without SPDX headers yet.
+path = ["windows/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+[[annotations]]
+# Russet's patches to vphone-linux: those to its QEMU carry QEMU's licence...
+path = ["windows/backend/patches/vphone-linux-qemu-*.patch"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+[[annotations]]
+# ...those to reims-vgpu carry reims-vgpu's...
+path = ["windows/backend/patches/vphone-linux-reims-*.patch"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "GPL-2.0-or-later OR LGPL-3.0-or-later"
+
+[[annotations]]
+# ...and those to vphone-linux's own scripts carry its MIT licence.
+path = ["windows/backend/patches/vphone-linux-auto-lock-*.patch", "windows/backend/patches/vphone-linux-ubuntu2604-*.patch",
+        "windows/backend/patches/vphone-linux-usbip-*.patch", "windows/backend/patches/vphone-linux-wsl3-*.patch"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Russet contributors"
+SPDX-License-Identifier = "MIT"

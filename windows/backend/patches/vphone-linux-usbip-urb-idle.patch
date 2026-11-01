@@ -1,0 +1,87 @@
+diff --git a/tools/vusb-usbip.py b/tools/vusb-usbip.py
+--- a/tools/vusb-usbip.py
++++ b/tools/vusb-usbip.py
+@@ -57,6 +57,14 @@
+ # RestoreOS during NORData.  Host URBs are forwarded whole.
+ CTRL_TIMEOUT = 5.0
+ URB_TIMEOUT = float(os.environ.get("VUSB_URB_TIMEOUT", "30"))
++# Data endpoints wait the way real USB does. A NAK means the guest is alive with nothing to send:
++# the RestoreOS leaves the mux silent for minutes while apfs_invert copies the system volume, so
++# NAKs keep a data URB alive for up to URB_IDLE_TIMEOUT. During apfs_invert the guest does not even
++# NAK: its controller goes silent for many minutes under emulation, so silence ends a data URB only
++# after URB_STALL_TIMEOUT (the same hour by default). A QEMU that exits closes the chardev, which
++# unplugs the device at once.
++URB_STALL_TIMEOUT = float(os.environ.get("VUSB_URB_STALL_TIMEOUT", "3600"))
++URB_IDLE_TIMEOUT = float(os.environ.get("VUSB_URB_IDLE_TIMEOUT", "3600"))
+ 
+ 
+ def log(*args):
+@@ -133,14 +141,22 @@
+             else:
+                 await self.out_acks[ep].put((code, data))
+ 
+-    async def _next(self, queue, timeout=URB_TIMEOUT, retry=None):
++    async def _next(self, queue, timeout=URB_TIMEOUT, retry=None, idle_timeout=None):
+         loop = asyncio.get_running_loop()
+-        deadline = loop.time() + timeout
++        started = loop.time()
++        deadline = started + timeout
+         while True:
+             remaining = deadline - loop.time()
+             if remaining <= 0:
+-                raise asyncio.TimeoutError
+-            code, data = await asyncio.wait_for(queue.get(), remaining)
++                # An answer that arrived while this process was not scheduled still counts. A NAK
++                # does not: a guest that only NAKs would otherwise never time out.
++                if queue.empty():
++                    raise asyncio.TimeoutError
++                code, data = queue.get_nowait()
++                if code == CODE_NAK:
++                    raise asyncio.TimeoutError
++            else:
++                code, data = await asyncio.wait_for(queue.get(), remaining)
+             if code == CODE_DRIVER_RESET:
+                 raise OSError(errno.ENODEV, "device unplugged (guest driver reset)")
+             if code == CODE_STALL:
+@@ -148,7 +164,11 @@
+             if code == CODE_NAK:
+                 if retry is None:
+                     raise OSError(errno.EPROTO, "unexpected NAK without retry callback")
+-                await asyncio.sleep(0.001)
++                waited = loop.time() - started
++                if idle_timeout is not None:
++                    # Only silence counts against the deadline; poll gently once idle.
++                    deadline = min(loop.time() + timeout, started + idle_timeout)
++                await asyncio.sleep(0.01 if idle_timeout is not None and waited > 1.0 else 0.001)
+                 await retry()
+                 continue
+             if code != CODE_DATA:
+@@ -200,7 +220,7 @@
+                 await self.send(address, MSG_DATA, payload if not direction_in else b"")
+ 
+             await retry()
+-            result = await self._next(queue, retry=retry)
++            result = await self._next(queue, URB_STALL_TIMEOUT, retry, idle_timeout=URB_IDLE_TIMEOUT)
+             if not direction_in:
+                 return b""
+             if max_length is not None and len(result) > max_length:
+@@ -461,14 +481,15 @@
+                 actual = length
+                 if DEBUG and ep == 1 and payload:
+                     self._log_mux(seqnum, "out", payload)
++        # Before OSError: since Python 3.11 asyncio.TimeoutError is the builtin TimeoutError,
++        # an OSError without errno, which the OSError branch would report as EIO.
++        except asyncio.TimeoutError:
++            log(f"USB/IP URB {seqnum} timed out: the guest stopped answering")
++            status = -errno.ETIMEDOUT
+         except OSError as e:
+             status = -(e.errno or errno.EIO)
+         except Stall:
+             status = -errno.EPIPE
+-        except asyncio.TimeoutError:
+-            if DEBUG:
+-                log(f"USB/IP URB {seqnum} timed out after {URB_TIMEOUT:g}s")
+-            status = -errno.ETIMEDOUT
+         except asyncio.CancelledError:
+             status = -errno.ECONNRESET
+         except Exception as e:

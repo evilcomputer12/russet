@@ -132,8 +132,7 @@ checked in dark, light and high-contrast themes; `prefers-reduced-motion` stops 
 
 ## Screenshots
 
-`C:\Users\pc\AppData\Local\Claude-Data\anthropicpbc.claude_fnn82j28hfe8t\side-session-notes\local_dcd07145-8778-4885-8a1f-30d85976d55b\w19-screenshots\`
-(synthetic data only; regenerate with the smoke commands above, which write to
+Kept outside the repository (synthetic data only; regenerate with the smoke commands above, which write to
 `extension/.vscode-test/w19-{screens,live}/shots/`):
 
 | File | Surface |
@@ -155,7 +154,7 @@ checked in dark, light and high-contrast themes; `prefers-reduced-motion` stops 
 Deploy with the host tree's script (the editor must be closed):
 
 ```powershell
-& C:\Users\pc\Documents\ChatGPT\russet\russet-windows\scripts\update-dev-install.ps1 -ExtensionVsix C:\Users\pc\Documents\ChatGPT\russet\russet-w19-ide-experience\extension\russet-w19.vsix
+& windows\scripts\update-dev-install.ps1 -ExtensionVsix extension\russet-w19.vsix
 ```
 
 The installed launcher must point `RUSSET_WINDOWS_HOST` at a supervisor that has `--setup` (the Release build
