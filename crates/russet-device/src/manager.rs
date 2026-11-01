@@ -506,7 +506,9 @@ impl DeviceHandle {
 
     /// A display session: the screen as HEVC access units and, with `o.input`, HID input (device.md §6.8.2).
     pub async fn mirror(&self, o: MirrorOptions) -> Result<MirrorHandle> {
-        crate::screen::mirror(self, o).await
+        // The display session's handshake (RSD service, two tunnel sockets, the CoreDevice offers)
+        // is a deep future: on the heap, not on the caller's worker stack.
+        Box::pin(crate::screen::mirror(self, o)).await
     }
 
     /// One input event outside a mirror. The device accepts HID input only while a display session authenticates
