@@ -17,7 +17,10 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 MEDIA = HERE.parents[2] / "extension" / "media"
+# The header the generated SVGs carry (REUSE reads this line as a header of its own without the markers).
+# REUSE-IgnoreStart
 HEADER = "<!-- SPDX-License-Identifier: AGPL-3.0-only -->"
+# REUSE-IgnoreEnd
 
 # 256-unit canvas. The tile is a rounded square with the corner of an iOS app icon.
 TILE = '<rect x="12" y="12" width="232" height="232" rx="54"/>'

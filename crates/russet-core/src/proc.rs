@@ -643,6 +643,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore = "needs Unix processes and a shell; the engine runs in Linux (WSL on Windows)")]
     async fn run_streams_lines_and_captures_output() {
         let sink = Lines::default();
         let out = ProcessRunner
@@ -660,6 +661,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore = "needs Unix processes and a shell; the engine runs in Linux (WSL on Windows)")]
     async fn env_cwd_and_env_clear_apply() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let spec = sh("echo \"$RUSSET_T:$HOME:$(pwd)\"").env("RUSSET_T", "v").cwd(tmp.path());
@@ -686,6 +688,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore = "needs Unix processes and a shell; the engine runs in Linux (WSL on Windows)")]
     async fn cancellation_and_timeouts_kill_the_tree() {
         let cancel = CancellationToken::new();
         let c2 = cancel.clone();
@@ -710,6 +713,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore = "needs Unix processes and a shell; the engine runs in Linux (WSL on Windows)")]
     async fn spawned_children_wait_and_kill() {
         let mut child = ProcessRunner.spawn(&sh("echo hi; exit 4")).await.expect("spawns");
         assert!(child.id().is_some());

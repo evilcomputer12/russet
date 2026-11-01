@@ -57,6 +57,8 @@ s2k_fo = "s2k_fo"
 s2k_and_s2k_fo_differ_and_an_unsafe_b_is_refused = "s2k_and_s2k_fo_differ_and_an_unsafe_b_is_refused"
 # Anisette one-time passwords, plural.
 OTPs = "OTPs"
+# H.265's unsigned Exp-Golomb code, ue(v): the HEVC parameter-set reader's `ue()` (russet-device screen.rs).
+ue = "ue"
 # The flate2 crate.
 flate2 = "flate2"
 # PNG images, plural.
