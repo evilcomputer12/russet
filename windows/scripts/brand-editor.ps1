@@ -22,6 +22,8 @@ foreach ($tile in 'code_150x150.png', 'code_70x70.png') {
 foreach ($theme in 'dark', 'light', 'hcDark', 'hcLight') {
     Copy-Item -LiteralPath (Join-Path $Brand "editor\letterpress-$theme.svg") -Destination (Join-Path $media "letterpress-$theme.svg") -Force
 }
+# The app icon in the window's own title bar.
+Copy-Item -LiteralPath (Join-Path $Brand 'russet-icon-light.svg') -Destination (Join-Path $media 'code-icon.svg') -Force
 if ($Rcedit) {
     $exe = Get-ChildItem -LiteralPath $Editor -Filter '*.exe' -File | Where-Object { $_.Name -notmatch '^unins' } | Select-Object -First 1
     if (-not $exe) { throw "No editor executable in $Editor." }
