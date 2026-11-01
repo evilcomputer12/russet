@@ -22,7 +22,7 @@ internal static class Installation
     // The managed distribution with its engine: WSL answers, Russet-Dev exists and holds the
     // daemon. False on a first run, before the setup page has installed them.
     internal static bool BackendInstalled(string wsl) =>
-        File.Exists(wsl) && Run(wsl, ["-d", "Russet-Dev", "-u", "russet", "--exec", "test", "-x", "/opt/russet/bin/russet-dev"], 60, out _);
+        File.Exists(wsl) && Run(wsl, ["-d", "Russet-Dev", "-u", "russet", "--exec", "test", "-x", "/opt/russet/bin/russet-dev"], 60, out _) == 0;
 
     // The installation's engine and backend scripts, copied into the distribution again when an
     // update replaced them (the full installer changes only Windows' files), with the daemons
@@ -32,13 +32,15 @@ internal static class Installation
     {
         if (BackendSync.Payload(root) is not { } payload || BackendSync.LinuxPath(payload) is not { } linux) return;
         var id = BackendSync.Id(payload);
-        if (Run(wsl, BackendSync.Recorded("Russet-Dev"), 60, out var recorded) && recorded.Trim() == id) return;
+        if (Run(wsl, BackendSync.Recorded("Russet-Dev"), 60, out var recorded) == 0 && recorded.Trim() == id) return;
         Run(wsl, BackendSync.StopDaemons("Russet-Dev"), 60, out _);
-        Run(wsl, BackendSync.Install("Russet-Dev", linux, id), 300, out _);
+        // A changed /etc/wsl.conf applies once the distribution restarts; the daemon starts it again.
+        if (Run(wsl, BackendSync.Install("Russet-Dev", linux, id), 300, out _) == BackendSync.RestartExit)
+            Run(wsl, BackendSync.Restart("Russet-Dev"), 60, out _);
     }
 
-    // Runs wsl.exe and reports whether it exited 0 within `seconds`, with its standard output.
-    static bool Run(string wsl, string[] arguments, int seconds, out string output)
+    // Runs wsl.exe: its exit status within `seconds` (-1 where it did not start or finish), and its standard output.
+    static int Run(string wsl, string[] arguments, int seconds, out string output)
     {
         output = "";
         var start = new ProcessStartInfo(wsl)
@@ -49,21 +51,21 @@ internal static class Installation
         try
         {
             using var process = Process.Start(start);
-            if (process is null) return false;
+            if (process is null) return -1;
             var standard = process.StandardOutput.ReadToEndAsync();
             var errors = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(seconds * 1000))
             {
                 process.Kill(entireProcessTree: true);
-                return false;
+                return -1;
             }
             Task.WaitAll(standard, errors);
             output = standard.Result;
-            return process.ExitCode == 0;
+            return process.ExitCode;
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            return false;
+            return -1;
         }
     }
 }

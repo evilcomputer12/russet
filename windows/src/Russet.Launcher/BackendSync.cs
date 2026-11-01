@@ -37,21 +37,37 @@ internal static class BackendSync
             : null;
     }
 
+    // Install's exit status when it changed /etc/wsl.conf: done, and the distribution must restart
+    // (wsl --terminate) for the change to apply.
+    internal const int RestartExit = 10;
+
     // wsl.exe arguments that copy a payload (as WSL sees it) under /opt/russet as root. The
-    // identity is written last, so a copy that stopped part way is copied again.
+    // identity is written last, so a copy that stopped part way is copied again. It also gives the
+    // distribution Russet's /etc/wsl.conf where it lacks it (the first one was its default user
+    // alone): systemd, which the virtual iPhone's udev rules and module loads need, and drvfs
+    // metadata, so builds can chmod and date the Windows files they write.
     internal static string[] Install(string distribution, string linuxPayload, string id) =>
     [
         "--distribution", distribution, "--user", "root", "--exec", "sh", "-c",
         $"set -e; rm -f {Stamp}; install -d -m 755 /opt/russet/bin /opt/russet/lib; " +
         "install -m 755 \"$1/bin/russet-dev\" \"$1/bin/russet-adi-host\" /opt/russet/bin/; " +
         "cp -R \"$1/lib/.\" /opt/russet/lib/; chmod 755 /opt/russet/lib/*.sh; " +
-        $"install -d -m 700 -o russet -g russet /home/russet/.russet; printf '%s\\n' \"$2\" > {Stamp}",
+        $"install -d -m 700 -o russet -g russet /home/russet/.russet; printf '%s\\n' \"$2\" > {Stamp}; " +
+        "if grep -qx 'systemd=true' /etc/wsl.conf 2>/dev/null && grep -q 'metadata' /etc/wsl.conf; then exit 0; fi; " +
+        "[ ! -f /etc/wsl.conf ] || [ -f /etc/wsl.conf.russet-bak ] || cp /etc/wsl.conf /etc/wsl.conf.russet-bak; " +
+        "printf '[boot]\\nsystemd=true\\n\\n[user]\\ndefault=russet\\n\\n[automount]\\noptions = \"metadata,uid=%s,gid=%s\"\\n' " +
+        $"\"$(id -u russet)\" \"$(id -g russet)\" > /etc/wsl.conf; exit {RestartExit}",
         "sh", linuxPayload, id,
     ];
 
-    // wsl.exe arguments that print the identity of the payload copied last (nothing before 0.6.3).
+    // wsl.exe arguments that stop the distribution, so its next command starts it with the new /etc/wsl.conf.
+    internal static string[] Restart(string distribution) => ["--terminate", distribution];
+
+    // wsl.exe arguments that print the identity of the payload copied last (nothing before 0.6.3),
+    // and fail where /etc/wsl.conf lacks what Install gives it, so that is copied again too.
     internal static string[] Recorded(string distribution) =>
-        ["--distribution", distribution, "--user", "russet", "--exec", "cat", Stamp];
+        ["--distribution", distribution, "--user", "russet", "--exec", "sh", "-c",
+         $"grep -qx 'systemd=true' /etc/wsl.conf && grep -q 'metadata' /etc/wsl.conf && cat {Stamp}"];
 
     // wsl.exe arguments that stop every Russet daemon (they all run /opt/russet/bin/russet-dev),
     // so the next start runs a newly copied engine.

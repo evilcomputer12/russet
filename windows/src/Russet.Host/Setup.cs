@@ -258,6 +258,10 @@ internal static partial class Setup
                 if (await Stream(id, "xtool_component.sh", ["sdk", linuxXip]) != 0) return Fail("build", "Building the iOS SDK failed.");
                 break;
             case "vphone":
+                // Upstream's setup and create flows use sudo: the managed user's sudo rule and the
+                // vhost-vsock device rules first (as root; it repeats harmlessly).
+                if (await Stream(id, "vphone_component.sh", ["prepare-root"], user: "root") != 0)
+                    return Fail("prepare", "The virtual iPhone engine's system settings could not be made (sudo, devices).");
                 if (await Stream(id, "vphone_component.sh", ["install"]) != 0) return Fail("build", "Building the virtual iPhone engine failed.");
                 break;
             case "virtual-iphone":
@@ -331,12 +335,12 @@ internal static partial class Setup
     }
 
     // Runs a component step, turning its "==> " lines into progress and the rest into log events.
-    static async Task<int> Stream(string id, string script, string[] arguments, Action<string>? result = null)
+    static async Task<int> Stream(string id, string script, string[] arguments, Action<string>? result = null, string user = "russet")
     {
         var start = new ProcessStartInfo(Wsl) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
         // Start in the managed home, never the caller's Windows folder (unmounted once isolated).
-        foreach (var argument in new[] { "--distribution", Distribution, "--user", "russet", "--cd", "~", "--exec", "bash", $"{Lib}/{script}" }.Concat(arguments))
+        foreach (var argument in new[] { "--distribution", Distribution, "--user", user, "--cd", "~", "--exec", "bash", $"{Lib}/{script}" }.Concat(arguments))
             start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new IOException("Cannot start WSL.");
         var gate = new object();

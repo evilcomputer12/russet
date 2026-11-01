@@ -49,9 +49,9 @@ internal static partial class Setup
             Progress("Creating Russet's WSL distribution", 0.65);
             if ((await Capture(["--import", Distribution, Path.Combine(data, "distro"), rootfs, "--version", "2"], Encoding.Unicode)).Exit != 0)
                 return fail("import", "WSL could not create Russet's distribution.", true);
+            // Its /etc/wsl.conf comes with the engine (BackendSync.Install), which restarts it.
             if ((await Capture(["--distribution", Distribution, "--user", "root", "--exec", "sh", "-c",
-                    "id russet >/dev/null 2>&1 || useradd --create-home --shell /bin/bash russet; " +
-                    "printf '[user]\\ndefault=russet\\n' > /etc/wsl.conf"])).Exit != 0)
+                    "id russet >/dev/null 2>&1 || useradd --create-home --shell /bin/bash russet"])).Exit != 0)
                 return fail("user", "Russet's backend user could not be created.", true);
             File.Delete(rootfs);
         }
@@ -66,8 +66,13 @@ internal static partial class Setup
 
     // The engine and backend scripts of a payload folder under /opt/russet (BackendSync). A
     // running daemon keeps its old binary until it stops; callers stop it first.
-    internal static async Task<bool> InstallPayload(string payload) =>
-        FramedPaths.ToLinux(payload) is { } linux && (await Capture(BackendSync.Install(Distribution, linux, BackendSync.Id(payload)))).Exit == 0;
+    internal static async Task<bool> InstallPayload(string payload)
+    {
+        if (FramedPaths.ToLinux(payload) is not { } linux) return false;
+        var exit = (await Capture(BackendSync.Install(Distribution, linux, BackendSync.Id(payload)))).Exit;
+        if (exit == BackendSync.RestartExit) await Capture(BackendSync.Restart(Distribution), Encoding.Unicode);
+        return exit is 0 or BackendSync.RestartExit;
+    }
 
     // Whether the engine in WSL is the installation's own: false once an update replaced the
     // installation's payload without copying it (the full installer does not).
