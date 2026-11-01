@@ -11,10 +11,14 @@ import type { Readable } from "node:stream";
 import {
   parseRunEvent,
   parseStatus,
+  parseLimits,
+  parseUpdates,
   runArgv,
   SetupProtocolError,
+  type ComponentUpdate,
   type SetupRunEvent,
   type SetupStatus,
+  type WslLimits,
 } from "./contract";
 
 /** The subset of ChildProcess the runner uses (a fake runner implements it in tests). */
@@ -38,7 +42,7 @@ export interface RunnerCommand {
 }
 
 export type SetupRunOutcome =
-  | { kind: "done" }
+  | { kind: "done"; result?: Record<string, unknown> }
   | { kind: "failed"; code: string; message: string; retryable: boolean }
   | { kind: "cancelled" };
 
@@ -86,10 +90,25 @@ export class SetupRunner {
 
   /** `--setup status`: one JSON line. */
   status(timeoutMs = STATUS_TIMEOUT_MS): Promise<SetupStatus> {
+    return this.oneLine(["--setup", "status"], parseStatus, "its status", timeoutMs);
+  }
+
+  /** `--setup updates`: one JSON line, each built component against upstream's latest commit. */
+  updates(timeoutMs = STATUS_TIMEOUT_MS): Promise<ComponentUpdate[]> {
+    return this.oneLine(["--setup", "updates"], parseUpdates, "its update check", timeoutMs);
+  }
+
+  /** `--setup limits`: one JSON line, WSL's memory limit and Russet's disk limit. */
+  limits(timeoutMs = STATUS_TIMEOUT_MS): Promise<WslLimits> {
+    return this.oneLine(["--setup", "limits"], parseLimits, "its limits", timeoutMs);
+  }
+
+  /** Runs the runner with `args` and parses the first line it prints. */
+  private oneLine<T>(args: string[], parse: (line: string) => T, what: string, timeoutMs: number): Promise<T> {
     return new Promise((resolve, reject) => {
       let child: RunnerProcess;
       try {
-        child = this.start(["--setup", "status"]);
+        child = this.start(args);
       } catch (err) {
         reject(unavailable(err));
         return;
@@ -106,7 +125,7 @@ export class SetupRunner {
       };
       const timer = setTimeout(() => {
         child.kill();
-        finish(() => reject(new SetupProtocolError("The setup runner did not report its status in time.")));
+        finish(() => reject(new SetupProtocolError(`The setup runner did not report ${what} in time.`)));
       }, timeoutMs);
       child.stderr?.resume();
       child.stdout?.setEncoding("utf8");
@@ -117,7 +136,7 @@ export class SetupRunner {
           const line = nl >= 0 ? buffered.slice(0, nl) : buffered;
           finish(() => {
             try {
-              resolve(parseStatus(line.replace(/\r$/, "")));
+              resolve(parse(line.replace(/\r$/, "")));
             } catch (err) {
               reject(err);
             }
@@ -129,13 +148,13 @@ export class SetupRunner {
         finish(() => {
           if (buffered.trim().length > 0) {
             try {
-              resolve(parseStatus(buffered.trim()));
+              resolve(parse(buffered.trim()));
             } catch (err) {
               reject(err);
             }
             return;
           }
-          reject(new SetupProtocolError(`The setup runner exited (code ${String(code)}) without a status.`));
+          reject(new SetupProtocolError(`The setup runner exited (code ${String(code)}) without ${what}.`));
         });
       });
     });
@@ -193,7 +212,7 @@ export class SetupRunner {
           }
           onEvent(event);
           if (event.event === "done") {
-            outcome = { kind: "done" };
+            outcome = event.result ? { kind: "done", result: event.result } : { kind: "done" };
           } else if (event.event === "failed") {
             outcome = { kind: "failed", code: event.code, message: event.message, retryable: event.retryable };
           }

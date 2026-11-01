@@ -336,6 +336,18 @@ function renderExtras(s: Snapshot, step: ViewStep): HTMLElement | undefined {
           h("code", { class: "cmd" }, "wsl --install --no-distribution"),
           h("button", { class: "secondary", "data-focus-key": "wsl:copy", onclick: () => post({ kind: "copyWslCommand" }) }, "Copy command")),
       );
+    case "wsl-update":
+      if (step.state === "done") {
+        return undefined;
+      }
+      return h(
+        "div",
+        { class: "extras" },
+        h("p", {}, "Run updates WSL from its pre-release channel after an administrator prompt. Or run this in a terminal yourself, then press Check again:"),
+        h("div", { class: "row" },
+          h("code", { class: "cmd" }, "wsl --update --pre-release"),
+          h("button", { class: "secondary", "data-focus-key": "wsl-update:copy", onclick: () => post({ kind: "copyWslUpdateCommand" }) }, "Copy command")),
+      );
     case "apple-devices":
       if (step.state === "done") {
         return undefined;

@@ -44,7 +44,10 @@ const stage = h("div", { class: "stage" });
 const open = h("button", { class: "secondary", onclick: () => vscode.postMessage({ kind: "openEditor" }) }, "Open in Editor");
 const home = h("button", { class: "secondary", title: "Go to the Home Screen", onclick: () => send({ t: "button", button: "home" }) }, "Home");
 home.hidden = true;
-document.getElementById("root")?.append(stage, h("div", { class: "foot" }, home, open));
+// A virtual iPhone is shown and driven in its editor tab: no second phone frame here.
+const virtualNote = h("p", { class: "muted", style: "padding:12px;text-align:center" }, "The virtual iPhone runs in its editor tab.");
+virtualNote.hidden = true;
+document.getElementById("root")?.append(virtualNote, stage, h("div", { class: "foot" }, home, open));
 const frame = new DeviceFrame(stage, { interactive: true, onInput: input, onSideButton: (b) => send({ t: "button", button: SIDE_BUTTONS[b] }) });
 frame.setStatus({ title: "iPhone", detail: "Connect an iPhone or create a virtual iPhone to see its screen here." });
 
@@ -277,6 +280,8 @@ window.addEventListener("message", (event: MessageEvent) => {
   }
   const t = msg.target;
   if (!t?.name) {
+    stage.hidden = false;
+    virtualNote.hidden = true;
     current = undefined;
     shown = undefined;
     frame.setDevice({ name: "iPhone", detail: "", screen: [1206, 2622] });
@@ -286,6 +291,8 @@ window.addEventListener("message", (event: MessageEvent) => {
   const same = current?.udid === t.udid;
   current = { udid: t.udid, name: t.name, detail: t.detail ?? "", screen: same && current ? current.screen : (t.screen ?? [1206, 2622]) };
   frame.setDevice({ name: current.name, detail: current.detail, screen: current.screen });
+  stage.hidden = t.kind === "virtual";
+  virtualNote.hidden = t.kind !== "virtual";
   if (t.kind === "virtual") {
     frame.setStatus({ title: t.name, detail: "Open the Virtual iPhone tab to interact with it." });
   } else if (msg.status !== "mirroring") {

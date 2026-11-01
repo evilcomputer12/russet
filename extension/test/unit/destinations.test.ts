@@ -31,6 +31,11 @@ describe("run destinations", () => {
     expect(mergeDestinations([], { ...created, created: false })).toEqual([]);
   });
 
+  it("says when the runner-created virtual iPhone runs, still not runnable", () => {
+    const [vm] = mergeDestinations([], { ...created, running: true });
+    expect([vm.ready, vm.stateLabel]).toEqual([false, "Running"]);
+  });
+
   it("slots in daemon devices with transport virtual unchanged", () => {
     const vm = { ...phone("00000000-SYNTHETIC-VM"), productType: "iPhone17,3", marketingName: undefined, osVersion: "27.0.1", transport: "virtual" as never };
     const all = mergeDestinations([vm], created);
@@ -38,15 +43,18 @@ describe("run destinations", () => {
     expect(all[0]).toMatchObject({ kind: "virtual", name: "iPhone 16 Pro", ready: true, transport: "virtual", device: vm });
   });
 
-  it("selects a virtual iPhone, blocks Run on it until the provider exists, and returns to a phone", () => {
+  it("selects a virtual iPhone, blocks Run on it until it runs, and returns to a phone", () => {
     const store = new Store(memento() as never);
     store.setDevices([phone("00000000-SYNTHETIC-A")]);
-    const model = new DestinationModel(store, memento() as never, () => created);
+    let source: VirtualSource = created;
+    const model = new DestinationModel(store, memento() as never, () => source);
     expect(model.selected?.kind).toBe("physical");
     expect(model.runBlocker()).toBeUndefined();
     model.select("virtual:iPhone17,3:27.0.1");
     expect(model.selected).toMatchObject({ kind: "virtual", name: "iPhone 16 Pro" });
-    expect(model.runBlocker()).toMatch(/virtual device provider/);
+    expect(model.runBlocker()).toMatch(/is not running/);
+    source = { ...created, running: true };
+    expect(model.runBlocker()).toBeUndefined();
     model.select("00000000-SYNTHETIC-A");
     expect(model.selected?.kind).toBe("physical");
     expect(store.activeDevice?.udid).toBe("00000000-SYNTHETIC-A");

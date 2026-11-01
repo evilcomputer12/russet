@@ -5,6 +5,7 @@
   "description": "Build, run and debug iOS apps on your iPhone from Linux and Windows, with the virtual iPhone embedded.",
   "version": "0.6.0",
   "license": "AGPL-3.0-only",
+  "icon": "media/russet-icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/evilcomputer12/russet"
@@ -17,7 +18,8 @@
     "Debuggers",
     "Programming Languages",
     "Testing",
-    "Other"
+    "Other",
+    "Themes"
   ],
   "extensionKind": [
     "workspace"
@@ -42,9 +44,55 @@
     "onWebviewPanel:russet.mirror",
     "onWebviewPanel:russet.console",
     "onWebviewPanel:russet.setup",
-    "onWebviewPanel:russet.virtualIphone"
+    "onWebviewPanel:russet.virtualIphone",
+    "onLanguage:plist",
+    "onFileSystem:russet-plist",
+    "onFileSystem:russet-profile"
   ],
   "contributes": {
+    "configurationDefaults": {
+      "window.autoDetectColorScheme": true,
+      "workbench.colorTheme": "Russet Studio Dark (Xcode-style)",
+      "workbench.preferredDarkColorTheme": "Russet Studio Dark (Xcode-style)",
+      "workbench.preferredLightColorTheme": "Russet Studio Light (Xcode-style)",
+      "editor.fontFamily": "'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Courier New', monospace",
+      "window.menuBarVisibility": "compact",
+      "window.commandCenter": true,
+      "workbench.layoutControl.enabled": false,
+      "workbench.activity.showAccounts": false,
+      "workbench.tips.enabled": false,
+      "workbench.startupEditor": "none",
+      "workbench.editor.empty.hint": "hidden",
+      "workbench.secondarySideBar.defaultVisibility": "hidden",
+      "workbench.tree.indent": 12,
+      "editor.minimap.enabled": false,
+      "editor.stickyScroll.enabled": false,
+      "editor.renderLineHighlight": "all",
+      "extensions.ignoreRecommendations": true,
+      "telemetry.telemetryLevel": "off"
+    },
+    "themes": [
+      {
+        "label": "Russet Studio Dark (Xcode-style)",
+        "uiTheme": "vs-dark",
+        "path": "./themes/russet-studio-dark-color-theme.json"
+      },
+      {
+        "label": "Russet Studio Light (Xcode-style)",
+        "uiTheme": "vs",
+        "path": "./themes/russet-studio-light-color-theme.json"
+      },
+      {
+        "label": "Russet Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/russet-dark-color-theme.json"
+      },
+      {
+        "label": "Russet Light",
+        "uiTheme": "vs",
+        "path": "./themes/russet-light-color-theme.json"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -202,6 +250,11 @@
       {
         "command": "russet.setup.openWalkthrough",
         "title": "Open Getting Started Walkthrough",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.wsl.limits",
+        "title": "Change WSL Limits (Memory and Disk)…",
         "category": "Russet"
       },
       {
@@ -445,6 +498,11 @@
         "command": "russet.signing.fix",
         "title": "Fix Signing",
         "category": "Russet"
+      },
+      {
+        "command": "russet.apple.openPlist",
+        "title": "Open as Property List",
+        "category": "Russet"
       }
     ],
     "menus": {
@@ -508,6 +566,10 @@
         {
           "command": "russet.virtual.screenshot",
           "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.apple.openPlist",
+          "when": "false"
         }
       ],
       "editor/title/run": [
@@ -670,6 +732,11 @@
         {
           "command": "russet.openCapabilities",
           "when": "resourceExtname == .entitlements"
+        },
+        {
+          "command": "russet.apple.openPlist",
+          "when": "resourceExtname =~ /^\\.(plist|strings|nib|mobileprovision|provisionprofile)$/",
+          "group": "navigation@9"
         }
       ],
       "editor/title": [
@@ -711,6 +778,13 @@
       ]
     },
     "debuggers": [
+      {
+        "type": "russet-virtual",
+        "label": "Russet: Virtual iPhone",
+        "languages": [
+          "swift"
+        ]
+      },
       {
         "type": "russet",
         "label": "Russet: iPhone",
@@ -793,7 +867,6 @@
             "type": "russet",
             "request": "launch",
             "name": "Run on iPhone",
-            "target": "${workspaceFolderBasename}",
             "device": "auto",
             "configuration": "Debug",
             "args": [],
@@ -876,61 +949,6 @@
             "type": "string"
           }
         }
-      }
-    ],
-    "customEditors": [
-      {
-        "viewType": "russet.plist",
-        "displayName": "Property List",
-        "priority": "default",
-        "selector": [
-          {
-            "filenamePattern": "**/Info.plist"
-          }
-        ]
-      },
-      {
-        "viewType": "russet.plistGeneric",
-        "displayName": "Property List",
-        "priority": "option",
-        "selector": [
-          {
-            "filenamePattern": "*.plist"
-          }
-        ]
-      },
-      {
-        "viewType": "russet.entitlements",
-        "displayName": "Entitlements",
-        "priority": "default",
-        "selector": [
-          {
-            "filenamePattern": "*.entitlements"
-          }
-        ]
-      },
-      {
-        "viewType": "russet.assetCatalog",
-        "displayName": "Asset Catalog",
-        "priority": "default",
-        "selector": [
-          {
-            "filenamePattern": "**/*.xcassets/Contents.json"
-          }
-        ]
-      },
-      {
-        "viewType": "russet.crashReport",
-        "displayName": "Crash Report",
-        "priority": "default",
-        "selector": [
-          {
-            "filenamePattern": "*.ips"
-          },
-          {
-            "filenamePattern": "*.crash"
-          }
-        ]
       }
     ],
     "walkthroughs": [
@@ -1342,7 +1360,145 @@
           "default": "vscode"
         }
       }
-    }
+    },
+    "languages": [
+      {
+        "id": "plist",
+        "aliases": [
+          "Property List",
+          "plist"
+        ],
+        "extensions": [
+          ".plist",
+          ".entitlements",
+          ".stringsdict",
+          ".xcprivacy",
+          ".mobileconfig"
+        ],
+        "firstLine": "^(<\\?xml[^>]*>\\s*)?<!DOCTYPE plist",
+        "configuration": "./language-configuration/plist.json"
+      },
+      {
+        "id": "strings",
+        "aliases": [
+          "Strings",
+          "strings"
+        ],
+        "extensions": [
+          ".strings"
+        ],
+        "configuration": "./language-configuration/c-style.json"
+      },
+      {
+        "id": "openstep-plist",
+        "aliases": [
+          "Xcode Project",
+          "OpenStep Property List"
+        ],
+        "extensions": [
+          ".pbxproj"
+        ],
+        "configuration": "./language-configuration/c-style.json"
+      },
+      {
+        "id": "xcconfig",
+        "aliases": [
+          "Xcode Build Configuration",
+          "xcconfig"
+        ],
+        "extensions": [
+          ".xcconfig"
+        ],
+        "configuration": "./language-configuration/xcconfig.json"
+      },
+      {
+        "id": "modulemap",
+        "aliases": [
+          "Module Map",
+          "modulemap"
+        ],
+        "extensions": [
+          ".modulemap"
+        ],
+        "filenames": [
+          "module.modulemap",
+          "module.private.modulemap"
+        ],
+        "configuration": "./language-configuration/c-style.json"
+      },
+      {
+        "id": "xml",
+        "extensions": [
+          ".storyboard",
+          ".xib",
+          ".xcscheme",
+          ".xcworkspacedata",
+          ".xcsettings",
+          ".gpx",
+          ".xcdatamodel",
+          ".intentdefinition"
+        ]
+      },
+      {
+        "id": "json",
+        "extensions": [
+          ".xcstrings",
+          ".xctestplan",
+          ".xcappdata",
+          ".ips",
+          ".apns"
+        ],
+        "filenames": [
+          "Package.resolved",
+          "Contents.json"
+        ]
+      },
+      {
+        "id": "cpp",
+        "extensions": [
+          ".metal"
+        ]
+      },
+      {
+        "id": "yaml",
+        "extensions": [
+          ".tbd"
+        ]
+      },
+      {
+        "id": "objective-cpp",
+        "extensions": [
+          ".mm"
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "plist",
+        "scopeName": "text.xml.plist",
+        "path": "./syntaxes/plist.tmLanguage.json"
+      },
+      {
+        "language": "strings",
+        "scopeName": "source.strings",
+        "path": "./syntaxes/strings.tmLanguage.json"
+      },
+      {
+        "language": "openstep-plist",
+        "scopeName": "source.openstep-plist",
+        "path": "./syntaxes/openstep-plist.tmLanguage.json"
+      },
+      {
+        "language": "xcconfig",
+        "scopeName": "source.xcconfig",
+        "path": "./syntaxes/xcconfig.tmLanguage.json"
+      },
+      {
+        "language": "modulemap",
+        "scopeName": "source.modulemap",
+        "path": "./syntaxes/modulemap.tmLanguage.json"
+      }
+    ]
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",

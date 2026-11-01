@@ -4,9 +4,10 @@
 // The "Virtual iPhone" editor tab: a device frame with touch and keyboard
 // capture and Xcode-Simulator-style hardware buttons (Home, Lock, Volume,
 // Rotate, Screenshot). Every button goes through a host command, so the same
-// actions work from the keyboard shortcuts and the editor title bar. The
-// display stream and input delivery come from the engine's virtual device
-// provider; until it exists the host says so in the status line.
+// actions work from the keyboard shortcuts and the editor title bar. While the
+// virtual iPhone runs, the host sends a "stream" message: the page shows its
+// screen from QEMU's VNC server and sends touches, keys and Home straight back
+// (rfb.ts); otherwise input goes to the host, which says what it did with it.
 
 import { vscodeApi } from "../shared/vscode";
 import { addStyles, announcer, h } from "../shared/dom";
@@ -15,6 +16,7 @@ import type { Orientation } from "../shared/geometry";
 import baseCss from "../shared/base.css?inline";
 import deviceCss from "../shared/device.css?inline";
 import pageCss from "./device.css?inline";
+import { BUTTON_MIDDLE, BUTTON_PRIMARY, keysym, RfbClient } from "./rfb";
 
 interface PanelState {
   device: FrameDevice & { kind: "virtual" | "device" };
@@ -70,9 +72,92 @@ document.getElementById("root")?.append(
   ),
 );
 
+/** The running virtual iPhone's screen stream, while there is one. */
+let stream: { url: string; rfb: RfbClient; shown: boolean } | undefined;
+let retry: ReturnType<typeof setTimeout> | undefined;
+
+function startStream(url: string): void {
+  if (stream?.url === url) {
+    return;
+  }
+  stopStream();
+  frame.setStatus({ title: "Connecting to the virtual iPhone's screen…", busy: true });
+  const s: NonNullable<typeof stream> = {
+    url,
+    shown: false,
+    rfb: new RfbClient(url, {
+      frame: (canvas, width, height) => {
+        frame.drawFrame(canvas, width, height);
+        if (!s.shown) {
+          s.shown = true;
+          frame.setStatus(undefined);
+        }
+      },
+      closed: (reason) => {
+        if (stream !== s) {
+          return;
+        }
+        stream = undefined;
+        frame.setStatus({ title: "The virtual iPhone's screen is not reachable", detail: `${reason} Retrying…`, busy: true });
+        // The VNC server comes up with QEMU; try again while the host still says it runs.
+        retry = setTimeout(() => startStream(url), 3000);
+      },
+    }),
+  };
+  stream = s;
+}
+
+function stopStream(): void {
+  if (retry) {
+    clearTimeout(retry);
+    retry = undefined;
+  }
+  const s = stream;
+  stream = undefined;
+  s?.rfb.close();
+}
+
+function pressHome(): void {
+  stream?.rfb.pointer(0.5, 0.5, BUTTON_MIDDLE);
+  stream?.rfb.pointer(0.5, 0.5, 0);
+}
+
+/** Where the touch in progress went down (0…1 of the screen's height). */
+let touchStartY: number | undefined;
+/**
+ * A swipe up from the bottom tenth, by at least an eighth of the screen: the home gesture, which
+ * the guest does not take from this touchscreen. It unlocks the phone (the host asks vphoned) and
+ * presses Home (QEMU's shortcut).
+ */
+function homeGesture(endY: number): boolean {
+  const start = touchStartY;
+  touchStartY = undefined;
+  return start !== undefined && start >= 0.9 && start - endY >= 0.12;
+}
+
 const frame = new DeviceFrame(stage, {
   interactive: true,
-  onInput: (input) => post({ kind: "input", input }),
+  onInput: (input) => {
+    const rfb = stream?.rfb;
+    if (!rfb) {
+      post({ kind: "input", input });
+    } else if (input.type === "touch") {
+      if (input.phase === "down") {
+        touchStartY = input.y;
+      }
+      rfb.pointer(input.x, input.y, input.phase === "up" ? 0 : BUTTON_PRIMARY);
+      if (input.phase === "up" && homeGesture(input.y)) {
+        post({ kind: "unlock" });
+        pressHome();
+      }
+    } else {
+      const sym = keysym(input.key);
+      if (sym !== undefined) {
+        rfb.key(sym, true);
+        rfb.key(sym, false);
+      }
+    }
+  },
   onSideButton: (name) => post({ kind: "button", name }),
 });
 
@@ -109,6 +194,17 @@ window.addEventListener("message", (event: MessageEvent) => {
       if (msg.state) {
         apply(msg.state);
       }
+      break;
+    case "stream":
+      if (typeof (msg as { url?: unknown }).url === "string") {
+        startStream((msg as { url: string }).url);
+      }
+      break;
+    case "stopStream":
+      stopStream();
+      break;
+    case "home":
+      pressHome();
       break;
     case "captureScreenshot":
       post({ kind: "screenshot", dataUrl: frame.snapshot() });

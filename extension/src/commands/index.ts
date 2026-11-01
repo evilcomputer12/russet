@@ -65,12 +65,27 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
     return changed;
   };
   reg("russet.run", async () => {
-    if (!blockedRun() && (await registrable())) {
+    if (blockedRun()) {
+      return;
+    }
+    // The virtual iPhone: build, then install and launch through the runner (vphoned signs it).
+    if (svc.experience?.virtualSelected()) {
+      await svc.experience.runOnVirtual();
+      return;
+    }
+    if (await registrable()) {
       await svc.run.run();
     }
   });
   reg("russet.debug", async () => {
-    if (blockedRun() || !(await registrable())) {
+    if (blockedRun()) {
+      return;
+    }
+    if (svc.experience?.virtualSelected()) {
+      await svc.experience.debugOnVirtual();
+      return;
+    }
+    if (!(await registrable())) {
       return;
     }
     const folder = vscode.workspace.workspaceFolders?.[0];
@@ -90,7 +105,7 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   });
   reg("russet.stop", async () => {
     const debugSession = vscode.debug.activeDebugSession;
-    if (debugSession && debugSession.type === "russet") {
+    if (debugSession && (debugSession.type === "russet" || debugSession.type === "russet-virtual")) {
       await vscode.debug.stopDebugging(debugSession);
       return;
     }
@@ -234,14 +249,10 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   reg("russet.openProfiler", () => soon("Profiler"));
   reg("russet.openCrashes", () => soon("Crash viewer"));
 
-  // --- Agents / MCP (later cards) ------------------------------------------
+  // --- Agents / MCP (later cards; install, register, status and copy are in ai/) --
   reg("russet.agents.open", () => soon("Agents panel"));
   reg("russet.agents.newSession", () => soon("Agent sessions"));
-  reg("russet.agents.install", () => soon("Agent install"));
   reg("russet.agents.quickAsk", () => soon("Ask Local Model"));
-  reg("russet.mcp.register", () => soon("Register Russet MCP"));
-  reg("russet.mcp.status", () => soon("MCP status"));
-  reg("russet.mcp.copyConfig", () => soon("Copy MCP config"));
   reg("russet.mcp.toggleHttp", () => soon("MCP HTTP endpoint"));
 
   // --- Shell ----------------------------------------------------------------

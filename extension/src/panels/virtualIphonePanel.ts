@@ -51,6 +51,12 @@ export interface VirtualSetupInfo {
 
 const NOTE_INTERVAL_MS = 250;
 
+/**
+ * Where a running virtual iPhone's screen and input are: QEMU's VNC server over a WebSocket on the
+ * backend's loopback, which WSL forwards to Windows (russet-windows backend/vphone_component.sh).
+ */
+export const VIRTUAL_SCREEN_URL = "ws://127.0.0.1:5700";
+
 export class VirtualIphonePanel implements vscode.Disposable {
   public static readonly viewType = "russet.virtualIphone";
 
@@ -61,6 +67,8 @@ export class VirtualIphonePanel implements vscode.Disposable {
   private lastReason?: string;
   private noteTimer?: ReturnType<typeof setTimeout>;
   private pendingScreenshot?: (dataUrl: string | undefined) => void;
+  /** The runner-created virtual iPhone runs: the page streams its screen. */
+  private running = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -91,11 +99,20 @@ export class VirtualIphonePanel implements vscode.Disposable {
 
   /** Adopt a panel (new, or restored by the serializer after a reload). */
   attach(panel: vscode.WebviewPanel): void {
+    // One virtual iPhone, one tab: a second restored copy (saved by an older build) closes.
+    if (this.panel && this.panel !== panel) {
+      panel.dispose();
+      this.panel.reveal();
+      return;
+    }
     this.panel = panel;
     panel.webview.options = { enableScripts: true, localResourceRoots: localResourceRoots(this.extensionUri) };
     panel.iconPath = vscode.Uri.joinPath(this.extensionUri, "media", "russet.svg");
-    panel.webview.html = renderPage(panel.webview, this.extensionUri, { page: "device", title: "Virtual iPhone" });
+    panel.webview.html = renderPage(panel.webview, this.extensionUri, { page: "device", title: "Virtual iPhone", mirrorPort: "any" });
     panel.webview.onDidReceiveMessage((msg: unknown) => void this.onMessage(msg), undefined, this.disposables);
+    // Feeding the VNC console costs QEMU a full readback per frame (reims-vgpu PR #139): stream
+    // only while the tab is visible.
+    panel.onDidChangeViewState(() => this.postState(), undefined, this.disposables);
     panel.onDidDispose(() => {
       this.panel = undefined;
       void vscode.commands.executeCommand("setContext", "russet.virtualIphoneOpen", false);
@@ -125,14 +142,15 @@ export class VirtualIphonePanel implements vscode.Disposable {
     this.panel.title = `Virtual iPhone — ${name}`;
     let status: { title: string; detail?: string; action?: { id: string; label: string } } | undefined;
     let state: string;
-    if (t?.ready) {
+    if (t?.ready || this.running) {
       state = "Running";
       status = undefined;
     } else if (t || info.created) {
       state = "Not running";
       status = {
         title: `${name} is not running`,
-        detail: "Starting the virtual iPhone and streaming its screen from the IDE arrive with the engine's virtual device provider.",
+        detail: "Start it from the run destination picker or the Devices view; its screen appears here.",
+        action: { id: "startVirtual", label: "Start Virtual iPhone" },
       };
     } else {
       state = "Not created";
@@ -158,6 +176,9 @@ export class VirtualIphonePanel implements vscode.Disposable {
         note: this.note(),
       },
     });
+    void this.panel.webview.postMessage(
+      this.running && this.panel.visible ? { kind: "stream", url: VIRTUAL_SCREEN_URL } : { kind: "stopStream" },
+    );
   }
 
   private note(): string {
@@ -188,9 +209,29 @@ export class VirtualIphonePanel implements vscode.Disposable {
   }
 
   /** Hardware buttons (commands `russet.virtual.home|lock|volumeUp|volumeDown`). */
+  /** Whether the virtual iPhone runs; the page streams its screen while it does. */
+  setRunning(running: boolean): void {
+    if (this.running !== running) {
+      this.running = running;
+      this.postState();
+    }
+  }
+
   async button(button: HardwareButton): Promise<void> {
     if (!this.panel) {
       this.show();
+    }
+    if (this.running && button === "home") {
+      // QEMU turns a middle click into the guest's Home shortcut (vphone-linux README); the lock
+      // screen ignores it, so the phone is unlocked first.
+      void this.panel?.webview.postMessage({ kind: "home" });
+      await vscode.commands.executeCommand("russet.virtual.unlock");
+      return;
+    }
+    if (this.running) {
+      const name = { lock: "lock", volumeUp: "volume-up", volumeDown: "volume-down", home: "home" }[button];
+      await vscode.commands.executeCommand("russet.virtual.press", name);
+      return;
     }
     await this.deliver({ type: "button", button });
     const label = { home: "Home", lock: "Lock", volumeUp: "Volume up", volumeDown: "Volume down" }[button];
@@ -268,10 +309,15 @@ export class VirtualIphonePanel implements vscode.Disposable {
       case "action":
         if (m.id === "createVirtual") {
           await vscode.commands.executeCommand("russet.openSetup", "virtual-iphone");
+        } else if (m.id === "startVirtual") {
+          await vscode.commands.executeCommand("russet.virtual.start");
         }
         break;
       case "screenshot":
         this.pendingScreenshot?.(typeof m.dataUrl === "string" ? m.dataUrl : undefined);
+        break;
+      case "unlock":
+        await vscode.commands.executeCommand("russet.virtual.unlock");
         break;
       default:
         break;

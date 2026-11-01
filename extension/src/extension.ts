@@ -33,6 +33,9 @@ import { RussetDebugAdapterFactory } from "./debug/adapterFactory";
 import { RussetDebugTrackerFactory } from "./debug/tracker";
 import { registerIdeBridge } from "./debug/ideBridge";
 import { installExperience } from "./setup";
+import { applyMinimalDefaults } from "./setup/minimal";
+import { registerAppleFiles } from "./apple";
+import { registerAi } from "./ai";
 import { log, disposeLog } from "./util/log";
 import type { DeviceSummary } from "./generated/protocol";
 
@@ -46,10 +49,13 @@ export interface RussetApi {
 export function activate(context: vscode.ExtensionContext): RussetApi {
   const logger = log();
   logger.info(`Russet extension ${context.extension.packageJSON.version} activating`);
+  void applyMinimalDefaults(context).catch((err: unknown) => logger.warn(`[setup] minimal defaults: ${String(err)}`));
+  registerAppleFiles(context);
 
   const config = vscode.workspace.getConfiguration("russet");
   const backend = WindowsBackend.fromEnvironment();
   if (backend) context.subscriptions.push(backend);
+  registerAi(context, backend?.home);
   const client = new RussetClient(
     {
       socketPath: config.get<string>("daemon.socketPath") || undefined,
@@ -93,7 +99,8 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
   );
 
   // Guided setup, Apple ID sign-in, run destinations and the Virtual iPhone tab.
-  const experience = installExperience(context, { client, store, mirror: mirrorView });
+  const experience = installExperience(context, { client, store, mirror: mirrorView, backendHome: backend?.home });
+  context.subscriptions.push(devicesTree.useDestinations(experience.destinations));
 
   // Status bar.
   context.subscriptions.push(new StatusBar(store, client, experience.destinations));
@@ -115,6 +122,7 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
       vscode.DebugConfigurationProviderTriggerKind.Dynamic,
     ),
     vscode.debug.registerDebugAdapterDescriptorFactory("russet", adapterFactory),
+    vscode.debug.registerDebugAdapterDescriptorFactory("russet-virtual", adapterFactory),
     vscode.debug.registerDebugAdapterTrackerFactory("russet", new RussetDebugTrackerFactory(client, store)),
   );
 

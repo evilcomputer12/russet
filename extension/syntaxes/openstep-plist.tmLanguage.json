@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "OpenStep Property List",
+  "scopeName": "source.openstep-plist",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash",
+      "match": "//.*$"
+    },
+    {
+      "name": "comment.block",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    {
+      "name": "string.quoted.double",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape",
+          "match": "\\\\(?:[\\\\\"'nrt0]|U[0-9A-Fa-f]{4}|u[0-9A-Fa-f]{4}|.)"
+        },
+        {
+          "name": "constant.other.placeholder",
+          "match": "%(?:\\d+\\$)?[-+ #0]*\\d*(?:\\.\\d+)?(?:hh|h|ll|l|q|L|z|t|j)?[@dDiuUxXoOfeEgGcCsSpaAF%]"
+        }
+      ]
+    },
+    {
+      "name": "constant.numeric.object-id",
+      "match": "\\b[0-9A-F]{24}\\b"
+    },
+    {
+      "match": "([A-Za-z_][\\w.$/-]*)\\s*(=)",
+      "captures": {
+        "1": {
+          "name": "variable.other.key"
+        },
+        "2": {
+          "name": "keyword.operator.assignment"
+        }
+      }
+    },
+    {
+      "name": "string.unquoted",
+      "match": "[A-Za-z0-9_$+/:.-]+"
+    },
+    {
+      "name": "punctuation.section",
+      "match": "[{}()]"
+    },
+    {
+      "name": "punctuation.separator",
+      "match": "[,;]"
+    },
+    {
+      "name": "string.other.data",
+      "match": "<[0-9a-fA-F\\s]*>"
+    }
+  ]
+}

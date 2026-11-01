@@ -1,0 +1,11 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF9A5C"/>
+      <stop offset="1" stop-color="#C9551F"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#tile)"><rect x="12" y="12" width="232" height="232" rx="54"/></g>
+  <g fill="#FFFFFF"><path d="M128 100 C 138 92, 152 90, 163 94 C 186 102, 198 124, 198 150 C 198 186, 167 212, 128 212 C 89 212, 58 186, 58 150 C 58 124, 70 102, 93 94 C 104 90, 118 92, 128 100 Z"/><path d="M124 102 L 124 62 C 124 58, 132 58, 132 62 L 132 102 Z"/><path d="M124 74 C 108 56, 84 52, 66 60 L 92 70 L 70 82 C 86 92, 108 90, 124 80 Z"/></g>
+</svg>

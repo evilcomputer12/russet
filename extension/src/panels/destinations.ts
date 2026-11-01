@@ -34,6 +34,8 @@ export interface RunDestination {
 /** What the setup knows about the runner-created virtual iPhone. */
 export interface VirtualSource {
   created: boolean;
+  /** Its VM runs (the runner's start and stop, and its periodic checks). */
+  running?: boolean;
   choice: VirtualIphoneChoice;
 }
 
@@ -84,7 +86,7 @@ export function mergeDestinations(devices: readonly DeviceSummary[], virtual: Vi
       osVersion: virtual.choice.ios,
       transport: "virtual",
       ready: false,
-      stateLabel: "Not running",
+      stateLabel: virtual.running ? "Running" : "Not running",
       ...(model ? { screen: model.screen } : {}),
     });
   }
@@ -152,8 +154,8 @@ export class DestinationModel implements vscode.Disposable {
   /** Why Run/Debug cannot use the selected destination yet, if it cannot. */
   runBlocker(): string | undefined {
     const d = this.selected;
-    if (d?.kind === "virtual" && !d.device) {
-      return `${d.name} (virtual) cannot run apps from the IDE yet: the engine's virtual device provider is still being built. Choose a USB iPhone, or open the Virtual iPhone tab.`;
+    if (d?.kind === "virtual" && !d.device && d.stateLabel !== "Running") {
+      return `${d.name} (virtual) is not running: start it from the run destination picker or the Devices view first.`;
     }
     return undefined;
   }
@@ -169,6 +171,8 @@ export class DestinationModel implements vscode.Disposable {
 interface DestinationItem extends vscode.QuickPickItem {
   destinationId?: string;
   createVirtual?: boolean;
+  /** A command that starts or stops the runner-created virtual iPhone. */
+  command?: string;
 }
 
 /** The Xcode-style run destination picker. */
@@ -188,6 +192,14 @@ export async function pickDestination(model: DestinationModel, canCreateVirtual:
   items.push({ label: "Virtual iPhones", kind: vscode.QuickPickItemKind.Separator });
   for (const d of virtual) {
     items.push(itemFor(d, selected));
+    // A runner-created VM (not a daemon device) is started and stopped through the runner.
+    if (canCreateVirtual && d.id.startsWith("virtual:")) {
+      items.push(
+        d.stateLabel === "Running"
+          ? { label: `$(debug-stop) Stop ${d.name}`, description: "Shut the virtual iPhone down", command: "russet.virtual.stop" }
+          : { label: `$(play) Start ${d.name}`, description: "Opens its window; several minutes to the lock screen", command: "russet.virtual.start" },
+      );
+    }
   }
   if (canCreateVirtual && virtual.length === 0) {
     items.push({ label: "$(add) Create a Virtual iPhone…", description: "Guided setup", createVirtual: true });
@@ -202,6 +214,10 @@ export async function pickDestination(model: DestinationModel, canCreateVirtual:
   }
   if (choice.createVirtual) {
     await vscode.commands.executeCommand("russet.openSetup", "virtual-iphone");
+    return;
+  }
+  if (choice.command) {
+    await vscode.commands.executeCommand(choice.command);
     return;
   }
   if (choice.destinationId) {

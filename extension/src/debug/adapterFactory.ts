@@ -51,6 +51,17 @@ export class RussetDebugAdapterFactory implements vscode.DebugAdapterDescriptorF
   async createDebugAdapterDescriptor(
     session: vscode.DebugSession,
   ): Promise<vscode.DebugAdapterDescriptor> {
+    // The virtual iPhone: lldb-dap in the backend, through the relay that maps Windows and Linux paths.
+    if (session.configuration.type === "russet-virtual") {
+      const socket = (session.configuration as { __dapSocket?: unknown }).__dapSocket;
+      if (!this.backend || typeof socket !== "string") {
+        throw new Error("Russet: debugging the virtual iPhone needs Russet's Windows backend.");
+      }
+      this.release(session.id);
+      const relay = await this.backend.open(socket, "dap");
+      this.relays.set(session.id, relay);
+      return new vscode.DebugAdapterNamedPipeServer(relay.endpoint);
+    }
     const token = (session.configuration as { __russetToken?: string }).__russetToken;
     const result = takePrepared(token);
     if (!result) {

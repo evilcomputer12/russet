@@ -20,6 +20,15 @@ import { renderPage, localResourceRoots } from "./webviewHost";
 
 /** The shortest time between two screenshot requests (at most about 8 frames a second). */
 const FRAME_INTERVAL_MS = 125;
+/**
+ * Whether the view asks for the live HEVC stream (`russet.mirror.liveStream`, on unless turned off).
+ * Engines before the fix that keeps the display session off the worker stacks abort opening it;
+ * turning the setting off keeps such an engine on screenshots.
+ */
+function liveStream(): boolean {
+  return vscode.workspace.getConfiguration("russet").get<boolean>("mirror.liveStream", true);
+}
+
 /** After a stream fails, poll screenshots this long before trying the stream again. */
 const STREAM_RETRY_MS = 15_000;
 /** After the webview reports it cannot decode HEVC, keep polling this long. */
@@ -160,7 +169,7 @@ export class MirrorViewProvider implements vscode.WebviewViewProvider {
     if (this.streamUdid === target.udid) {
       return;
     }
-    if (Date.now() >= (this.streamBlocked.get(target.udid) ?? 0)) {
+    if (liveStream() && Date.now() >= (this.streamBlocked.get(target.udid) ?? 0)) {
       void this.startStream(target.udid);
     } else if (!this.polling) {
       void this.poll();
@@ -228,7 +237,7 @@ export class MirrorViewProvider implements vscode.WebviewViewProvider {
         if (!this.view?.visible || !this.client || target?.kind !== "device" || this.streamUdid === target.udid) {
           return;
         }
-        if (Date.now() >= (this.streamBlocked.get(target.udid) ?? 0)) {
+        if (liveStream() && Date.now() >= (this.streamBlocked.get(target.udid) ?? 0)) {
           // Time to try the stream again; mirror() starts it once this loop has ended.
           setTimeout(() => this.mirror(), 0);
           return;

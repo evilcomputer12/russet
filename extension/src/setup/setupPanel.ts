@@ -161,6 +161,10 @@ export class SetupPanel implements vscode.Disposable {
         await vscode.env.clipboard.writeText("wsl --install --no-distribution");
         void this.panel?.webview.postMessage({ kind: "announce", text: "Command copied." });
         break;
+      case "copyWslUpdateCommand":
+        await vscode.env.clipboard.writeText("wsl --update --pre-release");
+        void this.panel?.webview.postMessage({ kind: "announce", text: "Command copied." });
+        break;
       case "openExternal":
         if (m.target === "apple-devices") {
           await vscode.env.openExternal(vscode.Uri.parse(APPLE_DEVICES_STORE));

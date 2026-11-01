@@ -9,6 +9,7 @@
 /** The runner's step ids, in the contract's order. Unknown ids are still shown. */
 export const KNOWN_STEP_IDS = [
   "wsl",
+  "wsl-update",
   "backend",
   "apple-devices",
   "iphone",
@@ -36,7 +37,7 @@ export interface SetupStatus {
 export type SetupRunEvent =
   | { step: string; event: "progress"; message: string; fraction?: number }
   | { step: string; event: "log"; message: string }
-  | { step: string; event: "done" }
+  | { step: string; event: "done"; result?: Record<string, unknown> }
   | { step: string; event: "failed"; code: string; message: string; retryable: boolean };
 
 export class SetupProtocolError extends Error {
@@ -101,6 +102,111 @@ export function parseStatus(line: string): SetupStatus {
   return { version: 1, steps };
 }
 
+/** Where a component's build of upstream's latest commit stands (`--setup updates`). */
+export type StagedState = "none" | "building" | "interrupted" | "built" | "failed" | "skipped";
+const STAGED: ReadonlySet<string> = new Set(["none", "building", "interrupted", "built", "failed", "skipped"]);
+const COMMIT = /^[0-9a-f]{7,40}$/;
+
+/** One component's update check: the commit in use against upstream's latest. */
+export interface ComponentUpdate {
+  id: string;
+  title: string;
+  current: string;
+  upstream: string;
+  /** Upstream has a commit other than the one in use. */
+  update: boolean;
+  staged: StagedState;
+  /** Why the build of `upstream` failed (`staged: "failed"`). */
+  reason?: string;
+  /** A virtual iPhone runs: a built update waits for it to stop. */
+  running: boolean;
+}
+
+/**
+ * Parse `--setup updates`: `{"version":1,"components":[{id,title,check:{…}}]}`. Components
+ * whose check is malformed are left out.
+ */
+export function parseUpdates(line: string): ComponentUpdate[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new SetupProtocolError("The setup runner printed an update check that is not JSON.");
+  }
+  const v = value as { version?: unknown; components?: unknown } | null;
+  if (!v || typeof v !== "object" || v.version !== 1 || !Array.isArray(v.components)) {
+    throw new SetupProtocolError("The setup runner's update check is not version 1.");
+  }
+  const out: ComponentUpdate[] = [];
+  for (const raw of v.components) {
+    const c = raw as { id?: unknown; title?: unknown; check?: Record<string, unknown> } | null;
+    const k = c?.check;
+    if (!c || !isStepId(c.id) || !k || typeof k !== "object") {
+      continue;
+    }
+    if (typeof k.current !== "string" || !COMMIT.test(k.current) || typeof k.upstream !== "string" || !COMMIT.test(k.upstream)) {
+      continue;
+    }
+    const reason = cleanText(k.reason, 200);
+    out.push({
+      id: c.id,
+      title: cleanText(c.title, 120) || c.id,
+      current: k.current,
+      upstream: k.upstream,
+      update: k.update === true,
+      staged: typeof k.staged === "string" && STAGED.has(k.staged) ? (k.staged as StagedState) : "none",
+      ...(reason ? { reason } : {}),
+      running: k.running === true,
+    });
+  }
+  return out;
+}
+
+/**
+ * `--setup limits`: WSL's memory limit (`memory=` under [wsl2] in %UserProfile%\.wslconfig, every
+ * distro's) and Russet's disk limit, the most the backend's disk may grow to before updates stop.
+ */
+export interface WslLimits {
+  machineMemoryBytes: number;
+  /** Absent: unset, so WSL takes its default (half the machine's memory). */
+  memoryGB?: number;
+  /** What the running WSL has; absent while Russet's backend is stopped. */
+  wslMemoryBytes?: number;
+  /** The running WSL has another amount than the file asks for. */
+  restartNeeded: boolean;
+  diskGB: number;
+  diskBytes?: number;
+  diskUsedBytes?: number;
+  freeBytes?: number;
+}
+
+export function parseLimits(line: string): WslLimits {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new SetupProtocolError("The setup runner printed limits that are not JSON.");
+  }
+  const v = value as Record<string, unknown> | null;
+  const count = (x: unknown): number | undefined => (typeof x === "number" && Number.isSafeInteger(x) && x >= 0 ? x : undefined);
+  const machine = count(v?.machineMemoryBytes);
+  const disk = count(v?.diskGB);
+  if (!v || v.version !== 1 || machine === undefined || disk === undefined) {
+    throw new SetupProtocolError("The setup runner's limits are not version 1.");
+  }
+  const optional = (key: string): Partial<WslLimits> => (count(v[key]) === undefined ? {} : { [key]: count(v[key]) });
+  return {
+    machineMemoryBytes: machine,
+    ...optional("memoryGB"),
+    ...optional("wslMemoryBytes"),
+    restartNeeded: v.restartNeeded === true,
+    diskGB: disk,
+    ...optional("diskBytes"),
+    ...optional("diskUsedBytes"),
+    ...optional("freeBytes"),
+  };
+}
+
 /**
  * Parse one NDJSON line of `--setup run`. Blank lines return undefined; a line for
  * another step or with an unknown event is a protocol error.
@@ -132,7 +238,10 @@ export function parseRunEvent(line: string, expectedStep: string): SetupRunEvent
     case "log":
       return { step: expectedStep, event: "log", message: cleanText(e.message, 2000) };
     case "done":
-      return { step: expectedStep, event: "done" };
+      // A step's result (virtual-iphone-debug: the debug session's sockets), when it has one.
+      return e.result && typeof e.result === "object" && !Array.isArray(e.result)
+        ? { step: expectedStep, event: "done", result: e.result as Record<string, unknown> }
+        : { step: expectedStep, event: "done" };
     case "failed": {
       const code = typeof e.code === "string" && /^setup\.[a-z0-9.-]{1,80}$/.test(e.code)
         ? e.code
