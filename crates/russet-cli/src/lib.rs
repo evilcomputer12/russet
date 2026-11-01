@@ -265,6 +265,10 @@ pub fn run_args(args: Vec<OsString>) -> ExitCode {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(std::thread::available_parallelism().map_or(2, |n| n.get().min(4)))
             .thread_name("russetd-worker")
+            // Device sessions nest deep futures (idevice's tunnels and services); an unoptimized
+            // build overflowed the default 2 MiB with the display session's handshake, and a stack
+            // overflow aborts the whole daemon. The stack is reserved address space, not memory.
+            .thread_stack_size(16 * 1024 * 1024)
             .enable_all()
             .build()
     } else {

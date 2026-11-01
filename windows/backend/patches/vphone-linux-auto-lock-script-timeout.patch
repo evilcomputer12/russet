@@ -1,0 +1,28 @@
+diff --git a/tools/auto-lock-never.py b/tools/auto-lock-never.py
+index e0bc542..1385b54 100755
+--- a/tools/auto-lock-never.py
++++ b/tools/auto-lock-never.py
+@@ -51,10 +51,10 @@ def response(s):
+     return body if length is None else body[:length]
+ 
+ 
+-def rpc(method, timeout=120, **params):
++def rpc(method, wait=120, **params):
+     body = json.dumps({"method": method, "params": params, "id": 1}).encode()
+     s = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
+-    s.settimeout(timeout)
++    s.settimeout(wait)
+     s.connect((cid, 1339))
+     s.sendall(b"POST /v1/rpc HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n"
+               b"Connection: close\r\nContent-Length: %d\r\n\r\n" % len(body) + body)
+@@ -65,7 +65,9 @@ def rpc(method, timeout=120, **params):
+ 
+ 
+ def set_never():
+-    r = rpc("script.eval", source=SCRIPT, timeout=60)
++    # vphoned stops a script after its `timeout` param (30 s when absent); a slow guest (WSL,
++    # lavapipe) needs longer to load ManagedConfiguration. The socket waits past the script.
++    r = rpc("script.eval", wait=210, source=SCRIPT, timeout=180)
+     if not r.get("ok"):
+         sys.exit(f"the script failed: {r.get('error')} {r.get('output', '')}")
+     return int(r["output"].strip().splitlines()[-1]) == NEVER

@@ -65,6 +65,8 @@ impl HubHooks for NoHooks {}
 
 /// A command the hub actor processes.
 enum HubCmd {
+    /// The headless handshake already established the one shared backend.
+    Bootstrapped(BootstrapState),
     /// A request from an agent client; the reply carries the response `body` (or an error).
     AgentRequest { role: ClientRole, command: String, arguments: Value, reply: oneshot::Sender<Result<Value>> },
     /// A framed message from the IDE socket client.
@@ -73,6 +75,12 @@ enum HubCmd {
     IdeAttached(mpsc::Sender<Vec<u8>>),
     /// The IDE socket closed.
     IdeGone,
+}
+
+struct BootstrapState {
+    initialize: Value,
+    attach: Value,
+    config: Value,
 }
 
 /// The hub handle (`DaemonCtx` holds one per debug session).
@@ -113,6 +121,7 @@ impl DapHub {
             pending: BTreeMap::new(),
             ide: None,
             ide_seq: 0,
+            bootstrap: None,
         };
         tokio::spawn(actor.run(backend, cmd_rx, cmd_tx.clone()));
         Self { cmd_tx, events, breakpoints }
@@ -133,8 +142,20 @@ impl DapHub {
     /// is `debug.prepare`'s `dapConfig` (with `attachCommands`/`initCommands`). Fails if the backend rejects it.
     pub async fn bootstrap_attach(&self, config: Value) -> Result<()> {
         let client = self.agent_client();
-        client.request("initialize", json!({ "adapterID": "russet", "linesStartAt1": true })).await?;
-        client.request("attach", config).await?;
+        let initialize = client
+            .request(
+                "initialize",
+                json!({
+                    "adapterID": "russet", "clientID": "russet-headless", "pathFormat": "path",
+                    "linesStartAt1": true, "columnsStartAt1": true,
+                }),
+            )
+            .await?;
+        let attach = client.request("attach", config.clone()).await?;
+        self.cmd_tx
+            .send(HubCmd::Bootstrapped(BootstrapState { initialize, attach, config }))
+            .await
+            .map_err(|_| Error::new(codes::debug::BROKER_LOST, "the DAP backend is gone"))?;
         Ok(())
     }
 
@@ -207,6 +228,7 @@ struct HubActor {
     pending: BTreeMap<u64, Pending>,
     ide: Option<mpsc::Sender<Vec<u8>>>,
     ide_seq: u64,
+    bootstrap: Option<BootstrapState>,
 }
 
 impl HubActor {
@@ -238,6 +260,7 @@ impl HubActor {
 
     async fn on_client<W: AsyncWrite + Unpin>(&mut self, cmd: HubCmd, backend: &mut W) {
         match cmd {
+            HubCmd::Bootstrapped(state) => self.bootstrap = Some(state),
             HubCmd::AgentRequest { role, command, arguments, reply } => {
                 self.handle_request(role, command, arguments, Caller::Agent(reply), 0, backend).await;
             }
@@ -274,6 +297,31 @@ impl HubActor {
         ide_seq: u64,
         backend: &mut W,
     ) {
+        // An IDE joining an agent-prepared session must share its established
+        // backend. LLDB accepts one initialize/attach handshake per process.
+        if role == ClientRole::Ide
+            && let Some(state) = &self.bootstrap
+        {
+            if command == "initialize" {
+                caller.respond(&command, ide_seq, Ok(state.initialize.clone()), &self.ide).await;
+                return;
+            }
+            if command == "attach" {
+                let matches = arguments.get("attachCommands") == state.config.get("attachCommands")
+                    && arguments.get("initCommands") == state.config.get("initCommands");
+                if !matches {
+                    let error = Error::new(
+                        codes::core::INVALID_ARGUMENT,
+                        "IDE attach configuration differs from the prepared session",
+                    );
+                    caller.respond(&command, ide_seq, Err(error), &self.ide).await;
+                    return;
+                }
+                caller.respond(&command, ide_seq, Ok(state.attach.clone()), &self.ide).await;
+                self.send_to_ide(json!({"type":"event", "event":"initialized"})).await;
+                return;
+            }
+        }
         // Only the IDE may end the session.
         if matches!(command.as_str(), "disconnect" | "terminate") && role != ClientRole::Ide {
             let e = Error::new(codes::core::INVALID_ARGUMENT, "only the IDE may disconnect or terminate the session")

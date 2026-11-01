@@ -1246,14 +1246,16 @@ These shapes are binding for every producer (device, run/debug) and consumer (CL
   - `{"t":"auth","token":"…"}` within 2 s, else close code 4401;
   - `Origin` must be `vscode-webview://…` or absent (CLI and test clients).
 - **Server → client, text:**
-  - `config {codec, description (base64 hvcC|avcC), codedWidth, codedHeight, rotation, fpsHint, format:"length-prefixed"}`; a keyframe always follows a `config`;
+  - `config {codec, codedWidth, codedHeight, width, height, rotation, fpsHint, format:"annexb", input}`; a keyframe always follows a `config`. `codec` is the RFC 6381 string from the keyframe's SPS (`hvc1.…`); `width`/`height` are the screen after the SPS's conformance window; `input` says whether the stream accepts input. Access units are Annex-B with the parameter sets before every keyframe, so WebCodecs decodes them without a `description`. (Superseded 2026-11-01: `description` (base64 hvcC|avcC) with `format:"length-prefixed"`; the depacketizer emits Annex-B and a viewer that joins at a keyframe needs nothing else.)
   - `orientation`, `stats` (1 Hz), `pong`;
   - `end {code: E_MEDIA_IN_USE | E_DEVICE_GONE | E_STREAM_FAILED}`.
 - **Server → client, binary:** a 16-byte header `u8 version=1 | u8 kind (1 = access unit, 2 = JPEG) | u8 flags (bit0 key, bit1 discontinuity) | u8 0 | u32 seq LE | u64 ptsMicros LE`, then the payload.
-- **Client → server:** `keyframe`, `touch {phase, x, y}` (0..65535, native portrait), `button`, `key`, `text`, `pause`/`resume`, `ping`.
+- **Client → server:** `keyframe`, `touch {phase: down|move|up, x, y}` (0..65535, native portrait), `button {button: home|lock|volume-up|volume-down|mute|siri, action?: press|down|up}`, `key {usage, down}` (HID keyboard page), `text {text}`, `pause`/`resume`, `ping`.
   - Input messages are accepted only on streams started with `input: true` by a connection allowed class `device`.
   - Input shares the device's single display session [V device §2.3 F4].
-- **Device side:** CoreDevice `displayservice` RTP/HEVC. The daemon depacketizes (RFC 7798, RFC 6184) and requests an IDR on join (PLI). Backpressure: above 2 MB buffered, drop non-key units and request an IDR.
+  - `keyframe` is accepted and not yet acted on; after `resume` the server skips to the next keyframe.
+- **Streams.** One viewer per stream: a second connection with the same stream closes with 4404, a missing or wrong token with 4401. The display session ends when the viewer leaves, on `screen.mirror.stop`, or 30 s after `screen.mirror.start` when no viewer connected.
+- **Device side:** CoreDevice `displayservice` RTP/HEVC. `screen.mirror.start` answers once the first keyframe arrived (10 s limit, `screen.streamFailed`). The daemon depacketizes (RFC 7798) and answers the encoder as Device Hub does: a frame acknowledgement per access unit, an RCTL report every 50 ms and a receiver report with SDES every second. Backpressure: at most 4 access units wait per stream; past that the daemon drops non-key units until a keyframe and requests one (PLI and FIR, at most every 500 ms).
 - **Codec fallback:** HEVC (hardware decode only in Electron [V IDE V10]) → AVC (software decode available) → MJPEG through the user's own `ffmpeg` (never shipped) → screenshot polling.
 - **CLI:** `russet mirror --stdout` and `--record f.h265` use the same WebSocket and rewrite length-prefixed NAL units to Annex-B.
 

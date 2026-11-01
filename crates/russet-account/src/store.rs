@@ -152,6 +152,15 @@ struct AccountEntry {
     secret: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     imported_from: Option<String>,
+    /// `paid` or `free` (Apple ID accounts, W22).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    team_tier: Option<String>,
+    /// The Apple ID (Apple ID accounts, W22; never logged or sent to clients).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    apple_id: Option<String>,
+    /// `"local"` or `{ remote = "https://…" }` (Apple ID accounts, W22).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    anisette: Option<crate::free::AnisetteSetting>,
 }
 
 /// The rate limiters of the App Store Connect keys, by key ID: every client of a key shares one, so the hourly
@@ -303,6 +312,9 @@ impl AccountStore {
             team_id: team,
             secret: format!("secret:asc-key/{}", r.key_id),
             imported_from: None,
+            team_tier: None,
+            apple_id: None,
+            anisette: None,
         };
         let id = AccountId(entry.id.clone());
         self.upsert(entry)?;
@@ -346,6 +358,9 @@ impl AccountStore {
                 team_id: team.clone(),
                 secret: format!("secret:asc-key/{}", k.key_id),
                 imported_from: Some("xtool".into()),
+                team_tier: None,
+                apple_id: None,
+                anisette: None,
             };
             if dry_run {
                 accounts.push(self.to_account(&entry));
@@ -402,8 +417,45 @@ impl AccountStore {
         Ok(XtoolImport { dry_run, accounts, identities, warnings })
     }
 
-    /// The developer portal of an account's team (GET-only in Wave 1).
+    /// Adds or refreshes an Apple ID account (W22, `account.appleId.*`); its session is already sealed.
+    pub fn upsert_apple_id(&mut self, a: &crate::free::AppleIdEntry) -> Result<Account> {
+        let id = a.account_id();
+        self.upsert(AccountEntry {
+            id: id.0.clone(),
+            kind: AccountKind::AppleId,
+            label: a.label.clone(),
+            key_id: None,
+            issuer_id: None,
+            team_id: a.team_id.clone(),
+            secret: a.secret_id().reference(),
+            imported_from: None,
+            team_tier: a.team_tier.clone(),
+            apple_id: Some(a.apple_id.clone()),
+            anisette: Some(a.anisette.clone()),
+        })?;
+        self.get(&id)
+    }
+
+    /// The Apple ID fields of account `id`, if it is an Apple ID account (W22).
+    pub fn apple_id_entry(&self, id: &AccountId) -> Option<crate::free::AppleIdEntry> {
+        let e = self.file.accounts.iter().find(|e| e.id == id.0 && e.kind == AccountKind::AppleId)?;
+        Some(crate::free::AppleIdEntry {
+            dsid: e.id.strip_prefix("appleid:")?.to_owned(),
+            apple_id: e.apple_id.clone().unwrap_or_default(),
+            label: e.label.clone(),
+            team_id: e.team_id.clone(),
+            team_tier: e.team_tier.clone(),
+            anisette: e.anisette.clone().unwrap_or_default(),
+        })
+    }
+
+    /// The developer portal of an account's team (GET-only in Wave 1). Apple ID accounts reach developerservices2
+    /// through the daemon's Apple ID service (W22).
     pub async fn portal(&self, id: &AccountId, team: Option<&str>) -> Result<Arc<dyn DevPortal>> {
+        if let Some(entry) = self.apple_id_entry(id) {
+            let config = self.path.parent().unwrap_or_else(|| Path::new("."));
+            return crate::free::portal_for(config, &entry, team).await;
+        }
         let account = self.get(id)?;
         let key = self.asc_key(&account).await?;
         let team_id = team.map(str::to_owned).or_else(|| account.team_id.clone()).ok_or_else(|| {
@@ -456,6 +508,12 @@ impl AccountStore {
         self.save()?;
         if wipe_secrets && let Some(key_id) = &entry.key_id {
             let secret = SecretId { kind: SecretKind::AscKey, name: key_id.clone() };
+            self.secrets.delete(&secret).await?;
+        }
+        if wipe_secrets
+            && entry.kind == AccountKind::AppleId
+            && let Some(secret) = self.to_account(&entry).secret_id()
+        {
             self.secrets.delete(&secret).await?;
         }
         Ok(())

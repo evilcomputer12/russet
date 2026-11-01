@@ -1,0 +1,5 @@
+# Files the Linux backend runs or applies keep LF on every checkout.
+*.sh text eol=lf
+*.py text eol=lf
+*.patch text eol=lf
+*.mjs text eol=lf

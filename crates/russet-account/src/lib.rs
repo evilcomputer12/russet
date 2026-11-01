@@ -25,6 +25,7 @@ use russet_core::time::Clock;
 use russet_secrets::SecretStore;
 use russet_sign::Distribution;
 
+mod csr;
 mod doctor;
 pub mod free;
 mod fsutil;
@@ -148,6 +149,8 @@ impl AccountService {
         xtool_dir: Option<PathBuf>,
     ) -> Result<Self> {
         let mut store = AccountStore::load(dirs, secrets.clone())?.with_asc_base(endpoints.asc.clone());
+        // Apple ID accounts reach developerservices2 through the home's Apple ID service (W22).
+        free::AppleIds::shared(dirs, secrets.clone(), endpoints.clone());
         if let Some(d) = xtool_dir {
             store = store.with_xtool_dir(d);
         }

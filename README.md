@@ -1,10 +1,43 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/design/brand/russet-icon-dark.svg">
+    <img src="docs/design/brand/russet-icon-light.svg" width="128" alt="Russet: a crab apple with a claw for a leaf">
+  </picture>
+</p>
+
 # Russet
 
 Build, run, debug and ship iOS apps from **Linux and Windows**, with a real iPhone
 plugged in, and **no Mac**.
 
-> Status: private, pre-alpha. The repository goes public once milestone M1 works
-> (a SwiftUI app built on Linux, installed on an iPhone and stopped at a breakpoint).
+> Status: pre-alpha, developed in the open. If Russet is useful to you, star the repository and
+> open an issue with what you tried: that steers what comes next.
+
+## Russet on Windows today
+
+A SwiftUI app built on Windows, installed on a **virtual iPhone** that runs inside the editor,
+stopped at a breakpoint, with variables, step and continue:
+
+![Debugging a SwiftUI app on the virtual iPhone, stopped at a breakpoint](docs/screenshots/virtual-iphone-debugging.png)
+
+| Xcode-style themes, light and dark | Built `Info.plist` opened as XML |
+| --- | --- |
+| ![Russet Studio Dark](docs/screenshots/xcode-style-dark.png) | ![A binary property list shown as XML](docs/screenshots/binary-plist-as-xml.png) |
+| ![Russet Studio Light](docs/screenshots/xcode-style-light.png) | ![Choosing AI assistants to install](docs/screenshots/ai-assistants.png) |
+
+- **Virtual iPhone** (vphone-linux in WSL): its screen, touch and hardware buttons in an editor
+  tab; Run installs and launches the app; Debug attaches LLDB through the phone's own debugserver.
+- **Real iPhone** over USB through Apple Devices: build, install, run, live mirror, debugging.
+- **Apple files**: property lists (binary ones open as XML and save back as binary),
+  `.strings`, `.xcconfig`, `.pbxproj`, `.modulemap`, entitlements, provisioning profiles,
+  storyboards, `.xcstrings`, Metal shaders.
+- **AI**: install Claude Code, Codex, Gemini Code Assist, Continue (tab completion with any
+  model) or Cline, and give them Russet's MCP tools, plus a read-only `russet-ide` server an
+  agent can use to diagnose the IDE itself.
+- **Self-maintaining**: the virtual iPhone engine follows upstream automatically (built beside
+  the one in use, with rollback); WSL's memory and disk limits are set from the IDE.
+- Not yet: Flutter on iOS (the SDK and its iOS engine files install; building waits on the Flutter
+  card), and a one-click installer.
 
 ## What Russet is
 
@@ -24,8 +57,9 @@ plugged in, and **no Mac**.
   take screenshots and tap the screen. Supported agents: Claude Code, Codex, Gemini CLI,
   Copilot, Cline, Continue and local models.
 
-Russet builds on open-source work: xtool, idevice, apple-codesign, LLVM/LLDB,
-Swift, Flutter and others. See [docs/research](docs/research/).
+Russet builds on open-source work: vphone-linux, vphone-cli, reims-vgpu, metal2vulkan, idevice,
+xtool, apple-codesign, Code-OSS, LLVM/LLDB, Swift, Flutter and others. [CREDITS.md](CREDITS.md) names
+the projects and the people and teams behind them.
 
 ## Apple software
 

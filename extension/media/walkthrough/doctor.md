@@ -1,5 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
-# doctor
+# Check your setup
 
-This step is part of the Russet setup walkthrough. See the Russet documentation for details.
+Run **Check Setup** to review your toolchain and device readiness, then open an
+existing project or create an app from the Project panel.
+
+This Windows development build tests the editor and managed backend connection.
+Physical iPhone installation and debugging, and the embedded virtual iPhone,
+are still being integrated. Both targets are required for the usable release.

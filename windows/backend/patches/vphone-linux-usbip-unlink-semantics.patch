@@ -1,0 +1,63 @@
+diff --git a/tools/vusb-usbip.py b/tools/vusb-usbip.py
+index 17f492d..a27dc88 100755
+--- a/tools/vusb-usbip.py
++++ b/tools/vusb-usbip.py
+@@ -279,6 +279,10 @@ class USBIPBridge:
+         self.urb_locks = collections.defaultdict(asyncio.Lock)
+         self.pending = {}
+         self.clients = set()
++        # Unlink bookkeeping, as Linux's usbip-host: a URB cancelled by CMD_UNLINK is answered by
++        # RET_UNLINK alone, and one whose RET_SUBMIT is being written counts as completed.
++        self.unlinked = set()
++        self.replying = set()
+ 
+     def interface_records(self):
+         return b"".join(bytes((i[0], i[1], i[2], 0)) for i in self.interfaces)
+@@ -470,9 +474,17 @@ class USBIPBridge:
+         except Exception as e:
+             log(f"USB/IP URB {seqnum} failed: {e}")
+             status = -errno.EIO
+-        await self._send_submit_reply(writer, seqnum, devid, direction, ep,
+-                                      status, data, actual if status == 0 else 0,
+-                                      start_frame, packets)
++        # An unlinked URB was already answered by RET_UNLINK: a RET_SUBMIT now names a URB
++        # vhci has given back, which it treats as a protocol error and drops the device.
++        if seqnum in self.unlinked:
++            return
++        self.replying.add(seqnum)
++        try:
++            await self._send_submit_reply(writer, seqnum, devid, direction, ep,
++                                          status, data, actual if status == 0 else 0,
++                                          start_frame, packets)
++        finally:
++            self.replying.discard(seqnum)
+ 
+     @staticmethod
+     def _log_mux(seqnum, tag, data):
+@@ -501,11 +513,16 @@ class USBIPBridge:
+         seqnum, devid, direction, ep, target = struct.unpack("!IIIII", rest)
+         pending = self.pending.get(target)
+         task = pending[0] if pending else None
+-        status = 0 if task and not task.done() else -errno.ENOENT
++        # In flight: cancel it and answer -ECONNRESET here, with no RET_SUBMIT to follow.
++        # Already completed (or its RET_SUBMIT is on its way): answer 0, vhci keeps that result.
++        cancel = task is not None and not task.done() and target not in self.replying
++        if cancel:
++            self.unlinked.add(target)
++        status = -errno.ECONNRESET if cancel else 0
+         # Pad to the fixed 48-byte header, or the client reads into the next message.
+         await self.write(writer, struct.pack("!IIIIIi24x", RET_UNLINK, seqnum,
+                                             devid, direction, ep, status))
+-        if status == 0:
++        if cancel:
+             _, target_ep, target_direction = pending
+             await self.usb.abort(target_ep, target_direction == 1)
+             task.cancel()
+@@ -538,6 +555,7 @@ class USBIPBridge:
+ 
+     def _submit_done(self, task, seqnum, tasks):
+         tasks.discard(task)
++        self.unlinked.discard(seqnum)
+         pending = self.pending.get(seqnum)
+         if pending and pending[0] is task:
+             self.pending.pop(seqnum, None)

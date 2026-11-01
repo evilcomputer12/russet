@@ -2,13 +2,21 @@
 // SPDX-FileCopyrightText: 2026 Russet contributors
 //
 // The Devices view (ide.md §5.6, EXT-03): each device with its state icon and a
-// USB/Wi-Fi badge; children open the console, mirror and crash reports.
+// USB/Wi-Fi badge; children open the console, mirror and crash reports. The
+// setup-created virtual iPhone follows the iPhones, running or not, with its tab
+// and Start or Stop.
 
 import * as vscode from "vscode";
 import type { Store } from "../state/store";
 import type { DeviceSummary, DeviceState } from "../generated/protocol";
+import type { DestinationModel, RunDestination } from "../panels/destinations";
 
-type Node = DeviceNode | ActionNode;
+type Node = DeviceNode | ActionNode | VirtualNode;
+
+interface VirtualNode {
+  kind: "virtual";
+  destination: RunDestination;
+}
 
 interface DeviceNode {
   kind: "device";
@@ -35,11 +43,30 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<Node> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
+  private destinations?: DestinationModel;
+
   constructor(private readonly store: Store) {
     store.onDidChange(() => this._onDidChangeTreeData.fire());
   }
 
+  /** Lists the setup-created virtual iPhone too (the run destinations know it). */
+  useDestinations(destinations: DestinationModel): vscode.Disposable {
+    this.destinations = destinations;
+    this._onDidChangeTreeData.fire();
+    return destinations.onDidChange(() => this._onDidChangeTreeData.fire());
+  }
+
   getTreeItem(node: Node): vscode.TreeItem {
+    if (node.kind === "virtual") {
+      const d = node.destination;
+      const running = d.stateLabel === "Running";
+      const item = new vscode.TreeItem(d.name, vscode.TreeItemCollapsibleState.Expanded);
+      item.description = `${d.productType ?? ""} · iOS ${d.osVersion ?? "?"} · Virtual · ${d.stateLabel}`;
+      item.iconPath = new vscode.ThemeIcon("vm", running ? new vscode.ThemeColor("testing.iconPassed") : undefined);
+      item.contextValue = running ? "russet.virtualRunning" : "russet.virtualStopped";
+      item.command = { command: "russet.openVirtualIphone", title: "Open Virtual iPhone" };
+      return item;
+    }
     if (node.kind === "action") {
       const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
       item.iconPath = new vscode.ThemeIcon(node.icon);
@@ -70,7 +97,20 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<Node> {
 
   getChildren(node?: Node): Node[] {
     if (!node) {
-      return this.store.state.devices.map((device) => ({ kind: "device", device }));
+      const virtual: Node[] = (this.destinations?.all ?? [])
+        .filter((d) => d.kind === "virtual" && d.id.startsWith("virtual:"))
+        .map((destination) => ({ kind: "virtual", destination }));
+      return [...this.store.state.devices.map((device): Node => ({ kind: "device", device })), ...virtual];
+    }
+    if (node.kind === "virtual") {
+      const running = node.destination.stateLabel === "Running";
+      const udid = node.destination.id;
+      return [
+        { kind: "action", udid, label: "Open Virtual iPhone", icon: "device-mobile", command: "russet.openVirtualIphone" },
+        running
+          ? { kind: "action", udid, label: "Stop", icon: "debug-stop", command: "russet.virtual.stop" }
+          : { kind: "action", udid, label: "Start", icon: "play", command: "russet.virtual.start" },
+      ];
     }
     if (node.kind === "device") {
       const udid = node.device.udid;

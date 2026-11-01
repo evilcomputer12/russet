@@ -45,13 +45,20 @@ itms = "itms"
 stik = "stik"
 # TCP retransmission timeout (jktcp's adapter: MSS, RTO).
 rto = "rto"
+# ELF relocation sections with addends (SHT_RELA, DT_RELA, Android's DT_ANDROID_RELA): the ADI host's loader.
+rela = "rela"
 
 [default.extend-identifiers]
 # Apple Neural Engine; Arm's Scalable Matrix Extension (macOS-on-x86 research notes).
 ANE = "ANE"
 SME = "SME"
-# The GrandSlam SRP password-derivation protocols `s2k` and `s2k_fo`.
+# The GrandSlam SRP password-derivation protocols `s2k` and `s2k_fo`, and the test comparing them.
 s2k_fo = "s2k_fo"
+s2k_and_s2k_fo_differ_and_an_unsafe_b_is_refused = "s2k_and_s2k_fo_differ_and_an_unsafe_b_is_refused"
+# Anisette one-time passwords, plural.
+OTPs = "OTPs"
+# H.265's unsigned Exp-Golomb code, ue(v): the HEVC parameter-set reader's `ue()` (russet-device screen.rs).
+ue = "ue"
 # The flate2 crate.
 flate2 = "flate2"
 # PNG images, plural.

@@ -1,0 +1,180 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 Russet contributors
+#
+# Russet's Windows installer: the Linux engine (the backend's daemon) built on Linux, then on
+# Windows the editor (VSCodium, pinned) branded as Russet with the extension inside, the
+# self-contained launcher and host, and the backend payload, packed by Inno Setup
+# (windows/scripts/build-release.ps1, windows/installer/russet.iss). Pull requests that touch
+# these build it as an artifact; a `windows-v<version>` tag publishes it as a release, which
+# installed copies of Russet find and update to (extension/src/setup/selfUpdate.ts).
+name: windows-release
+
+on:
+  pull_request:
+    paths:
+      - "windows/**"
+      - "extension/**"
+      - "crates/**"
+      - "Cargo.lock"
+      - "docs/design/brand/**"
+      - ".github/workflows/windows-release.yml"
+  push:
+    tags: ["windows-v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTUP_TOOLCHAIN: "1.99.0"
+
+jobs:
+  engine:
+    name: engine (linux x64, release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift
+          df -h /
+      - name: Install the Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - name: Build the engine
+        run: |
+          cargo build --release --locked -p russet-cli -p russet-adi-host
+          mkdir -p engine
+          cp target/release/russet target/release/russet-adi-host engine/
+          ./engine/russet --version
+      - uses: ./.github/actions/upload-safe
+        with:
+          name: engine-linux-x64
+          path: engine
+          if-no-files-found: error
+
+  installer:
+    name: installer (windows x64)
+    needs: engine
+    runs-on: windows-2025
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          # No cache in a workflow that publishes releases (zizmor cache-poisoning).
+          package-manager-cache: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: engine-linux-x64
+          path: engine
+      - name: Version
+        id: version
+        run: |
+          # A windows-v<version> tag names the release; other builds take the extension's version.
+          $version = if ($env:GITHUB_REF -like 'refs/tags/windows-v*') { $env:GITHUB_REF.Substring('refs/tags/windows-v'.Length) }
+                     else { (Get-Content extension/package.json -Raw | ConvertFrom-Json).version }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Not a release version: $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Build the extension
+        working-directory: extension
+        run: |
+          npm ci --no-audit --no-fund
+          New-Item -ItemType Directory -Force ../out | Out-Null
+          npx vsce package --no-dependencies --skip-license -o ../out/russet.vsix
+      - name: Publish the launcher and host (self-contained)
+        run: |
+          dotnet publish windows/src/Russet.Host -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o out/host
+          dotnet publish windows/src/Russet.Launcher -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o out/launcher
+      - name: Fetch the pinned editor and rcedit
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest https://github.com/VSCodium/vscodium/releases/download/1.143.17232/VSCodium-win32-x64-1.143.17232.zip -OutFile out/editor.zip
+          Invoke-WebRequest https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe -OutFile out/rcedit-x64.exe
+          if ((Get-FileHash out/rcedit-x64.exe -Algorithm SHA256).Hash -ne '3E7801DB1A5EDBEC91B49A24A094AAD776CB4515488EA5A4CA2289C400EADE2A') { throw 'rcedit does not match its pinned checksum.' }
+      - name: Install Inno Setup
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          if (-not (Test-Path $iscc)) { throw 'Inno Setup is not installed.' }
+      - name: Fingerprint each part's source
+        run: |
+          # Git trees of each part's source: a patch update downloads only the parts whose source
+          # changed (extension/src/setup/selfUpdate.ts, windows/src/Russet.Host/Update.cs).
+          function Tree([string]$path) { (git rev-parse "HEAD:$path").Trim() }
+          function Mix([string[]]$items) {
+            $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($items -join ' '))
+            ($digest | ForEach-Object { $_.ToString('x2') }) -join ''
+          }
+          $windowsSource = Tree 'windows/src'
+          [ordered]@{
+            extension = Tree 'extension'
+            host = $windowsSource
+            launcher = $windowsSource
+            backend = Mix @((Tree 'crates'), (Tree 'Cargo.lock'), (Tree 'windows/backend'))
+            editor = Mix @('1.143.17232', (Tree 'docs/design/brand'), (Tree 'windows/scripts'), (Tree 'windows/installer'))
+          } | ConvertTo-Json | Set-Content out/fingerprints.json
+          Get-Content out/fingerprints.json
+      - name: Build the installer and the patch packages
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          windows/scripts/build-release.ps1 -Version $env:VERSION -EditorZip out/editor.zip -ExtensionVsix out/russet.vsix `
+            -HostPublish out/host -LauncherPublish out/launcher -Engine engine -Brand docs/design/brand `
+            -Out out/release -Rcedit out/rcedit-x64.exe -Iscc 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            -Fingerprints out/fingerprints.json
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Move-Item "out/release/RussetSetup-$env:VERSION.exe", "out/release/RussetSetup-$env:VERSION.exe.sha256", "out/release/update.json" dist/
+          Move-Item "out/release/russet-*-$env:VERSION.zip" dist/
+          Get-ChildItem dist | Format-Table Name, Length
+      - name: Install the Rust toolchain (the upload guard)
+        run: rustup toolchain install "$env:RUSTUP_TOOLCHAIN" --profile minimal
+      - uses: ./.github/actions/upload-safe
+        with:
+          name: russet-windows-installer
+          path: dist
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    if: startsWith(github.ref, 'refs/tags/windows-v')
+    needs: installer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: russet-windows-installer
+          path: dist
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          version="${TAG#windows-v}"
+          gh release create "$TAG" dist/* --repo "$REPO" --title "Russet $version for Windows" --notes \
+            "Download RussetSetup-$version.exe and run it (no administrator rights needed). On first start Russet's setup page installs WSL, Ubuntu and Russet's engine. Installed copies update themselves from here."

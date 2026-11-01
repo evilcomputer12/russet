@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "about": "SHA-256 of Apple's ADI libraries inside the Apple Music APK, by x-apple-version-number and ABI (SIGN 7.5). Hashes only: the libraries are fetched from Apple's CDN at runtime after consent and never redistributed. A version missing here is trusted on first use and recorded locally; a Russet release adds it. 4.9.6.1447/x86_64 was recorded by W22 on 2026-10-31 (provenance in docs/windows/W22-STATUS.md).",
+  "versions": {
+    "4.9.6.1447": {
+      "x86_64": {
+        "libCoreADI.so": "ece4ffa6bbe4239e8f0d4714da57e62ce5e3c581d19553a83d78ac897783b905",
+        "libstoreservicescore.so": "d8be230df34c0044758d43e33a8dabd3236b9a4258c4d48cb366911224d52f68"
+      }
+    }
+  }
+}

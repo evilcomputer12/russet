@@ -5,6 +5,7 @@
   "description": "Build, run and debug iOS apps on your iPhone from Linux and Windows, with the virtual iPhone embedded.",
   "version": "0.6.0",
   "license": "AGPL-3.0-only",
+  "icon": "media/russet-icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/evilcomputer12/russet"
@@ -17,7 +18,8 @@
     "Debuggers",
     "Programming Languages",
     "Testing",
-    "Other"
+    "Other",
+    "Themes"
   ],
   "extensionKind": [
     "workspace"
@@ -40,9 +42,57 @@
     "workspaceContains:**/russet.toml",
     "onDebugResolve:russet",
     "onWebviewPanel:russet.mirror",
-    "onWebviewPanel:russet.console"
+    "onWebviewPanel:russet.console",
+    "onWebviewPanel:russet.setup",
+    "onWebviewPanel:russet.virtualIphone",
+    "onLanguage:plist",
+    "onFileSystem:russet-plist",
+    "onFileSystem:russet-profile"
   ],
   "contributes": {
+    "configurationDefaults": {
+      "window.autoDetectColorScheme": true,
+      "workbench.colorTheme": "Russet Studio Dark (Xcode-style)",
+      "workbench.preferredDarkColorTheme": "Russet Studio Dark (Xcode-style)",
+      "workbench.preferredLightColorTheme": "Russet Studio Light (Xcode-style)",
+      "editor.fontFamily": "'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Courier New', monospace",
+      "window.menuBarVisibility": "compact",
+      "window.commandCenter": true,
+      "workbench.layoutControl.enabled": false,
+      "workbench.activity.showAccounts": false,
+      "workbench.tips.enabled": false,
+      "workbench.startupEditor": "none",
+      "workbench.editor.empty.hint": "hidden",
+      "workbench.secondarySideBar.defaultVisibility": "hidden",
+      "workbench.tree.indent": 12,
+      "editor.minimap.enabled": false,
+      "editor.stickyScroll.enabled": false,
+      "editor.renderLineHighlight": "all",
+      "extensions.ignoreRecommendations": true,
+      "telemetry.telemetryLevel": "off"
+    },
+    "themes": [
+      {
+        "label": "Russet Studio Dark (Xcode-style)",
+        "uiTheme": "vs-dark",
+        "path": "./themes/russet-studio-dark-color-theme.json"
+      },
+      {
+        "label": "Russet Studio Light (Xcode-style)",
+        "uiTheme": "vs",
+        "path": "./themes/russet-studio-light-color-theme.json"
+      },
+      {
+        "label": "Russet Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/russet-dark-color-theme.json"
+      },
+      {
+        "label": "Russet Light",
+        "uiTheme": "vs",
+        "path": "./themes/russet-light-color-theme.json"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -198,6 +248,16 @@
         "category": "Russet"
       },
       {
+        "command": "russet.setup.openWalkthrough",
+        "title": "Open Getting Started Walkthrough",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.wsl.limits",
+        "title": "Change WSL Limits (Memory and Disk)…",
+        "category": "Russet"
+      },
+      {
         "command": "russet.importXcode",
         "title": "Import Xcode (.xip or Xcode.app)…",
         "category": "Russet"
@@ -264,6 +324,52 @@
         "title": "Mirror Screen",
         "category": "Russet",
         "icon": "$(device-mobile)"
+      },
+      {
+        "command": "russet.openVirtualIphone",
+        "title": "Open Virtual iPhone",
+        "category": "Russet",
+        "icon": "$(vm)"
+      },
+      {
+        "command": "russet.virtual.home",
+        "title": "Home",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(home)"
+      },
+      {
+        "command": "russet.virtual.lock",
+        "title": "Lock",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "russet.virtual.volumeUp",
+        "title": "Volume Up",
+        "category": "Russet Virtual iPhone"
+      },
+      {
+        "command": "russet.virtual.volumeDown",
+        "title": "Volume Down",
+        "category": "Russet Virtual iPhone"
+      },
+      {
+        "command": "russet.virtual.rotateLeft",
+        "title": "Rotate Left",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "russet.virtual.rotateRight",
+        "title": "Rotate Right",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(redo)"
+      },
+      {
+        "command": "russet.virtual.screenshot",
+        "title": "Take Screenshot",
+        "category": "Russet Virtual iPhone",
+        "icon": "$(device-camera)"
       },
       {
         "command": "russet.takeScreenshot",
@@ -392,6 +498,16 @@
         "command": "russet.signing.fix",
         "title": "Fix Signing",
         "category": "Russet"
+      },
+      {
+        "command": "russet.apple.openPlist",
+        "title": "Open as Property List",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.update.check",
+        "title": "Check for Russet Updates",
+        "category": "Russet"
       }
     ],
     "menus": {
@@ -427,6 +543,38 @@
         {
           "command": "russet.stop",
           "when": "russet.isRunning"
+        },
+        {
+          "command": "russet.virtual.home",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.lock",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.volumeUp",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.volumeDown",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.rotateLeft",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.rotateRight",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.virtual.screenshot",
+          "when": "russet.virtualIphoneOpen"
+        },
+        {
+          "command": "russet.apple.openPlist",
+          "when": "false"
         }
       ],
       "editor/title/run": [
@@ -444,6 +592,11 @@
           "command": "russet.hotReload",
           "group": "russet@3",
           "when": "russet.canHotReload"
+        },
+        {
+          "command": "russet.stop",
+          "group": "russet@4",
+          "when": "russet.isRunning"
         }
       ],
       "view/title": [
@@ -481,6 +634,11 @@
           "command": "russet.signing.refresh",
           "when": "view == russet.signing",
           "group": "navigation@1"
+        },
+        {
+          "command": "russet.openVirtualIphone",
+          "when": "view == russet.mirror",
+          "group": "navigation@1"
         }
       ],
       "russet/titleBar": [
@@ -489,20 +647,24 @@
           "group": "navigation@1"
         },
         {
-          "command": "russet.stop",
+          "command": "russet.debug",
           "group": "navigation@2"
         },
         {
-          "command": "russet.hotReload",
+          "command": "russet.stop",
           "group": "navigation@3"
         },
         {
-          "command": "russet.selectTarget",
+          "command": "russet.hotReload",
           "group": "navigation@4"
         },
         {
-          "command": "russet.selectDevice",
+          "command": "russet.selectTarget",
           "group": "navigation@5"
+        },
+        {
+          "command": "russet.selectDevice",
+          "group": "navigation@6"
         }
       ],
       "view/item/context": [
@@ -575,10 +737,59 @@
         {
           "command": "russet.openCapabilities",
           "when": "resourceExtname == .entitlements"
+        },
+        {
+          "command": "russet.apple.openPlist",
+          "when": "resourceExtname =~ /^\\.(plist|strings|nib|mobileprovision|provisionprofile)$/",
+          "group": "navigation@9"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "russet.virtual.home",
+          "group": "navigation@1",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.rotateLeft",
+          "group": "navigation@2",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.rotateRight",
+          "group": "navigation@3",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.screenshot",
+          "group": "navigation@4",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.lock",
+          "group": "1_hardware@1",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.volumeUp",
+          "group": "1_hardware@2",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+        },
+        {
+          "command": "russet.virtual.volumeDown",
+          "group": "1_hardware@3",
+          "when": "activeWebviewPanelId == 'russet.virtualIphone'"
         }
       ]
     },
     "debuggers": [
+      {
+        "type": "russet-virtual",
+        "label": "Russet: Virtual iPhone",
+        "languages": [
+          "swift"
+        ]
+      },
       {
         "type": "russet",
         "label": "Russet: iPhone",
@@ -661,7 +872,6 @@
             "type": "russet",
             "request": "launch",
             "name": "Run on iPhone",
-            "target": "${workspaceFolderBasename}",
             "device": "auto",
             "configuration": "Debug",
             "args": [],
@@ -746,67 +956,24 @@
         }
       }
     ],
-    "customEditors": [
-      {
-        "viewType": "russet.plist",
-        "displayName": "Property List",
-        "priority": "default",
-        "selector": [
-          {
-            "filenamePattern": "**/Info.plist"
-          }
-        ]
-      },
-      {
-        "viewType": "russet.plistGeneric",
-        "displayName": "Property List",
-        "priority": "option",
-        "selector": [
-          {
-            "filenamePattern": "*.plist"
-          }
-        ]
-      },
-      {
-        "viewType": "russet.entitlements",
-        "displayName": "Entitlements",
-        "priority": "default",
-        "selector": [
-          {
-            "filenamePattern": "*.entitlements"
-          }
-        ]
-      },
-      {
-        "viewType": "russet.assetCatalog",
-        "displayName": "Asset Catalog",
-        "priority": "default",
-        "selector": [
-          {
-            "filenamePattern": "**/*.xcassets/Contents.json"
-          }
-        ]
-      },
-      {
-        "viewType": "russet.crashReport",
-        "displayName": "Crash Report",
-        "priority": "default",
-        "selector": [
-          {
-            "filenamePattern": "*.ips"
-          },
-          {
-            "filenamePattern": "*.crash"
-          }
-        ]
-      }
-    ],
     "walkthroughs": [
       {
         "id": "russet.setup",
         "title": "Set up Russet",
         "description": "Build and run iOS apps on your iPhone without a Mac.",
         "steps": [
+          {
+            "id": "setup",
+            "title": "Set up this PC",
+            "description": "Russet installs its backend, USB support through Apple Devices, xtool and the iOS SDK for you, with progress and repair.\n[Open Setup](command:russet.openSetup)",
+            "media": {
+              "markdown": "media/walkthrough/setup.md"
+            },
+            "completionEvents": [
+              "onContext:russet.setupOk"
+            ],
+            "when": "russet.windowsSetup"
+          },
           {
             "id": "doctor",
             "title": "Check this computer",
@@ -832,7 +999,7 @@
           {
             "id": "xcode",
             "title": "Import your Xcode",
-            "description": "Download Xcode from Apple yourself, then import it. Russet never redistributes it.\n[Import Xcode…](command:russet.importXcode)",
+            "description": "Download Xcode from Apple yourself, then choose the .xip. Russet reads the iOS SDK from it and never redistributes it.\n[Choose Xcode…](command:russet.importXcode)",
             "media": {
               "markdown": "media/walkthrough/xcode.md"
             },
@@ -843,7 +1010,7 @@
           {
             "id": "account",
             "title": "Sign in",
-            "description": "Add an App Store Connect API key (recommended) or sign in with an Apple ID.\n[Add API Key…](command:russet.account.addAscKey)",
+            "description": "Sign in with your Apple ID (free or paid), or add an App Store Connect API key.\n[Sign in with Apple ID…](command:russet.account.signInAppleId)\n[Add API Key…](command:russet.account.addAscKey)",
             "media": {
               "markdown": "media/walkthrough/account.md"
             },
@@ -854,13 +1021,25 @@
           {
             "id": "device",
             "title": "Connect your iPhone",
-            "description": "Connect your iPhone with USB and tap Trust. Enable Developer Mode when prompted.\n[Run Doctor](command:russet.doctor)",
+            "description": "Connect your iPhone with USB and tap Trust. Enable Developer Mode when prompted.\n[Choose Run Destination](command:russet.selectDevice)\n[Run Doctor](command:russet.doctor)",
             "media": {
               "markdown": "media/walkthrough/device.md"
             },
             "completionEvents": [
               "onContext:russet.deviceReady"
             ]
+          },
+          {
+            "id": "virtual",
+            "title": "Create a virtual iPhone",
+            "description": "Russet builds a virtual iPhone (iPhone17,3 with iOS 27.0.1 by default) that runs, installs and debugs like a real one, in an editor tab.\n[Create Virtual iPhone](command:russet.openSetup?%5B%22virtual-iphone%22%5D)\n[Open Virtual iPhone](command:russet.openVirtualIphone)",
+            "media": {
+              "markdown": "media/walkthrough/virtual.md"
+            },
+            "completionEvents": [
+              "onContext:russet.virtualIphoneOk"
+            ],
+            "when": "russet.windowsSetup"
           },
           {
             "id": "project",
@@ -962,6 +1141,48 @@
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "when": "russet.featureAgents"
+      },
+      {
+        "command": "russet.virtual.home",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.lock",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+l",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.volumeUp",
+        "key": "ctrl+shift+up",
+        "mac": "cmd+shift+up",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.volumeDown",
+        "key": "ctrl+shift+down",
+        "mac": "cmd+shift+down",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.rotateLeft",
+        "key": "ctrl+shift+left",
+        "mac": "cmd+left",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.rotateRight",
+        "key": "ctrl+shift+right",
+        "mac": "cmd+right",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
+      },
+      {
+        "command": "russet.virtual.screenshot",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+s",
+        "when": "activeWebviewPanelId == 'russet.virtualIphone'"
       }
     ],
     "configuration": {
@@ -1059,6 +1280,37 @@
           "type": "boolean",
           "default": false
         },
+        "russet.account.appleIdSignIn": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Offer Apple ID sign-in when the Russet engine supports it.",
+            "Always show the sign-in form, even if the engine does not report its sign-in libraries (development).",
+            "Hide Apple ID sign-in; use App Store Connect API keys only."
+          ],
+          "default": "auto",
+          "description": "Native Apple ID sign-in. Russet never stores your password in settings or in the IDE."
+        },
+        "russet.project.organizationIdentifier": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "pattern": "^$|^[A-Za-z][A-Za-z0-9-]*(\\.[A-Za-z0-9-]+)+$",
+          "patternErrorMessage": "Use reverse-DNS, like com.yourname.",
+          "markdownDescription": "Your reverse-DNS prefix for new apps' bundle IDs, like `com.yourname` (Xcode calls it the organization identifier). Russet asks for it the first time it needs it and saves it here. Apple never registers `com.example`."
+        },
+        "russet.account.anisetteServer": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "pattern": "^$|^https://\\S+$",
+          "patternErrorMessage": "Use an https:// URL, or leave empty to use this PC's own identity.",
+          "markdownDescription": "The Apple device-identity (anisette) server used when you sign in with an Apple ID. Empty: this PC creates its own identity locally. An `https://` URL (for example `https://mac-ani.jkcoxson.com`): that server provides the identity instead, and **its operator sees this computer's Apple device-identity requests** — not your Apple ID password or two-factor codes. Set in user settings only; a workspace cannot change it."
+        },
         "russet.debug.adapter": {
           "type": "string",
           "enum": [
@@ -1113,7 +1365,145 @@
           "default": "vscode"
         }
       }
-    }
+    },
+    "languages": [
+      {
+        "id": "plist",
+        "aliases": [
+          "Property List",
+          "plist"
+        ],
+        "extensions": [
+          ".plist",
+          ".entitlements",
+          ".stringsdict",
+          ".xcprivacy",
+          ".mobileconfig"
+        ],
+        "firstLine": "^(<\\?xml[^>]*>\\s*)?<!DOCTYPE plist",
+        "configuration": "./language-configuration/plist.json"
+      },
+      {
+        "id": "strings",
+        "aliases": [
+          "Strings",
+          "strings"
+        ],
+        "extensions": [
+          ".strings"
+        ],
+        "configuration": "./language-configuration/c-style.json"
+      },
+      {
+        "id": "openstep-plist",
+        "aliases": [
+          "Xcode Project",
+          "OpenStep Property List"
+        ],
+        "extensions": [
+          ".pbxproj"
+        ],
+        "configuration": "./language-configuration/c-style.json"
+      },
+      {
+        "id": "xcconfig",
+        "aliases": [
+          "Xcode Build Configuration",
+          "xcconfig"
+        ],
+        "extensions": [
+          ".xcconfig"
+        ],
+        "configuration": "./language-configuration/xcconfig.json"
+      },
+      {
+        "id": "modulemap",
+        "aliases": [
+          "Module Map",
+          "modulemap"
+        ],
+        "extensions": [
+          ".modulemap"
+        ],
+        "filenames": [
+          "module.modulemap",
+          "module.private.modulemap"
+        ],
+        "configuration": "./language-configuration/c-style.json"
+      },
+      {
+        "id": "xml",
+        "extensions": [
+          ".storyboard",
+          ".xib",
+          ".xcscheme",
+          ".xcworkspacedata",
+          ".xcsettings",
+          ".gpx",
+          ".xcdatamodel",
+          ".intentdefinition"
+        ]
+      },
+      {
+        "id": "json",
+        "extensions": [
+          ".xcstrings",
+          ".xctestplan",
+          ".xcappdata",
+          ".ips",
+          ".apns"
+        ],
+        "filenames": [
+          "Package.resolved",
+          "Contents.json"
+        ]
+      },
+      {
+        "id": "cpp",
+        "extensions": [
+          ".metal"
+        ]
+      },
+      {
+        "id": "yaml",
+        "extensions": [
+          ".tbd"
+        ]
+      },
+      {
+        "id": "objective-cpp",
+        "extensions": [
+          ".mm"
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "plist",
+        "scopeName": "text.xml.plist",
+        "path": "./syntaxes/plist.tmLanguage.json"
+      },
+      {
+        "language": "strings",
+        "scopeName": "source.strings",
+        "path": "./syntaxes/strings.tmLanguage.json"
+      },
+      {
+        "language": "openstep-plist",
+        "scopeName": "source.openstep-plist",
+        "path": "./syntaxes/openstep-plist.tmLanguage.json"
+      },
+      {
+        "language": "xcconfig",
+        "scopeName": "source.xcconfig",
+        "path": "./syntaxes/xcconfig.tmLanguage.json"
+      },
+      {
+        "language": "modulemap",
+        "scopeName": "source.modulemap",
+        "path": "./syntaxes/modulemap.tmLanguage.json"
+      }
+    ]
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",

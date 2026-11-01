@@ -4,6 +4,8 @@
 //! Shared helpers of the CLI's integration tests (included with `#[path]`; on its own it has no tests): a
 //! temporary `RUSSET_HOME` per test whose daemons are stopped when it is dropped, the real `russet` binary with
 //! a lane-D environment, process checks, a mini JSON Schema validator and a fake usbmuxd.
+// Linux only, like every test that includes it (Unix sockets; the daemon runs in Linux).
+#![cfg(target_os = "linux")]
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};

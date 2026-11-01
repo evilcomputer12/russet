@@ -4,7 +4,8 @@
 //! `account.*`: accounts and the free Apple ID flow (ARCHITECTURE §8.4). Owner: W6 (Wave 1), W12 (Wave 2), W22
 //! (appleId and anisette rows, Wave 3).
 //!
-//! The Wave-2 and Wave-3 rows keep placeholder DTOs ([`Unspecified`]) until their owners define them.
+//! `account.event` keeps a placeholder DTO ([`Unspecified`]) until W12 defines it. The Apple ID and anisette rows
+//! (W22) carry passwords and two-factor codes: their `Debug` never prints them.
 //! `account.addAscKey` and `account.importXtool` are `secrets`-class local-file imports: a non-interactive CLI
 //! may run them with `--yes` (ARCHITECTURE §7.5 [D 85]). Team IDs are masked on the wire (`*******345`) and
 //! identities are named by their certificate serial.
@@ -210,10 +211,121 @@ crate::rpc_method!(
     Permission::Secrets
 );
 
-/// Params of `account.appleId.begin`: `{appleId, password, anisette: local|{remote}} → {sessionId, step: done|two-factor, twoFactor?} (cli/ide only)`.
-pub type AccountAppleIdBeginParams = Unspecified;
+/// The string form of local anisette (`"local"`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum LocalAnisette {
+    #[default]
+    Local,
+}
+
+/// Where the anisette data of an Apple ID sign-in comes from (`local|{remote}`): `"local"` (Apple's ADI libraries
+/// in the sandboxed `russet-adi-host`, the default) or `{"remote": "<url>"}` (an anisette-v3 server the user runs;
+/// its operator learns this machine's ADI identity) (SIGN §7.5). Untagged, like `accounts.toml`'s `anisette`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(untagged)]
+pub enum AnisetteChoice {
+    Local(LocalAnisette),
+    Remote {
+        /// The base URL of an anisette-v3 server.
+        remote: String,
+    },
+}
+
+impl Default for AnisetteChoice {
+    fn default() -> Self {
+        Self::Local(LocalAnisette::Local)
+    }
+}
+
+/// Params of `account.appleId.begin` (cli/ide only): signs in to Apple with the engine's own GrandSlam client.
+/// `Debug` never prints the Apple ID or the password; neither is logged, audited or echoed.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAppleIdBeginParams {
+    pub apple_id: String,
+    pub password: String,
+    #[serde(default)]
+    pub anisette: AnisetteChoice,
+    /// The account's label in `account.list` (default: `Apple ID (<masked id>)`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub label: Option<String>,
+}
+
+impl std::fmt::Debug for AccountAppleIdBeginParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccountAppleIdBeginParams")
+            .field("apple_id", &"***")
+            .field("password", &"***")
+            .field("anisette", &self.anisette)
+            .field("label", &self.label)
+            .finish()
+    }
+}
+
+/// The step a sign-in session is at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum AppleIdStep {
+    /// Signed in: the account is in `account.list` (and in `account` of this result).
+    Done,
+    /// Apple asks for a two-factor code: call `account.appleId.submitCode` (after `requestCode` for an SMS).
+    TwoFactor,
+}
+
+/// Where a two-factor code is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum TwoFactorVia {
+    /// A push to the user's trusted Apple devices.
+    TrustedDevice,
+    /// A text message to one of the trusted phone numbers.
+    Sms,
+}
+
+/// A trusted phone number, as Apple obfuscates it (`(•••) •••-••12`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustedPhone {
+    pub id: u32,
+    /// Apple's obfuscated form; never the full number.
+    pub number: String,
+}
+
+/// What a two-factor step offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TwoFactorInfo {
+    /// The ways a code can be requested (`requestCode`).
+    pub via: Vec<TwoFactorVia>,
+    /// Where the current code went: Russet asks Apple to push one to the trusted devices as soon as Apple offers
+    /// that; omitted when nothing was sent yet (call `requestCode`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub code_sent_to: Option<TwoFactorVia>,
+    /// The trusted phone numbers for `requestCode {via: "sms", phoneId}` (empty until Apple lists them).
+    pub phone_numbers: Vec<TrustedPhone>,
+    /// The code length (6).
+    pub code_length: u32,
+}
+
 /// Result of `account.appleId.begin`.
-pub type AccountAppleIdBeginResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAppleIdBeginResult {
+    /// The sign-in session (valid for 10 minutes).
+    pub session_id: String,
+    pub step: AppleIdStep,
+    /// With `step: "two-factor"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub two_factor: Option<TwoFactorInfo>,
+    /// With `step: "done"`: the account that was added (or refreshed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account: Option<Account>,
+}
 crate::rpc_method!(
     /// `account.appleId.begin` (class `secrets`). W22 (Wave 3).
     AccountAppleIdBegin,
@@ -223,9 +335,20 @@ crate::rpc_method!(
 );
 
 /// Params of `account.appleId.requestCode`: `{sessionId, via, phoneId?} → {}`.
-pub type AccountAppleIdRequestCodeParams = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAppleIdRequestCodeParams {
+    pub session_id: String,
+    pub via: TwoFactorVia,
+    /// Required with `via: "sms"`: a `phoneNumbers[].id` of the two-factor step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub phone_id: Option<u32>,
+}
 /// Result of `account.appleId.requestCode`.
-pub type AccountAppleIdRequestCodeResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAppleIdRequestCodeResult {}
 crate::rpc_method!(
     /// `account.appleId.requestCode` (class `secrets`). W22 (Wave 3).
     AccountAppleIdRequestCode,
@@ -234,10 +357,25 @@ crate::rpc_method!(
     Permission::Secrets
 );
 
-/// Params of `account.appleId.submitCode`: `{sessionId, code} → Account`.
-pub type AccountAppleIdSubmitCodeParams = Unspecified;
-/// Result of `account.appleId.submitCode`.
-pub type AccountAppleIdSubmitCodeResult = Unspecified;
+/// Params of `account.appleId.submitCode`: `{sessionId, code} → Account`. The code is checked against the way it
+/// was last requested (the trusted devices unless `requestCode` sent an SMS). `Debug` never prints the code.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAppleIdSubmitCodeParams {
+    pub session_id: String,
+    pub code: String,
+}
+
+impl std::fmt::Debug for AccountAppleIdSubmitCodeParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccountAppleIdSubmitCodeParams")
+            .field("session_id", &self.session_id)
+            .field("code", &"***")
+            .finish()
+    }
+}
+/// Result of `account.appleId.submitCode`: the account that was added (or refreshed).
+pub type AccountAppleIdSubmitCodeResult = Account;
 crate::rpc_method!(
     /// `account.appleId.submitCode` (class `secrets`). W22 (Wave 3).
     AccountAppleIdSubmitCode,
@@ -246,10 +384,37 @@ crate::rpc_method!(
     Permission::Secrets
 );
 
+/// Which anisette provider `account.anisette.status` describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnisetteKind {
+    Local,
+    Remote,
+}
+
 /// Params of `account.anisette.status`: `{} → {kind, librariesPresent, apkVersion?, provisioned}`.
-pub type AccountAnisetteStatusParams = Unspecified;
-/// Result of `account.anisette.status`.
-pub type AccountAnisetteStatusResult = Unspecified;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAnisetteStatusParams {}
+/// Result of `account.anisette.status`: the local ADI provider (remote servers are configured per account).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAnisetteStatusResult {
+    pub kind: AnisetteKind,
+    /// Apple's two ADI libraries are downloaded and match their pins (or their trust-on-first-use record).
+    pub libraries_present: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub apk_version: Option<String>,
+    /// This machine holds ADI provisioning state.
+    pub provisioned: bool,
+    /// Local ADI runs on this host (Linux x86_64; Windows through the engine's WSL backend).
+    pub local_supported: bool,
+    /// The libraries' hashes are in Russet's shipped pin table (false: recorded on first use).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pinned: Option<bool>,
+}
 crate::rpc_method!(
     /// `account.anisette.status` (class `read`). W22 (Wave 3).
     AccountAnisetteStatus,
@@ -258,10 +423,23 @@ crate::rpc_method!(
     Permission::Read
 );
 
-/// Params of `account.anisette.fetchLibraries`: `{consent: true} → {apkVersion, bytesDownloaded}`.
-pub type AccountAnisetteFetchLibrariesParams = Unspecified;
+/// Params of `account.anisette.fetchLibraries`: `{consent: true} → {apkVersion, bytesDownloaded}`. `consent`
+/// records that the user read the consent screen (SIGN §7.1); anything but `true` is refused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAnisetteFetchLibrariesParams {
+    pub consent: bool,
+}
 /// Result of `account.anisette.fetchLibraries`.
-pub type AccountAnisetteFetchLibrariesResult = Unspecified;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAnisetteFetchLibrariesResult {
+    pub apk_version: String,
+    /// HTTP traffic of the range fetch (about 2–3 MB; 0 when the libraries were already present).
+    pub bytes_downloaded: u64,
+    /// The hashes are in Russet's pin table; false means they were recorded on first use.
+    pub pinned: bool,
+}
 crate::rpc_method!(
     /// `account.anisette.fetchLibraries` (class `system`, long-running). W22 (Wave 3).
     AccountAnisetteFetchLibraries,
@@ -326,5 +504,54 @@ mod tests {
             dry_run: true,
         });
         assert!(v.is_ok_and(|v| v["dryRun"] == true && v["warnings"][0] == "chmod 600"));
+    }
+
+    #[test]
+    fn anisette_choice_is_local_or_a_remote_object() {
+        let local: Result<AccountAppleIdBeginParams, _> =
+            serde_json::from_value(serde_json::json!({"appleId": "a", "password": "b"}));
+        assert!(local.is_ok_and(|p| p.anisette == AnisetteChoice::default()));
+        let remote: Result<AccountAppleIdBeginParams, _> = serde_json::from_value(
+            serde_json::json!({"appleId": "a", "password": "b", "anisette": {"remote": "https://ani.example"}}),
+        );
+        assert!(remote.is_ok_and(|p| p.anisette == AnisetteChoice::Remote { remote: "https://ani.example".into() }));
+        assert!(serde_json::to_value(AnisetteChoice::default()).is_ok_and(|v| v == "local"));
+        let bare_remote: Result<AnisetteChoice, _> = serde_json::from_value(serde_json::json!("remote"));
+        assert!(bare_remote.is_err());
+    }
+
+    #[test]
+    fn debug_never_prints_credentials() {
+        let begin = AccountAppleIdBeginParams {
+            apple_id: "canary-user@example.invalid".into(),
+            password: "canary-password-7731".into(),
+            anisette: AnisetteChoice::default(),
+            label: None,
+        };
+        let code = AccountAppleIdSubmitCodeParams { session_id: "s1".into(), code: "731904".into() };
+        let text = format!("{begin:?} {code:?}");
+        for canary in ["canary-user", "canary-password-7731", "731904"] {
+            assert!(!text.contains(canary), "{canary} leaked: {text}");
+        }
+    }
+
+    #[test]
+    fn two_factor_steps_are_kebab_case() {
+        let r = AccountAppleIdBeginResult {
+            session_id: "s".into(),
+            step: AppleIdStep::TwoFactor,
+            two_factor: Some(TwoFactorInfo {
+                via: vec![TwoFactorVia::TrustedDevice, TwoFactorVia::Sms],
+                code_sent_to: Some(TwoFactorVia::TrustedDevice),
+                phone_numbers: vec![TrustedPhone { id: 1, number: "(•••) •••-••12".into() }],
+                code_length: 6,
+            }),
+            account: None,
+        };
+        let v = serde_json::to_value(r).unwrap_or_default();
+        assert_eq!(v["step"], "two-factor");
+        assert_eq!(v["twoFactor"]["via"][0], "trusted-device");
+        assert_eq!(v["twoFactor"]["codeSentTo"], "trusted-device");
+        assert_eq!(v["twoFactor"]["phoneNumbers"][0]["id"], 1);
     }
 }

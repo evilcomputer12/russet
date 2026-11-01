@@ -75,6 +75,197 @@
       ],
       "type": "object"
     },
+    "AccountAnisetteFetchLibrariesParams": {
+      "description": "Params of `account.anisette.fetchLibraries`: `{consent: true} → {apkVersion, bytesDownloaded}`. `consent`\nrecords that the user read the consent screen (SIGN §7.1); anything but `true` is refused.",
+      "properties": {
+        "consent": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "consent"
+      ],
+      "type": "object"
+    },
+    "AccountAnisetteFetchLibrariesResult": {
+      "description": "Result of `account.anisette.fetchLibraries`.",
+      "properties": {
+        "apkVersion": {
+          "type": "string"
+        },
+        "bytesDownloaded": {
+          "description": "HTTP traffic of the range fetch (about 2–3 MB; 0 when the libraries were already present).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pinned": {
+          "description": "The hashes are in Russet's pin table; false means they were recorded on first use.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "apkVersion",
+        "bytesDownloaded",
+        "pinned"
+      ],
+      "type": "object"
+    },
+    "AccountAnisetteStatusParams": {
+      "description": "Params of `account.anisette.status`: `{} → {kind, librariesPresent, apkVersion?, provisioned}`.",
+      "type": "object"
+    },
+    "AccountAnisetteStatusResult": {
+      "description": "Result of `account.anisette.status`: the local ADI provider (remote servers are configured per account).",
+      "properties": {
+        "apkVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/AnisetteKind"
+        },
+        "librariesPresent": {
+          "description": "Apple's two ADI libraries are downloaded and match their pins (or their trust-on-first-use record).",
+          "type": "boolean"
+        },
+        "localSupported": {
+          "description": "Local ADI runs on this host (Linux x86_64; Windows through the engine's WSL backend).",
+          "type": "boolean"
+        },
+        "pinned": {
+          "description": "The libraries' hashes are in Russet's shipped pin table (false: recorded on first use).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "provisioned": {
+          "description": "This machine holds ADI provisioning state.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "librariesPresent",
+        "provisioned",
+        "localSupported"
+      ],
+      "type": "object"
+    },
+    "AccountAppleIdBeginParams": {
+      "description": "Params of `account.appleId.begin` (cli/ide only): signs in to Apple with the engine's own GrandSlam client.\n`Debug` never prints the Apple ID or the password; neither is logged, audited or echoed.",
+      "properties": {
+        "anisette": {
+          "$ref": "#/$defs/AnisetteChoice",
+          "default": "local"
+        },
+        "appleId": {
+          "type": "string"
+        },
+        "label": {
+          "description": "The account's label in `account.list` (default: `Apple ID (<masked id>)`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appleId",
+        "password"
+      ],
+      "type": "object"
+    },
+    "AccountAppleIdBeginResult": {
+      "description": "Result of `account.appleId.begin`.",
+      "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Account"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "With `step: \"done\"`: the account that was added (or refreshed)."
+        },
+        "sessionId": {
+          "description": "The sign-in session (valid for 10 minutes).",
+          "type": "string"
+        },
+        "step": {
+          "$ref": "#/$defs/AppleIdStep"
+        },
+        "twoFactor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TwoFactorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "With `step: \"two-factor\"`."
+        }
+      },
+      "required": [
+        "sessionId",
+        "step"
+      ],
+      "type": "object"
+    },
+    "AccountAppleIdRequestCodeParams": {
+      "description": "Params of `account.appleId.requestCode`: `{sessionId, via, phoneId?} → {}`.",
+      "properties": {
+        "phoneId": {
+          "description": "Required with `via: \"sms\"`: a `phoneNumbers[].id` of the two-factor step.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "via": {
+          "$ref": "#/$defs/TwoFactorVia"
+        }
+      },
+      "required": [
+        "sessionId",
+        "via"
+      ],
+      "type": "object"
+    },
+    "AccountAppleIdRequestCodeResult": {
+      "description": "Result of `account.appleId.requestCode`.",
+      "type": "object"
+    },
+    "AccountAppleIdSubmitCodeParams": {
+      "description": "Params of `account.appleId.submitCode`: `{sessionId, code} → Account`. The code is checked against the way it\nwas last requested (the trusted devices unless `requestCode` sent an SMS). `Debug` never prints the code.",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "code"
+      ],
+      "type": "object"
+    },
     "AccountImportXtoolParams": {
       "description": "Params of `account.importXtool` (cli/ide only; the explicit one-time import [D 50]).",
       "properties": {
@@ -235,6 +426,34 @@
         "roleProbe"
       ],
       "type": "object"
+    },
+    "AnisetteChoice": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LocalAnisette"
+        },
+        {
+          "properties": {
+            "remote": {
+              "description": "The base URL of an anisette-v3 server.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "remote"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "Where the anisette data of an Apple ID sign-in comes from (`local|{remote}`): `\"local\"` (Apple's ADI libraries\nin the sandboxed `russet-adi-host`, the default) or `{\"remote\": \"<url>\"}` (an anisette-v3 server the user runs;\nits operator learns this machine's ADI identity) (SIGN §7.5). Untagged, like `accounts.toml`'s `anisette`."
+    },
+    "AnisetteKind": {
+      "description": "Which anisette provider `account.anisette.status` describes.",
+      "enum": [
+        "local",
+        "remote"
+      ],
+      "type": "string"
     },
     "AppExitedParams": {
       "description": "Params of the `app.exited` notification: `{leaseId, pid, code?, signal?, crashId?}; to the app.launch caller`.",
@@ -590,6 +809,21 @@
     "AppUninstallResult": {
       "description": "Result of `app.uninstall`.",
       "type": "object"
+    },
+    "AppleIdStep": {
+      "description": "The step a sign-in session is at.",
+      "oneOf": [
+        {
+          "const": "done",
+          "description": "Signed in: the account is in `account.list` (and in `account` of this result).",
+          "type": "string"
+        },
+        {
+          "const": "two-factor",
+          "description": "Apple asks for a two-factor code: call `account.appleId.submitCode` (after `requestCode` for an SMS).",
+          "type": "string"
+        }
+      ]
     },
     "Approval": {
       "description": "An approval record (ARCHITECTURE §6.5).",
@@ -4992,6 +5226,14 @@
       ],
       "type": "object"
     },
+    "ImageFormat": {
+      "description": "An image encoding.",
+      "enum": [
+        "png",
+        "jpeg"
+      ],
+      "type": "string"
+    },
     "InitializeParams": {
       "description": "Params of `initialize` (ARCHITECTURE §7.4).",
       "properties": {
@@ -6060,6 +6302,13 @@
       ],
       "type": "string"
     },
+    "LocalAnisette": {
+      "description": "The string form of local anisette (`\"local\"`).",
+      "enum": [
+        "local"
+      ],
+      "type": "string"
+    },
     "LogEntry": {
       "description": "One log line: `logs.entries`, `logs.tail`, `run.output`, `run.output.query`.",
       "properties": {
@@ -6834,6 +7083,16 @@
       ],
       "type": "string"
     },
+    "MirrorCodec": {
+      "description": "A mirror codec, best first: HEVC from the device's display service, AVC, MJPEG, or screenshot polling.",
+      "enum": [
+        "hevc",
+        "avc",
+        "jpeg",
+        "poll"
+      ],
+      "type": "string"
+    },
     "MutationKind": {
       "description": "The kind of an account change.",
       "enum": [
@@ -6843,6 +7102,14 @@
         "enable-capability",
         "create-profile",
         "delete-profile"
+      ],
+      "type": "string"
+    },
+    "Orientation": {
+      "description": "Which way up the screen is.",
+      "enum": [
+        "portrait",
+        "landscape"
       ],
       "type": "string"
     },
@@ -8520,6 +8787,197 @@
       },
       "required": [
         "subscriptionId"
+      ],
+      "type": "object"
+    },
+    "ScreenMirrorStartParams": {
+      "description": "Params of `screen.mirror.start`: `{udid?, codecs: (hevc|avc|jpeg|poll)[], maxFps?, input?} → {streamId, url, token, codec, width, height} (class: read, input → device)`.",
+      "properties": {
+        "codecs": {
+          "default": [],
+          "description": "The codecs the viewer decodes, best first. The daemon streams HEVC; a viewer without it polls\n`screen.screenshot` instead.",
+          "items": {
+            "$ref": "#/$defs/MirrorCodec"
+          },
+          "type": "array"
+        },
+        "input": {
+          "description": "Also accept touch, button, key and text messages on the WebSocket (class `device`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "maxFps": {
+          "description": "A frame-rate cap (not applied yet: the device paces the stream).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ScreenMirrorStartResult": {
+      "description": "Result of `screen.mirror.start`.",
+      "properties": {
+        "codec": {
+          "$ref": "#/$defs/MirrorCodec"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "streamId": {
+          "description": "`str_…`.",
+          "type": "string"
+        },
+        "token": {
+          "description": "The single-use token for the WebSocket's first message.",
+          "type": "string"
+        },
+        "url": {
+          "description": "`ws://127.0.0.1:<port>/mirror/v1?stream=<streamId>` (ARCHITECTURE §10.1).",
+          "type": "string"
+        },
+        "width": {
+          "description": "The screen's size in pixels.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "streamId",
+        "url",
+        "token",
+        "codec",
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "ScreenMirrorStopParams": {
+      "description": "Params of `screen.mirror.stop`: `{streamId} → {}`.",
+      "properties": {
+        "streamId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "streamId"
+      ],
+      "type": "object"
+    },
+    "ScreenMirrorStopResult": {
+      "description": "Result of `screen.mirror.stop`.",
+      "type": "object"
+    },
+    "ScreenScreenshotParams": {
+      "description": "Params of `screen.screenshot`: `{udid?, format?: png|jpeg, maxDimension?, scale?, quality?, toFile?} → {imageBase64?|path?, format, width, height, orientation}`.",
+      "properties": {
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImageFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The encoding (default `png`). The device's screenshot service answers PNG only."
+        },
+        "maxDimension": {
+          "description": "The longest side, in pixels (downscaling; not available yet).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "quality": {
+          "description": "JPEG quality, 1–100.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scale": {
+          "description": "A scale factor in (0, 1] (downscaling; not available yet).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "toFile": {
+          "description": "Write the image to this absolute path instead of returning it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "udid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ScreenScreenshotResult": {
+      "description": "Result of `screen.screenshot`.",
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/ImageFormat"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "imageBase64": {
+          "description": "The image, base64 (absent with `toFile`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "orientation": {
+          "$ref": "#/$defs/Orientation"
+        },
+        "path": {
+          "description": "The file written (with `toFile`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "width",
+        "height",
+        "orientation"
       ],
       "type": "object"
     },
@@ -10390,6 +10848,25 @@
       ],
       "type": "string"
     },
+    "TrustedPhone": {
+      "description": "A trusted phone number, as Apple obfuscates it (`(•••) •••-••12`).",
+      "properties": {
+        "id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "number": {
+          "description": "Apple's obfuscated form; never the full number.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "number"
+      ],
+      "type": "object"
+    },
     "TunnelState": {
       "description": "Tunnel states.",
       "enum": [
@@ -10436,6 +10913,63 @@
         "state"
       ],
       "type": "object"
+    },
+    "TwoFactorInfo": {
+      "description": "What a two-factor step offers.",
+      "properties": {
+        "codeLength": {
+          "description": "The code length (6).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "codeSentTo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TwoFactorVia"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the current code went: Russet asks Apple to push one to the trusted devices as soon as Apple offers\nthat; omitted when nothing was sent yet (call `requestCode`)."
+        },
+        "phoneNumbers": {
+          "description": "The trusted phone numbers for `requestCode {via: \"sms\", phoneId}` (empty until Apple lists them).",
+          "items": {
+            "$ref": "#/$defs/TrustedPhone"
+          },
+          "type": "array"
+        },
+        "via": {
+          "description": "The ways a code can be requested (`requestCode`).",
+          "items": {
+            "$ref": "#/$defs/TwoFactorVia"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "via",
+        "phoneNumbers",
+        "codeLength"
+      ],
+      "type": "object"
+    },
+    "TwoFactorVia": {
+      "description": "Where a two-factor code is sent.",
+      "oneOf": [
+        {
+          "const": "trusted-device",
+          "description": "A push to the user's trusted Apple devices.",
+          "type": "string"
+        },
+        {
+          "const": "sms",
+          "description": "A text message to one of the trusted phone numbers.",
+          "type": "string"
+        }
+      ]
     },
     "UiConfirmParams": {
       "description": "Params of `ui.confirm` (served by `cli` with a TTY or `--yes`, and `ide`).",
@@ -10861,11 +11395,11 @@
       "longRunning": true,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAnisetteFetchLibrariesParams"
       },
       "permission": "system",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAnisetteFetchLibrariesResult"
       }
     },
     "account.anisette.status": {
@@ -10874,11 +11408,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAnisetteStatusParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAnisetteStatusResult"
       }
     },
     "account.appleId.begin": {
@@ -10887,11 +11421,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAppleIdBeginParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAppleIdBeginResult"
       }
     },
     "account.appleId.requestCode": {
@@ -10900,11 +11434,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAppleIdRequestCodeParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAppleIdRequestCodeResult"
       }
     },
     "account.appleId.submitCode": {
@@ -10913,11 +11447,11 @@
       "longRunning": false,
       "namespace": "account",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/AccountAppleIdSubmitCodeParams"
       },
       "permission": "secrets",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/Account"
       }
     },
     "account.importXtool": {
@@ -12655,11 +13189,11 @@
       "longRunning": false,
       "namespace": "screen",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ScreenMirrorStartParams"
       },
       "permission": "device",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ScreenMirrorStartResult"
       }
     },
     "screen.mirror.stop": {
@@ -12668,11 +13202,11 @@
       "longRunning": false,
       "namespace": "screen",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ScreenMirrorStopParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ScreenMirrorStopResult"
       }
     },
     "screen.press": {
@@ -12694,11 +13228,11 @@
       "longRunning": false,
       "namespace": "screen",
       "params": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ScreenScreenshotParams"
       },
       "permission": "read",
       "result": {
-        "$ref": "#/$defs/Unspecified"
+        "$ref": "#/$defs/ScreenScreenshotResult"
       }
     },
     "sdk.deviceSupport.check": {

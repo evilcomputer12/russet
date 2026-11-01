@@ -12,6 +12,10 @@ import type { RunManager } from "../run/session";
 import type { ConsoleViewProvider } from "../panels/consoleView";
 import type { MirrorViewProvider } from "../panels/mirrorView";
 import type { SigningTreeProvider } from "../views/signingTree";
+import type { Experience } from "../setup";
+import { ISSUER_ID_PLACEHOLDER, ISSUER_ID_PROMPT, issuerIdParam, issuerIdProblem } from "../setup/ascKey";
+import { chooseBundleId, ensureRegistrable, isPlaceholder } from "../setup/bundleId";
+import { refreshProject } from "../daemon/subscriptions";
 import { pickDevice, pickTarget, pickConfiguration } from "./pickers";
 import { hotReload } from "./hotReload";
 import { showDaemonError } from "../daemon/errors";
@@ -25,6 +29,8 @@ export interface CommandServices {
   mirror: MirrorViewProvider;
   signing: SigningTreeProvider;
   refreshDevices: () => Promise<void>;
+  /** The W19 setup, sign-in and run-destination surfaces. */
+  experience?: Experience;
 }
 
 export function registerCommands(context: vscode.ExtensionContext, svc: CommandServices): void {
@@ -36,8 +42,52 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   };
 
   // --- Run / Debug / Stop / Hot reload -------------------------------------
-  reg("russet.run", () => svc.run.run());
+  const blockedRun = (): boolean => {
+    const reason = svc.experience?.runBlocker();
+    if (reason) {
+      void vscode.window.showInformationMessage(reason, "Select Run Destination").then((c) =>
+        c ? vscode.commands.executeCommand("russet.selectDevice") : undefined,
+      );
+    }
+    return !!reason;
+  };
+  // A placeholder bundle ID can never be signed: offer the user's own before building.
+  const registrable = async (): Promise<boolean> => {
+    const project = svc.store.state.project;
+    const target = project?.targets.find((t) => t.name === svc.store.state.selectedTarget) ?? project?.targets[0];
+    if (!isPlaceholder(target?.bundleId ?? "")) {
+      return true;
+    }
+    const changed = await ensureRegistrable(target?.bundleId, project?.root);
+    if (changed) {
+      await refreshProject(svc.store, svc.client);
+    }
+    return changed;
+  };
+  reg("russet.run", async () => {
+    if (blockedRun()) {
+      return;
+    }
+    // The virtual iPhone: build, then install and launch through the runner (vphoned signs it).
+    if (svc.experience?.virtualSelected()) {
+      await svc.experience.runOnVirtual();
+      return;
+    }
+    if (await registrable()) {
+      await svc.run.run();
+    }
+  });
   reg("russet.debug", async () => {
+    if (blockedRun()) {
+      return;
+    }
+    if (svc.experience?.virtualSelected()) {
+      await svc.experience.debugOnVirtual();
+      return;
+    }
+    if (!(await registrable())) {
+      return;
+    }
     const folder = vscode.workspace.workspaceFolders?.[0];
     const ok = await vscode.debug.startDebugging(folder, {
       type: "russet",
@@ -55,7 +105,7 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   });
   reg("russet.stop", async () => {
     const debugSession = vscode.debug.activeDebugSession;
-    if (debugSession && debugSession.type === "russet") {
+    if (debugSession && (debugSession.type === "russet" || debugSession.type === "russet-virtual")) {
       await vscode.debug.stopDebugging(debugSession);
       return;
     }
@@ -69,15 +119,17 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   reg("russet.clean", () => runRussetTask("clean"));
 
   // --- Pickers --------------------------------------------------------------
-  reg("russet.selectDevice", () => pickDevice(svc.store));
+  reg("russet.selectDevice", () => (svc.experience ? svc.experience.selectDestination() : pickDevice(svc.store)));
   reg("russet.selectTarget", () => pickTarget(svc.store));
   reg("russet.selectConfiguration", () => pickConfiguration(svc.store));
   reg("russet.device.setRunDestination", (node: unknown) => {
     const udid = extractUdid(node) ?? svc.store.activeDevice?.udid;
-    if (udid) {
+    if (udid && svc.experience) {
+      svc.experience.selectDevice(udid);
+    } else if (udid) {
       svc.store.setActiveDevice(udid);
     } else {
-      void pickDevice(svc.store);
+      void vscode.commands.executeCommand("russet.selectDevice");
     }
   });
 
@@ -104,14 +156,18 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
 
   // --- Doctor / setup -------------------------------------------------------
   reg("russet.doctor", runDoctor);
-  reg("russet.openSetup", async () => {
+  reg("russet.openSetup", async (step?: unknown) => {
+    if (svc.experience) {
+      svc.experience.openSetup(typeof step === "string" ? step : undefined);
+      return;
+    }
     await vscode.commands.executeCommand(
       "workbench.action.openWalkthrough",
       "russet.russet#russet.setup",
       false,
     );
   });
-  reg("russet.importXcode", () => soon("Import Xcode"));
+  reg("russet.importXcode", () => (svc.experience ? svc.experience.importXcode() : soon("Import Xcode")));
 
   // --- Project --------------------------------------------------------------
   reg("russet.project.new", async () => {
@@ -133,12 +189,17 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
     if (!picked || picked.length === 0) {
       return;
     }
+    const bundleId = await chooseBundleId(name);
+    if (!bundleId) {
+      return;
+    }
     const root = vscode.Uri.joinPath(picked[0], name.trim());
     try {
       const res = (await svc.client.call("project.init" as never, {
         dir: root.fsPath,
         stack: "swiftpm",
         name: name.trim(),
+        bundleId,
         force: false,
       } as never)) as { root: string; files: string[] };
       const open = await vscode.window.showInformationMessage(
@@ -160,7 +221,7 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
 
   // --- Accounts / signing ---------------------------------------------------
   reg("russet.account.addAscKey", addAscKey);
-  reg("russet.account.signInAppleId", () => soon("Sign in with Apple ID"));
+  reg("russet.account.signInAppleId", () => (svc.experience ? svc.experience.signIn() : soon("Sign in with Apple ID")));
   reg("russet.account.signOut", () => soon("Sign Out"));
   reg("russet.signing.refresh", () => svc.signing.refresh());
   reg("russet.signing.fix", () => soon("Fix Signing"));
@@ -188,14 +249,10 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
   reg("russet.openProfiler", () => soon("Profiler"));
   reg("russet.openCrashes", () => soon("Crash viewer"));
 
-  // --- Agents / MCP (later cards) ------------------------------------------
+  // --- Agents / MCP (later cards; install, register, status and copy are in ai/) --
   reg("russet.agents.open", () => soon("Agents panel"));
   reg("russet.agents.newSession", () => soon("Agent sessions"));
-  reg("russet.agents.install", () => soon("Agent install"));
   reg("russet.agents.quickAsk", () => soon("Ask Local Model"));
-  reg("russet.mcp.register", () => soon("Register Russet MCP"));
-  reg("russet.mcp.status", () => soon("MCP status"));
-  reg("russet.mcp.copyConfig", () => soon("Copy MCP config"));
   reg("russet.mcp.toggleHttp", () => soon("MCP HTTP endpoint"));
 
   // --- Shell ----------------------------------------------------------------
@@ -266,12 +323,18 @@ export function registerCommands(context: vscode.ExtensionContext, svc: CommandS
     }
     const issuerId = await vscode.window.showInputBox({
       title: "Issuer ID",
-      prompt: "The App Store Connect issuer ID (omit for an individual key).",
+      prompt: ISSUER_ID_PROMPT,
+      placeHolder: ISSUER_ID_PLACEHOLDER,
+      ignoreFocusOut: true,
+      validateInput: issuerIdProblem,
     });
+    if (issuerId === undefined) {
+      return; // Escape cancels; it must not add the key as an individual one.
+    }
     try {
       await svc.client.call("account.addAscKey", {
         keyId,
-        issuerId: issuerId || undefined,
+        issuerId: issuerIdParam(issuerId),
         p8Path,
       });
       await svc.signing.refresh();

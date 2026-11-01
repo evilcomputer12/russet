@@ -140,6 +140,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(windows, ignore = "needs Unix processes and a shell; the engine runs in Linux (WSL on Windows)")]
     fn a_second_holder_is_refused_with_the_first_ones_record() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("locks").join("live.lock");

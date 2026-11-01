@@ -1567,6 +1567,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     async fn the_broker_endpoint_check_passes_in_a_writable_runtime_dir_and_fails_otherwise() {
         let base = std::env::temp_dir().join(format!("russet-doctor-{}", std::process::id()));
         let ok = broker_endpoint_probe(&base.join("runtime")).await;

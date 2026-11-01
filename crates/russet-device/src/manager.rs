@@ -501,17 +501,21 @@ impl DeviceHandle {
     }
 
     pub async fn screenshot(&self) -> Result<Screenshot> {
-        Err(wave2("screen.screenshot"))
+        crate::screen::screenshot(self).await
     }
 
+    /// A display session: the screen as HEVC access units and, with `o.input`, HID input (device.md §6.8.2).
     pub async fn mirror(&self, o: MirrorOptions) -> Result<MirrorHandle> {
-        let _ = o;
-        Err(wave2("screen.mirror"))
+        // The display session's handshake (RSD service, two tunnel sockets, the CoreDevice offers)
+        // is a deep future: on the heap, not on the caller's worker stack.
+        Box::pin(crate::screen::mirror(self, o)).await
     }
 
+    /// One input event outside a mirror. The device accepts HID input only while a display session authenticates
+    /// it, so input goes through [`MirrorHandle::input`] for now.
     pub async fn input(&self, e: InputEvent) -> Result<()> {
         let _ = e;
-        Err(wave2("input"))
+        Err(wave2("input outside a mirror"))
     }
 
     pub async fn crash_pull(&self, q: CrashQuery, dest: &Path) -> Result<Vec<IpsReport>> {

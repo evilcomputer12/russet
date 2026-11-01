@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Strings",
+  "scopeName": "source.strings",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash",
+      "match": "//.*$"
+    },
+    {
+      "name": "comment.block",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    {
+      "match": "(\"(?:[^\"\\\\]|\\\\.)*\")\\s*(=)",
+      "captures": {
+        "1": {
+          "name": "variable.other.key.strings"
+        },
+        "2": {
+          "name": "keyword.operator.assignment"
+        }
+      }
+    },
+    {
+      "name": "string.quoted.double",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape",
+          "match": "\\\\(?:[\\\\\"'nrt0]|U[0-9A-Fa-f]{4}|u[0-9A-Fa-f]{4}|.)"
+        },
+        {
+          "name": "constant.other.placeholder",
+          "match": "%(?:\\d+\\$)?[-+ #0]*\\d*(?:\\.\\d+)?(?:hh|h|ll|l|q|L|z|t|j)?[@dDiuUxXoOfeEgGcCsSpaAF%]"
+        }
+      ]
+    },
+    {
+      "name": "punctuation.terminator",
+      "match": ";"
+    }
+  ]
+}

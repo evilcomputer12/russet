@@ -1,0 +1,15 @@
+243:  if is_wsl && [ ! -e "/lib/modules/$(uname -r)/build" ]; then
+diff --git a/setup/setup.sh b/setup/setup.sh
+index 7f89346..1427118 100755
+--- a/setup/setup.sh
++++ b/setup/setup.sh
+@@ -240,7 +240,8 @@ build_apfs() {
+     make -C "$dir" clean
+   fi
+   log " Building linux-apfs-rw for kernel $(uname -r)"
+-  if is_wsl && [ ! -e "/lib/modules/$(uname -r)/build" ]; then
++  # WSL 3 mounts an include-only headers tree at the build link: test for a real tree.
++  if is_wsl && [ ! -f "/lib/modules/$(uname -r)/build/Makefile" ]; then
+     # WSL: no headers package for Microsoft's kernel; build against its source tree
+     make -C "$dir" CC="${WSL_KERNEL_CC:-gcc-13}" KERNEL_DIR="$("$VSETUP_SRC/tools/wsl-kernel-tree.sh")"
+   else
