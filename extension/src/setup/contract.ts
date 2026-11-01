@@ -11,6 +11,7 @@ export const KNOWN_STEP_IDS = [
   "wsl",
   "wsl-update",
   "backend",
+  "swift",
   "apple-devices",
   "iphone",
   "xtool",
@@ -105,7 +106,8 @@ export function parseStatus(line: string): SetupStatus {
 /** Where a component's build of upstream's latest commit stands (`--setup updates`). */
 export type StagedState = "none" | "building" | "interrupted" | "built" | "failed" | "skipped";
 const STAGED: ReadonlySet<string> = new Set(["none", "building", "interrupted", "built", "failed", "skipped"]);
-const COMMIT = /^[0-9a-f]{7,40}$/;
+/** What a component is at: a git commit (the virtual iPhone engine) or a release version (Swift). */
+const REVISION = /^(?:[0-9a-f]{7,40}|\d+(?:\.\d+){1,3})$/;
 
 /** One component's update check: the commit in use against upstream's latest. */
 export interface ComponentUpdate {
@@ -144,7 +146,7 @@ export function parseUpdates(line: string): ComponentUpdate[] {
     if (!c || !isStepId(c.id) || !k || typeof k !== "object") {
       continue;
     }
-    if (typeof k.current !== "string" || !COMMIT.test(k.current) || typeof k.upstream !== "string" || !COMMIT.test(k.upstream)) {
+    if (typeof k.current !== "string" || !REVISION.test(k.current) || typeof k.upstream !== "string" || !REVISION.test(k.upstream)) {
       continue;
     }
     const reason = cleanText(k.reason, 200);

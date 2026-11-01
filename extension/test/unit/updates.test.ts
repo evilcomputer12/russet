@@ -20,6 +20,15 @@ describe("update check contract", () => {
     ]);
   });
 
+  it("reads Swift's entry, whose revisions are release versions", () => {
+    const line = JSON.stringify({ version: 1, components: [
+      { id: "swift", title: "Swift toolchain", check: { current: "6.4.1", upstream: "6.4.2", update: true, staged: "none", running: false } },
+    ] });
+    expect(parseUpdates(line)).toEqual([
+      { id: "swift", title: "Swift toolchain", current: "6.4.1", upstream: "6.4.2", update: true, staged: "none", running: false },
+    ]);
+  });
+
   it("rejects other versions and drops malformed components", () => {
     expect(() => parseUpdates('{"version":2,"components":[]}')).toThrow(SetupProtocolError);
     expect(() => parseUpdates("nope")).toThrow(SetupProtocolError);

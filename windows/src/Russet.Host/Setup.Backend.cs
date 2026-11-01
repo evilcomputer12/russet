@@ -28,19 +28,19 @@ internal static partial class Setup
         if (FramedPaths.ToLinux(payload) is not { } linuxPayload)
             return fail("location", "Install Russet into a folder WSL can read, then retry.", false);
         var names = (await Capture(["--list", "--quiet"], Encoding.Unicode)).Output.Split('\n', StringSplitOptions.TrimEntries);
-        var data = Path.Combine(RussetData, "Backends", "Russet");
+        var data = Path.Combine(RussetData, "Backends", Distribution);
         if (!names.Contains(Distribution))
         {
             Directory.CreateDirectory(data);
             if (new DriveInfo(Path.GetPathRoot(data)!).AvailableFreeSpace < BackendFreeBytes)
                 return fail("space", "Russet's backend needs 25 GB free on this drive.", true);
             var rootfs = Path.Combine(data, "ubuntu-26.04-wsl-amd64.wsl");
-            if (!File.Exists(rootfs) || !await HashMatches(rootfs))
+            if (!File.Exists(rootfs) || !await HashMatches(rootfs, RootfsSha256))
             {
                 Progress("Downloading Ubuntu for WSL", 0);
                 if (!await Download(RootfsUrl, rootfs, fraction => Progress("Downloading Ubuntu for WSL", fraction * 0.6)))
                     return fail("download", "Ubuntu for WSL did not download; check the connection, then retry.", true);
-                if (!await HashMatches(rootfs))
+                if (!await HashMatches(rootfs, RootfsSha256))
                 {
                     File.Delete(rootfs);
                     return fail("checksum", "The Ubuntu download did not match its checksum; retry.", true);
@@ -76,10 +76,10 @@ internal static partial class Setup
     internal static async Task StopDaemons() =>
         await Capture(["--distribution", Distribution, "--user", "russet", "--exec", "pkill", "-f", "^/opt/russet/bin/russet-dev daemon run"]);
 
-    static async Task<bool> HashMatches(string file)
+    static async Task<bool> HashMatches(string file, string sha256)
     {
         await using var stream = File.OpenRead(file);
-        return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream)) == RootfsSha256;
+        return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream)) == sha256;
     }
 
     static async Task<bool> Download(string url, string destination, Action<double> progress)

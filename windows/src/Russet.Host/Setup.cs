@@ -11,14 +11,17 @@ using System.Text.RegularExpressions;
 // managed distro; everything printed is redacted before it reaches the IDE.
 internal static partial class Setup
 {
-    const string Distribution = "Russet-Dev";
+    // Russet's managed distribution. RUSSET_SETUP_DISTRIBUTION names another Russet-* one, for
+    // testing a first run in a scratch distribution beside it.
+    static readonly string Distribution = Environment.GetEnvironmentVariable("RUSSET_SETUP_DISTRIBUTION") is { } test
+        && test.StartsWith("Russet-", StringComparison.Ordinal) ? test : "Russet-Dev";
     const string Lib = "/opt/russet/lib";
     const string AppleDevicesStore = "ms-windows-store://pdp/?productid=9NP83LWLPZ9K";
     static readonly string Wsl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe");
-    static readonly string[] Order = ["wsl", "wsl-update", "backend", "apple-devices", "iphone", "xtool", "xcode-sdk", "vphone", "virtual-iphone"];
+    static readonly string[] Order = ["wsl", "wsl-update", "backend", "swift", "apple-devices", "iphone", "xtool", "xcode-sdk", "vphone", "virtual-iphone"];
     static readonly Dictionary<string, string> Titles = new()
     {
-        ["wsl"] = "Windows Subsystem for Linux", ["wsl-update"] = "WSL pre-release", ["backend"] = "Russet backend", ["apple-devices"] = "Apple Devices (USB)",
+        ["wsl"] = "Windows Subsystem for Linux", ["wsl-update"] = "WSL pre-release", ["backend"] = "Russet backend", ["swift"] = "Swift toolchain", ["apple-devices"] = "Apple Devices (USB)",
         ["iphone"] = "iPhone", ["xtool"] = "xtool", ["xcode-sdk"] = "iOS SDK from Xcode",
         ["vphone"] = "Virtual iPhone engine", ["virtual-iphone"] = "Virtual iPhone",
     };
@@ -32,17 +35,23 @@ internal static partial class Setup
         }
         if (args is ["updates"])
         {
-            // Polled by the IDE (every 30 s by default): one git ls-remote per component.
-            var vphone = await Component("vphone_component.sh", "check");
-            var components = vphone is { } v ? new[] { new { id = "vphone", title = Titles["vphone"], check = v } } : [];
+            // Polled by the IDE (every 30 s by default): one git ls-remote per component, and
+            // swift.org's release list (kept for six hours) for Swift.
+            var components = new List<object>();
+            if (await Component("vphone_component.sh", "check") is { } vphone)
+                components.Add(new { id = "vphone", title = Titles["vphone"], check = (object)vphone });
+            if (await SwiftCheck() is { } swift)
+                components.Add(new { id = "swift", title = Titles["swift"], check = swift });
             Console.WriteLine(JsonSerializer.Serialize(new { version = 1, components }));
-            return vphone is null ? 1 : 0;
+            return components.Count == 0 ? 1 : 0;
         }
         if (args is ["limits"])
         {
             Console.WriteLine(JsonSerializer.Serialize(await Limits()));
             return 0;
         }
+        if (args is ["run", "swift-update" or "swift-retry-update" or "swift-rollback"])
+            return await RunSwiftMaintenance(args[1]);
         if (args is ["run", "wsl-limits" or "wsl-restart", ..])
             return await RunLimits(args[1], args[2..]);
         if (args.Length >= 2 && args[0] == "run" && Maintenance.TryGetValue(args[1], out var command))
@@ -151,6 +160,15 @@ internal static partial class Setup
             backend ? "Ready." : BackendPayload() is not null
                 ? "Install Russet's backend: Ubuntu in WSL (a 0.4 GB download) and Russet's engine."
                 : "Russet's backend is missing; reinstall Russet to restore it.");
+        if (!backend) Add("swift", "unavailable", "Needs the Russet backend.");
+        else
+        {
+            var swift = await SwiftInstalled();
+            var latest = await SwiftLatest();
+            Add("swift", swift is not null ? "done" : "needed", swift is not null
+                ? latest is not null && SwiftNewer(latest.Version, swift) ? $"Swift {swift}; Swift {latest.Version} installs by itself." : $"Swift {swift}."
+                : $"Install Swift {latest?.Version ?? "(swift.org's newest release)"}, which builds your apps (about a 1.1 GB download).");
+        }
         var usb = await AppleDevicesReachable();
         Add("apple-devices", usb ? "done" : "needed", usb ? "Apple Devices is running." : "Install or open Apple Devices from the Microsoft Store.");
         Add("iphone", "unavailable", "Checked in the device picker once the backend is ready.");
@@ -214,6 +232,11 @@ internal static partial class Setup
                 break;
             case "backend":
                 if (await InstallBackend(Emit, (reason, message, retryable) => Fail(reason, message, retryable)) != 0) return 1;
+                break;
+            case "swift":
+                if (await SwiftLatest(fresh: true) is not { } release)
+                    return Fail("lookup", "swift.org's release list is unreachable; check the connection, then retry.");
+                if (await InstallSwift(id, Emit, (reason, message, retryable) => Fail(reason, message, retryable), release) != 0) return 1;
                 break;
             case "apple-devices":
                 Process.Start(new ProcessStartInfo(AppleDevicesStore) { UseShellExecute = true })?.Dispose();
