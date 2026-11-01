@@ -22,7 +22,11 @@ $EditorVersion = '1.143.17232'
 $EditorSha256 = 'a1090868af8ac0ac04c22d79fdd02246fa115a78daf38a741d8db06df1753c1d'
 $here = Split-Path -Parent $PSCommandPath
 $windows = Split-Path -Parent $here
-$Out = [IO.Path]::GetFullPath($Out)
+# Absolute paths from here on: Inno Setup reads relative ones against the .iss file's folder.
+$EditorZip, $ExtensionVsix, $HostPublish, $LauncherPublish, $Engine, $Brand = @(
+    $EditorZip, $ExtensionVsix, $HostPublish, $LauncherPublish, $Engine, $Brand) | ForEach-Object { (Resolve-Path -LiteralPath $_).Path }
+if ($Rcedit) { $Rcedit = (Resolve-Path -LiteralPath $Rcedit).Path }
+$Out = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Out)
 $stage = Join-Path $Out 'stage'
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage | Out-Null
@@ -59,7 +63,7 @@ Remove-Item -LiteralPath $unpacked -Recurse -Force
 & (Join-Path $here 'brand-editor.ps1') -Editor $editor -Brand $Brand -Rcedit $Rcedit
 
 # The Windows side: the launcher at the root, the supervisor in host\.
-Copy-Item -LiteralPath ([IO.Path]::GetFullPath($HostPublish)) -Destination (Join-Path $stage 'host') -Recurse
+Copy-Item -LiteralPath $HostPublish -Destination (Join-Path $stage 'host') -Recurse
 Get-ChildItem -LiteralPath $LauncherPublish -File | Where-Object { $_.Name -like 'Russet.Launcher*' -and $_.Extension -ne '.pdb' } |
     Copy-Item -Destination $stage
 
