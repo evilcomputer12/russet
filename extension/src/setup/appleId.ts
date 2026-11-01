@@ -163,7 +163,7 @@ export function classifySignInError(err: unknown, ctx: { identityServer?: string
       "identityRejected",
       ctx.identityServer
         ? `Apple did not accept the sign-in identity from ${ctx.identityServer}. Try again later, or choose another identity server.`
-        : "Apple did not accept this computer's own sign-in identity. You can sign in through an identity server instead (setting Russet › Account: Anisette Server).",
+        : "Apple did not accept this computer's own sign-in identity. Sign in through an identity server instead: set Russet › Account: Anisette Server to one, for example https://mac-ani.jkcoxson.com (the server xtool uses).",
     );
   }
   if (e?.data?.details?.httpStatus === 503) {
