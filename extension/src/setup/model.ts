@@ -64,6 +64,8 @@ export interface SetupSnapshot {
   doneCount: number;
   totalCount: number;
   runningStep?: string;
+  /** A step the runner reports running that this window did not start (see backgroundStep). */
+  backgroundStep?: string;
   runningAll: boolean;
   xcode: {
     candidates: Array<{ path: string; fileName: string; version?: string; sizeBytes: number }>;
@@ -147,6 +149,14 @@ export class SetupModel {
 
   stepState(id: string): SetupStepState | undefined {
     return this.status?.steps.find((s) => s.id === id)?.state;
+  }
+
+  /**
+   * A step the runner reports running that this window did not start: a virtual iPhone still
+   * being created after Russet closed or crashed part way. It counts as the one running step.
+   */
+  get backgroundStep(): string | undefined {
+    return this.status?.steps.find((s) => s.state === "running" && s.id !== this.running?.id)?.id;
   }
 
   /** Re-read the runner's status, the daemon state and the Downloads folder. */
@@ -238,7 +248,7 @@ export class SetupModel {
   /** Run (or retry, or repair) one runner step. Only one step runs at a time. */
   async runStep(id: string, mode: "run" | "retry" | "repair" = "run"): Promise<SetupRunOutcome | undefined> {
     const runner = this.deps.runner;
-    if (!runner || this.running || !isStepId(id) || !this.status?.steps.some((s) => s.id === id)) {
+    if (!runner || this.running || this.backgroundStep || !isStepId(id) || !this.status?.steps.some((s) => s.id === id)) {
       return undefined;
     }
     const args = this.argsFor(id, mode === "repair");
@@ -318,7 +328,7 @@ export class SetupModel {
     try {
       await this.refresh();
       for (const step of [...(this.status?.steps ?? [])]) {
-        if (this.stopAll) {
+        if (this.stopAll || this.backgroundStep) {
           break;
         }
         const state = this.stepState(step.id);
@@ -341,7 +351,8 @@ export class SetupModel {
 
   snapshot(): SetupSnapshot {
     const steps: SetupViewStep[] = [];
-    const busy = !!this.running;
+    const background = this.backgroundStep;
+    const busy = !!this.running || !!background;
     for (const raw of this.status?.steps ?? []) {
       const s = this.withDeviceState(raw);
       const rt = this.runtime.get(s.id);
@@ -366,7 +377,7 @@ export class SetupModel {
       } else if (s.state === "unavailable") {
         actions.push("recheck");
       }
-      if (!isMine && actions[0] !== "recheck" && actions[0] !== "pickDevice") {
+      if (!isMine && actions.length > 0 && actions[0] !== "recheck" && actions[0] !== "pickDevice") {
         const args = this.argsFor(s.id, false);
         if ("blocked" in args) {
           blockedReason = args.blocked;
@@ -408,6 +419,7 @@ export class SetupModel {
       doneCount,
       totalCount: steps.length,
       ...(this.running ? { runningStep: this.running.id } : {}),
+      ...(background ? { backgroundStep: background } : {}),
       runningAll: this.runningAll,
       xcode: {
         candidates: this.candidates.map((c) => ({

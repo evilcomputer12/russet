@@ -168,6 +168,28 @@ describe("SetupModel", () => {
     expect(model.snapshot().runningStep).toBeUndefined();
   });
 
+  it("treats a creation still running from before Russet restarted as the running step", async () => {
+    const { model, runner } = setup({ xips: [XIP] });
+    runner!.states.set("vphone", "done");
+    runner!.states.set("virtual-iphone", "running");
+    await model.refresh();
+    const snap = model.snapshot();
+    expect(snap.backgroundStep).toBe("virtual-iphone");
+    expect(snap.runningStep).toBeUndefined();
+    const step = snap.steps.find((x) => x.id === "virtual-iphone");
+    expect(step).toMatchObject({ state: "running", actions: [] });
+    expect(step?.blockedReason).toBeUndefined();
+    expect(snap.steps.find((x) => x.id === "xcode-sdk")?.blockedReason).toBe("Another step is running.");
+    await expect(model.runStep("xcode-sdk")).resolves.toBeUndefined();
+    await model.runAll();
+    expect(runner!.runs).toEqual([]);
+    // It ends: the step reports done and nothing is blocked any more.
+    runner!.states.set("virtual-iphone", "done");
+    await model.refresh();
+    expect(model.snapshot().backgroundStep).toBeUndefined();
+    expect(model.snapshot().steps.find((x) => x.id === "xcode-sdk")?.blockedReason).toBeUndefined();
+  });
+
   it("runs every remaining step in order and stops at the first failure", async () => {
     const { model, runner } = setup({ xips: [XIP] });
     runner!.outcomes.set("vphone", { kind: "failed", code: "setup.vphone.build", message: "x", retryable: true });

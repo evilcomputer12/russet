@@ -132,6 +132,7 @@ apply_patches() {
 }
 
 install() {
+  creating && die "a virtual iPhone is being created with this build; wait for it to finish"
   fetch
   # setup.sh's sources phase clones nothing here: the checkout already exists.
   "$ROOT/setup/setup.sh" -y
@@ -212,6 +213,8 @@ oom_hint() {
 }
 
 create() {
+  # One creation at a time: a second would reset the virtual disk the first is restoring.
+  creating && die "a virtual iPhone is already being created (it carries on while Russet is closed); wait for it to finish"
   [ -x "$ROOT/setup/create-vm.sh" ] || die "run install first"
   if [ $# -eq 0 ]; then set -- --device "iPhone17,3" --ios 27.0.1 --scale 2; fi
   # vphone-cli finds guest-resources/ relative to the working directory.
@@ -242,6 +245,10 @@ built_in() {
 }
 
 vm_running() { pgrep -f '/qemu-system-aarch64 ' >/dev/null; }
+
+# A creation at work. create-vm.sh runs in a session of its own (create), so it carries on when
+# the step that started it ends with Russet: closed, or crashed, part way.
+creating() { pgrep -f '/setup/create-vm\.sh( |$)' >/dev/null; }
 
 upstream_head() {
   local sha
@@ -395,8 +402,9 @@ status() {
     vms=$((vms + 1))
     grep -qx booted "$state" && ready=$((ready + 1))
   done
-  printf '{"pin":"%s","checkout":"%s","qemuBuilt":%s,"built":%s,"vms":%s,"vmsReady":%s,"running":%s}\n' \
-    "${PIN:0:10}" "$head" "$qemu" "$built" "$vms" "$ready" "$(vm_running && echo true || echo false)"
+  printf '{"pin":"%s","checkout":"%s","qemuBuilt":%s,"built":%s,"vms":%s,"vmsReady":%s,"running":%s,"creating":%s}\n' \
+    "${PIN:0:10}" "$head" "$qemu" "$built" "$vms" "$ready" "$(vm_running && echo true || echo false)" \
+    "$(creating && echo true || echo false)"
 }
 
 vphoned() { CID=${CID:-3} VPHONED_TIMEOUT=${VPHONED_TIMEOUT:-30} timeout 60 "$ROOT/tools/vphoned.sh" "$@"; }
@@ -542,6 +550,8 @@ unlock_screen() {
 # Shuts the running virtual iPhone down through vphoned, then stops its QEMU if it lingers.
 stop() {
   local i
+  # A creation's QEMU (the restore's, then the first boot's) matches the pattern below.
+  creating && die "the virtual iPhone is still being created; stopping it now would break the creation"
   if ! vm_running; then log "the virtual iPhone is not running"; return 0; fi
   log "shutting the virtual iPhone down"
   vphoned POST /v1/rpc '{"method":"system.shutdown","params":{"force":true},"id":1}' >/dev/null 2>&1 || true

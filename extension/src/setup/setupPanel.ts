@@ -15,6 +15,7 @@ import { downloadsDir } from "./xcode";
 const APPLE_DEVICES_STORE = "https://apps.microsoft.com/detail/9NP83LWLPZ9K";
 const XCODE_DOWNLOADS = "https://developer.apple.com/download/all/?q=xcode";
 const POST_INTERVAL_MS = 100;
+const BACKGROUND_CHECK_MS = 30_000;
 
 export class SetupPanel implements vscode.Disposable {
   public static readonly viewType = "russet.setup";
@@ -22,6 +23,7 @@ export class SetupPanel implements vscode.Disposable {
   private panel?: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
   private postTimer?: ReturnType<typeof setTimeout>;
+  private checkTimer?: ReturnType<typeof setTimeout>;
   private lastPost = 0;
   private pendingFocus?: string;
 
@@ -87,7 +89,17 @@ export class SetupPanel implements vscode.Disposable {
 
   private postState(): void {
     this.lastPost = Date.now();
-    void this.panel?.webview.postMessage({ kind: "state", snapshot: this.model.snapshot() });
+    const snapshot = this.model.snapshot();
+    void this.panel?.webview.postMessage({ kind: "state", snapshot });
+    // A step running outside this window sends no progress: check again until it ends.
+    if (snapshot.backgroundStep && this.panel?.visible && !this.checkTimer) {
+      this.checkTimer = setTimeout(() => {
+        this.checkTimer = undefined;
+        if (this.panel?.visible) {
+          void this.model.refresh();
+        }
+      }, BACKGROUND_CHECK_MS);
+    }
   }
 
   private async onMessage(msg: unknown): Promise<void> {
@@ -200,6 +212,9 @@ export class SetupPanel implements vscode.Disposable {
   dispose(): void {
     if (this.postTimer) {
       clearTimeout(this.postTimer);
+    }
+    if (this.checkTimer) {
+      clearTimeout(this.checkTimer);
     }
     this.panel?.dispose();
     for (const d of this.disposables.splice(0)) {

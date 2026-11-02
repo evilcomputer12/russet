@@ -59,7 +59,12 @@ internal static partial class Setup
                 || !arguments.TryAdd(key, number))
                 return Usage();
         }
-        if (id == "wsl-restart") return arguments.Count == 0 ? RestartWsl(Emit) : Usage();
+        if (id == "wsl-restart")
+        {
+            if (arguments.Count != 0) return Usage();
+            // The restart shuts every distro down.
+            return Creating(await Component("vphone_component.sh")) ? Fail("busy", StillCreating) : RestartWsl(Emit);
+        }
         var now = await Limits();
         var machineGB = (int)Math.Round(now.machineMemoryBytes / (double)GiB);
         if (arguments.TryGetValue("memoryGB", out var memoryGB))

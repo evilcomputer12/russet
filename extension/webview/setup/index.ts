@@ -37,6 +37,7 @@ interface Snapshot {
   doneCount: number;
   totalCount: number;
   runningStep?: string;
+  backgroundStep?: string;
   runningAll: boolean;
   xcode: { candidates: Array<{ path: string; fileName: string; version?: string; sizeBytes: number }>; selected?: string };
   virtual: { device: string; ios: string };
@@ -127,15 +128,16 @@ document.getElementById("root")?.append(
 
 function render(s: Snapshot): void {
   const runnerSteps = s.steps;
+  const running = s.runningStep ?? s.backgroundStep;
   summaryText.textContent = s.loading && runnerSteps.length === 0
     ? "Checking this PC…"
-    : `${s.doneCount} of ${s.totalCount} steps done${s.runningStep ? ` · running: ${titleOf(s, s.runningStep)}` : ""}`;
+    : `${s.doneCount} of ${s.totalCount} steps done${running ? ` · running: ${titleOf(s, running)}` : ""}`;
   overall.max = Math.max(1, s.totalCount);
   overall.value = s.doneCount;
   overall.setAttribute("aria-valuetext", `${s.doneCount} of ${s.totalCount} steps done`);
 
   runAllBtn.hidden = !s.runnerAvailable || s.runningAll || s.doneCount === s.totalCount;
-  runAllBtn.disabled = !!s.runningStep || s.doneCount === s.totalCount;
+  runAllBtn.disabled = !!running || s.doneCount === s.totalCount;
   cancelAllBtn.hidden = !s.runningAll && !s.runningStep;
   refreshBtn.disabled = s.loading;
 

@@ -57,6 +57,7 @@ internal static partial class Setup
         var script = Path.Combine(AppContext.BaseDirectory, "move-wsl-disk.ps1");
         if (!File.Exists(launcher) || !File.Exists(script))
             return Fail("missing", "This installation cannot move the disk itself; reinstall Russet from its GitHub release, then retry.");
+        if (Creating(await Component("vphone_component.sh"))) return Fail("busy", StillCreating, true);
         // The script says whether the move can start (drive, space) before Russet closes for it.
         var check = await PowerShell(MoveCommand(script, folder, check: true), visible: false);
         if (check.Exit != 0) return Fail("check", check.Output.Length > 0 ? check.Output : "The disk cannot move there.");

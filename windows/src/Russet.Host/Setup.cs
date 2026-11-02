@@ -193,10 +193,21 @@ internal static partial class Setup
         var built = vphone?.GetProperty("built").GetBoolean() == true;
         Add("vphone", built ? "done" : "needed", built ? "Built." : "Not built yet (about an hour).");
         var ready = vphone?.GetProperty("vmsReady").GetInt32() ?? 0;
-        Add("virtual-iphone", ready > 0 ? "done" : built ? "needed" : "unavailable",
-            ready > 0 ? $"{ready} ready." : "Create a virtual iPhone (several hours on first boot).");
+        if (Creating(vphone))
+            Add("virtual-iphone", "running", "Being created. This carries on while Russet is closed; the step shows done when it finishes.");
+        else
+            Add("virtual-iphone", ready > 0 ? "done" : built ? "needed" : "unavailable",
+                ready > 0 ? $"{ready} ready." : "Create a virtual iPhone (several hours on first boot).");
         return steps;
     }
+
+    // A virtual iPhone still being created (vphone_component.sh status): its create-vm.sh outlives
+    // the step that started it, so Russet may have closed, or crashed, since. Stopping Russet-Dev
+    // would break it, and a second creation would reset the virtual disk it restores.
+    static bool Creating(JsonElement? vphone) =>
+        vphone is { } status && status.TryGetProperty("creating", out var creating) && creating.ValueKind == JsonValueKind.True;
+
+    const string StillCreating = "A virtual iPhone is still being created (it carries on while Russet is closed). Wait for it to finish; Set up Russet shows it done.";
 
     static async Task<int> RunStep(string id, Dictionary<string, string> arguments)
     {
@@ -208,6 +219,7 @@ internal static partial class Setup
         }
         var current = (await Status()).Single(s => s.id == id);
         if (current.state == "done") { Emit(new { step = id, @event = "done" }); return 0; }
+        if (current.state == "running") return Fail("busy", StillCreating);
         switch (id)
         {
             case "wsl":
