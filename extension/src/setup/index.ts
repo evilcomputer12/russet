@@ -278,7 +278,8 @@ export function installExperience(
       title: "WSL memory limit (1 of 2)",
       prompt:
         `GB of this PC's ${machine} GB that WSL may use, shared by every WSL distro; now ${memoryNow} GB` +
-        `${now.memoryGB === undefined ? " (WSL's default)" : ""}${now.restartNeeded ? ", not yet applied" : ""}. The virtual iPhone needs about 16 GB.`,
+        `${now.memoryGB === undefined ? " (WSL's default)" : ""}${now.restartNeeded ? ", not yet applied" : ""}. The virtual iPhone runs best with 16 GB; ` +
+        `with less it gets less RAM of its own (4 GB in WSL's 8) and runs more slowly.`,
       value: String(memoryNow),
       validateInput: (v) => (/^\d+$/.test(v) && +v >= 4 && +v <= machine ? undefined : `A whole number from 4 to ${machine}.`),
     });

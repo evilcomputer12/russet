@@ -172,12 +172,48 @@ reset_interrupted_restore() {
   done
 }
 
+# The guest's RAM (MEM) and QEMU's code cache (TB_SIZE, MiB) for run-vphone.sh, sized to WSL's
+# memory: half the PC's RAM unless .wslconfig sets more (Russet: Change WSL Limits). Upstream's
+# 8 GiB guest and 2 GiB code cache want 16 GB in WSL (its docs/WSL.md). In the 8 GB WSL of a 16 GB
+# PC the kernel's OOM killer stops QEMU part-way, and the firmware step loses the SSH ramdisk
+# ("Connection to vphone closed by remote host"). Smaller WSLs get a smaller guest, down to 4 GiB,
+# and a 1 GiB code cache, which flushes more often. With the GPU the guest's RAM is a file in
+# /dev/shm, a tmpfs half WSL's size: enlarged to hold it. RUSSET_VPHONE_MEM (e.g. 6G) overrides.
+vm_memory() {
+  local total gb tb mem used size want
+  total=$(awk '$1 == "MemTotal:" { print int($2 / 1024) }' /proc/meminfo)
+  gb=$(awk -v m="$total" 'BEGIN { printf "%.1f", m / 1024 }')
+  [ "$total" -ge 7168 ] || die "WSL has $gb GB of memory and the virtual iPhone needs 8 GB or more: raise WSL's memory limit (command palette: Russet: Change WSL Limits), then run this step again"
+  if [ "$total" -ge 12288 ]; then tb=2048; else tb=1024; fi
+  mem=$(( (total - 2560 - tb) / 512 * 512 ))
+  [ "$mem" -le 8192 ] || mem=8192
+  [ "$mem" -ge 4096 ] || mem=4096
+  export MEM=${RUSSET_VPHONE_MEM:-${mem}M} TB_SIZE=${TB_SIZE:-$tb}
+  read -r used size < <(df -m --output=used,size /dev/shm | tail -1)
+  want=$(( used + $(numfmt --from=iec "$MEM") / 1048576 + 512 ))
+  if [ "$size" -lt "$want" ]; then
+    sudo -n mount -o "remount,size=${want}M" /dev/shm || die "/dev/shm could not be enlarged to $want MB for the virtual iPhone's RAM"
+  fi
+  log "the virtual iPhone gets $MEM of RAM and a ${TB_SIZE} MiB code cache (WSL has $gb GB)"
+}
+
+# Whether the kernel's OOM killer stopped a process since the epoch second $1. grep reads to the
+# end: with -q, journalctl's SIGPIPE would fail the pipeline under pipefail.
+oom_since() {
+  sudo -n journalctl -k --since "@$1" --no-pager 2>/dev/null | grep -i -E 'out of memory|oom-kill' >/dev/null
+}
+
+oom_hint() {
+  echo "WSL ran out of memory and stopped the virtual iPhone. Raise WSL's memory limit (command palette: Russet: Change WSL Limits), close other WSL distributions and memory-hungry apps, then run this step again"
+}
+
 create() {
   [ -x "$ROOT/setup/create-vm.sh" ] || die "run install first"
   if [ $# -eq 0 ]; then set -- --device "iPhone17,3" --ios 27.0.1 --scale 2; fi
   # vphone-cli finds guest-resources/ relative to the working directory.
   cd "$ROOT"
   reset_interrupted_restore "$@"
+  vm_memory
   # An update switches builds only while no creation holds this lock.
   mkdir -p "$VERSIONS"
   exec 7>"$VERSIONS/.use.lock"
@@ -186,7 +222,12 @@ create() {
   # the VM's name: clear it so upstream names the VM after the device and iOS.
   # In a session of its own: the VM it leaves running outlives this step's WSL session,
   # whose end would otherwise hang it up (QEMU: "terminating on signal 1").
-  env -u NAME setsid --wait "$ROOT/setup/create-vm.sh" "$@"
+  local since status
+  since=$(date +%s)
+  env -u NAME setsid --wait "$ROOT/setup/create-vm.sh" "$@" && return 0
+  status=$?
+  if oom_since "$since"; then die "$(oom_hint)"; fi
+  return "$status"
 }
 
 # Everything create-vm.sh needs from a build: QEMU, the APFS module, vphone-cli's tooling, the ROMs.
@@ -391,12 +432,19 @@ start() {
     done
     [ -n "${VK_DRIVER_FILES:-}" ] || die "lavapipe (mesa-vulkan-drivers) is missing; run the Virtual iPhone engine step on the setup page again"
   fi
+  vm_memory
+  local since
+  since=$(date +%s)
   ( cd "$ROOT" && GFX=1 SMP=${RUSSET_VPHONE_SMP:-6} WINDOW=${RUSSET_VPHONE_WINDOW:-0} CID=${CID:-3} setsid -f "$ROOT/run-vphone.sh" "$vm" \
       -vnc "127.0.0.1:0,websocket=127.0.0.1:$VNC_WS_PORT" -qmp "unix:$vm/qmp.sock,server=on,wait=off" \
       > "$vm/serial.log" 2>&1 < /dev/null )
   for i in $(seq 1 120); do
     vphoned GET /v1/health 2>/dev/null | grep -q '"status":"ok"' && break
-    sleep 1; vm_running || die "the virtual iPhone stopped while starting (see serial.log in its folder)"
+    sleep 1
+    if ! vm_running; then
+      oom_since "$since" && die "$(oom_hint)"
+      die "the virtual iPhone stopped while starting (see serial.log in its folder)"
+    fi
     sleep 9
   done
   vphoned GET /v1/health 2>/dev/null | grep -q '"status":"ok"' || die "the virtual iPhone did not answer within 20 minutes"
