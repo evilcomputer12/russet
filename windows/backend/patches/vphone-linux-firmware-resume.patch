@@ -1,0 +1,53 @@
+diff --git a/setup/create-vm.sh b/setup/create-vm.sh
+index bc81b54..6125e47 100755
+--- a/setup/create-vm.sh
++++ b/setup/create-vm.sh
+@@ -201,15 +201,42 @@ resolve_firmware
+ 
+ do_firmware() {
+   [ "$DRY" = 1 ] || mkdir -p "$CACHE"
+-  if [ -n "$CLOUD_URL" ] && [ ! -s "$CLOUDOS_LOCAL" ]; then
+-    dry curl -L --retry 3 -o "$CLOUDOS_LOCAL" "$CLOUD_URL"
+-  fi
+-  if [ -n "$IOS_URL" ] && [ ! -s "$IOS_LOCAL" ]; then
+-    dry curl -L --retry 3 -o "$IOS_LOCAL" "$IOS_URL"
+-  fi
++  if [ -n "$CLOUD_URL" ]; then fetch_firmware "$CLOUDOS_LOCAL" "$CLOUD_URL"; fi
++  if [ -n "$IOS_URL" ]; then fetch_firmware "$IOS_LOCAL" "$IOS_URL"; fi
+   log "  firmware: $IOS_LOCAL + ${CLOUDOS_LOCAL:-cloudOS $PAIR_CLOUDOS}"
+ }
+ 
++# An IPSW takes its name only once it arrived whole: curl writes FILE.part, and a later attempt
++# (or run) carries on from there; a connection that drops or stalls (under 1 KB/s for two
++# minutes) costs a retry, not the gigabytes received. Six attempts in a row that bring nothing
++# end the run, which carries on the same way when re-run. An IPSW is a zip, whose directory is at
++# its end: a cache file without one (cut short by an older run) goes back to FILE.part.
++is_zip() { python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).close()' "$1" 2>/dev/null; }
++fetch_firmware() {
++  local file=$1 url=$2 have rc idle=0
++  if [ -s "$file" ]; then
++    [ "$DRY" = 0 ] && [[ $file == "$CACHE"/* ]] && ! is_zip "$file" || return 0
++    log "  $(basename "$file") is incomplete: carrying on with its download"
++    mv -f "$file" "$file.part"
++  fi
++  if [ "$DRY" = 1 ]; then dry curl -fL -C - -o "$file.part" "$url"; return 0; fi
++  while :; do
++    have=$(stat -c %s "$file.part" 2>/dev/null || echo 0)
++    [ "$have" = 0 ] || log "  resuming $(basename "$file") at $((have / 1048576)) MiB"
++    rc=0
++    curl -fL --connect-timeout 30 --speed-limit 1024 --speed-time 120 -C - -o "$file.part" "$url" || rc=$?
++    [ "$rc" != 0 ] || break
++    # 33: the server ignored the range; start that file again.
++    [ "$rc" != 33 ] || rm -f "$file.part"
++    if [ "$(stat -c %s "$file.part" 2>/dev/null || echo 0)" -gt "$have" ]; then idle=0; else idle=$((idle + 1)); fi
++    [ "$idle" -lt 6 ] || die "$(basename "$file") did not download (curl exit $rc); check the connection, then re-run: it carries on where it stopped"
++    warn "the download of $(basename "$file") stopped (curl exit $rc); retrying in 10 s"
++    sleep 10
++  done
++  is_zip "$file.part" || { rm -f "$file.part"; die "$(basename "$file") arrived but is not a whole IPSW; re-run to download it again"; }
++  mv -f "$file.part" "$file"
++}
++
+ # The GPU driver's cryptex keys are not public (Apple answers 403 for the 23E5207q), so it
+ # comes from a stock cloudOS restore. Look in the usual places; GPU_DRIVER_BUNDLE= wins.
+ find_gpu_bundle() {
