@@ -19,7 +19,7 @@ use idevice::core_device_proxy::CoreDeviceProxy;
 use idevice::rsd::RsdHandshake;
 use idevice::{IdeviceService, ReadWrite};
 use jktcp::adapter::Adapter;
-use jktcp::handle::AdapterHandle;
+use jktcp::handle::{AdapterHandle, UdpSocketHandle};
 use russet_core::Result;
 use russet_core::error::codes;
 use time::OffsetDateTime;
@@ -68,6 +68,21 @@ pub fn select_mss(mtu: u16, cap: usize) -> usize {
 pub struct RsdEntry {
     pub port: u16,
     pub features: Vec<String>,
+}
+
+/// A UDP socket inside a device's tunnel. It stays bound until dropped.
+pub struct TunnelUdp {
+    pub socket: UdpSocketHandle,
+    /// This host's address in the tunnel.
+    pub host_ip: std::net::IpAddr,
+    /// The device's address in the tunnel.
+    pub peer_ip: std::net::IpAddr,
+}
+
+impl std::fmt::Debug for TunnelUdp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TunnelUdp").field("port", &self.socket.local_port()).finish_non_exhaustive()
+    }
 }
 
 /// An open tunnel: the jktcp adapter, the RSD map and its generation.
@@ -138,6 +153,13 @@ impl Tunnel {
             properties,
             active: Arc::new(AtomicUsize::new(0)),
         })
+    }
+
+    /// A UDP socket on the tunnel's userspace stack (a CoreDevice media stream's RTP receiver), with this host's
+    /// and the device's tunnel addresses, which the stream's negotiation names.
+    pub async fn bind_udp(&self) -> std::io::Result<TunnelUdp> {
+        let socket = self.handle.bind_udp(0).await?;
+        Ok(TunnelUdp { socket, host_ip: self.handle.host_ip(), peer_ip: self.handle.peer_ip() })
     }
 
     /// The port of an RSD service in this generation.

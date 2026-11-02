@@ -154,6 +154,9 @@ pub(crate) fn build(
     let perms = Arc::new(PermissionEngine::new(opts.mcp_policy.clone()));
     perms.install_typed_texts(typed);
     let web = WebEndpoint::new(opts.web_listen, shutdown.clone());
+    if let Err(e) = crate::web::mirror::register(&web) {
+        tracing::warn!("the mirror route is unavailable: {}", e.message());
+    }
     {
         let state = Arc::clone(&state);
         web.on_start(move |url| {

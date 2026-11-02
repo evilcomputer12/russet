@@ -257,6 +257,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     fn maps_sign_and_its_subcommands() {
         match parse(
             &[

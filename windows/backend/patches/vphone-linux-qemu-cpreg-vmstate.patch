@@ -1,0 +1,48 @@
+From 797ba87bb5e72074a8077cc2e3a2ceca5174fd4e Mon Sep 17 00:00:00 2001
+From: evilcomputer12 <evilcomputer12@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 07:52:29 +0100
+Subject: [PATCH 3/3] target/arm: fix cpreg_vmstate_array_len left 0 on a
+ freshly realized CPU
+
+init_cpreg_list set cpreg_vmstate_array_len from cpu->cpreg_array_len before
+that field was recomputed: cpreg_array_len still held its previous value (0
+on the first call, at realize), and is reset to 0 and counted up only
+afterwards, so cpreg_vmstate_array_len stayed 0 while cpreg_array_len became
+the real total.
+
+On the migration source cpu_pre_save overwrites it, so an outbound stream is
+correct; on the destination nothing else sets it, so an inbound migration
+failed loading cpu:cpreg_vmstate_array_len ("Invalid value N expecting
+positive value <= 0"). This blocked savevm/loadvm and migrate for the VM.
+
+Set it from arraylen, the final count, which the assert below confirms
+equals cpreg_array_len.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ target/arm/helper.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/qemu/target/arm/helper.c b/qemu/target/arm/helper.c
+index 841b55805c..2921e4e7e7 100644
+--- a/qemu/target/arm/helper.c
++++ b/qemu/target/arm/helper.c
+@@ -247,7 +247,14 @@ void init_cpreg_list(ARMCPU *cpu)
+     cpu->cpreg_values = g_new(uint64_t, arraylen);
+     cpu->cpreg_vmstate_indexes = g_new(uint64_t, arraylen);
+     cpu->cpreg_vmstate_values = g_new(uint64_t, arraylen);
+-    cpu->cpreg_vmstate_array_len = cpu->cpreg_array_len;
++    /*
++     * vphone-linux: arraylen, not cpu->cpreg_array_len, which still holds the
++     * previous count here (0 on the first call) and is only recomputed below.
++     * Leaving the stale value made cpreg_vmstate_array_len 0 on a freshly
++     * realized CPU, so an inbound migration failed cpu:cpreg_vmstate_array_len
++     * ("Invalid value N expecting positive value <= 0").
++     */
++    cpu->cpreg_vmstate_array_len = arraylen;
+ 
+     cpreg_key_array_algo_sort(key_array);
+ 
+-- 
+2.56.0.windows.4
+

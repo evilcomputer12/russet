@@ -1130,7 +1130,7 @@ specified by the device area [R dv-05, dv-32].
 
 ### 17.1 Crate `russet-gdbremote`
 
-Licence: MIT OR Apache-2.0, so it can go upstream to idevice. It has no device knowledge.
+Licence: AGPL-3.0-only, like all of Russet. It has no device knowledge.
 
 ```rust
 pub mod codec {

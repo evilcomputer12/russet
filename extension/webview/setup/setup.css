@@ -1,0 +1,132 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* SPDX-FileCopyrightText: 2026 Russet contributors */
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+}
+.page-head {
+  margin-bottom: 16px;
+}
+.summary {
+  margin: 12px 0 10px;
+}
+.summary progress {
+  height: 8px;
+}
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.step-head h2 {
+  flex: 1;
+}
+.icon {
+  width: 1.4em;
+  height: 1.4em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 0.85em;
+  flex: none;
+}
+.state-done .icon {
+  color: var(--r-ok);
+}
+.state-failed .icon {
+  color: var(--r-err);
+}
+.state-running .icon {
+  color: var(--r-info);
+}
+.state-unavailable .icon {
+  color: var(--r-warn);
+}
+.state-needed .icon,
+.state-unknown .icon {
+  color: var(--r-muted);
+}
+.state-running {
+  border-color: var(--vscode-focusBorder);
+}
+.detail {
+  margin: 6px 0 0 calc(1.4em + 10px);
+}
+.extras,
+.progress,
+.actions,
+.log,
+.step > .alert,
+.step > .muted {
+  margin: 10px 0 0 calc(1.4em + 10px);
+}
+fieldset.extras {
+  border: 1px solid var(--r-border);
+  border-radius: 4px;
+  padding: 6px 12px 10px;
+}
+legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+.radio {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0;
+}
+.radio label {
+  margin: 0;
+}
+.virtual {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: flex-end;
+}
+.virtual .field label {
+  margin-top: 0;
+}
+.virtual > p {
+  flex-basis: 100%;
+}
+.small {
+  font-size: 0.9em;
+}
+.cmd {
+  font-family: var(--vscode-editor-font-family, monospace);
+  background: var(--vscode-textCodeBlock-background);
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+.code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+}
+.log summary {
+  cursor: pointer;
+  color: var(--r-muted);
+}
+.log pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 12px);
+  background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
+  border: 1px solid var(--r-border);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

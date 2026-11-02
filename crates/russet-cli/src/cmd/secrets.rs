@@ -165,6 +165,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     fn invocations_become_params() {
         assert_eq!(parse(&["russet", "secrets", "status"]), SecretsRequest::Status);
         assert_eq!(

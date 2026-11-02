@@ -1,0 +1,203 @@
+diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/answer.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/answer.rs
+index 31d3e138..11190fa5 100644
+--- a/reims-vgpu/crates/reims-vgpu-vulkan/src/answer.rs
++++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/answer.rs
+@@ -2184,11 +2184,14 @@ pub enum Inexact {
+     /// Metal's carries them from a command that names no pipeline state, so the getter answers
+     /// the runtime's 0 ([`crate::gpu::icb`]'s `Sides::copied_lengths`).
+     IcbCopiedLength,
++    /// A texture, render or tile state, or pass without attachments of a sample count the device
++    /// does not render at, drawn at the next count it renders ([`crate::gpu::samples`]).
++    SampleCount,
+ }
+ 
+ impl Inexact {
+     /// Every kind, once.
+-    pub const ALL: [Self; 14] = [
++    pub const ALL: [Self; 15] = [
+         Self::HalfOutputBlend,
+         Self::BfloatLoaded,
+         Self::WriteRounding,
+@@ -2203,6 +2206,7 @@ impl Inexact {
+         Self::IcbIdentifierAfterEncoder,
+         Self::IcbLengthPastTheLastCommand,
+         Self::IcbCopiedLength,
++        Self::SampleCount,
+     ];
+ 
+     /// The kind's code, which its line names.
+@@ -2222,6 +2226,7 @@ impl Inexact {
+             Self::IcbIdentifierAfterEncoder => "inexact-icb-identifier-after-encoder",
+             Self::IcbLengthPastTheLastCommand => "inexact-icb-length-past-last-command",
+             Self::IcbCopiedLength => "inexact-icb-copied-length",
++            Self::SampleCount => "inexact-sample-count",
+         }
+     }
+ }
+@@ -2861,7 +2866,8 @@ mod tests {
+                 | Inexact::UniqueIdentifier
+                 | Inexact::IcbIdentifierAfterEncoder
+                 | Inexact::IcbLengthPastTheLastCommand
+-                | Inexact::IcbCopiedLength => {}
++                | Inexact::IcbCopiedLength
++                | Inexact::SampleCount => {}
+             }
+         }
+     }
+diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu.rs
+index b31c5a4b..2d6da389 100644
+--- a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu.rs
++++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu.rs
+@@ -38,6 +38,7 @@ mod paging_discard;
+ pub mod predication;
+ pub mod rate_map;
+ pub mod resource;
++pub(crate) mod samples;
+ #[cfg(test)]
+ #[cfg(target_os = "macos")]
+ mod rgbx;
+diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/desc.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/desc.rs
+index 106de019..09bd18f6 100644
+--- a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/desc.rs
++++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/desc.rs
+@@ -290,7 +290,7 @@ impl TextureFields {
+         desc.height = d.height;
+         desc.depth = d.depth;
+         desc.mipmap_level_count = d.mipmap_level_count;
+-        desc.sample_count = d.sample_count;
++        desc.sample_count = crate::gpu::samples::drawn("setSampleCount:", d.sample_count);
+         desc.array_length = d.array_length;
+         let (usage, private_usage) = usage_set(d.usage);
+         desc.usage = usage;
+@@ -1052,7 +1052,8 @@ impl RenderPassDescriptor<VulkanPlatform> for VulkanRenderPassDescriptor {
+             d.render_target_height = v;
+         }
+         if let Some(v) = set.default_raster_sample_count {
+-            d.default_raster_sample_count = v;
++            d.default_raster_sample_count =
++                crate::gpu::samples::drawn("setDefaultRasterSampleCount:", v);
+         }
+         // `setDefaultColorSampleCount:` (SPI) is kept nowhere: on this host it changes nothing a
+         // pass shows, with attachments or without (`mutgap_dec_render_default_color_samples`).
+diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/device.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/device.rs
+index 1053a266..d93db5ec 100644
+--- a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/device.rs
++++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/device.rs
+@@ -246,6 +246,7 @@ pub fn adopt(sel: &'static str, raw: rt::Device) -> VulkanDevice {
+         return kept.clone_ref();
+     }
+     metal_space::count_sampler_ids(&raw);
++    crate::gpu::samples::learn(&raw);
+     crate::answer::native::device_made(raw.properties());
+     let made = Obj::new(DeviceObject {
+         raw,
+diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/samples.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/samples.rs
+new file mode 100644
+index 00000000..7186fc34
+--- /dev/null
++++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/samples.rs
+@@ -0,0 +1,82 @@
++//! Sample counts a guest asks for that the device does not render at. An Apple9 GPU renders
++//! textures at 1, 2 and 4 samples, and iOS 27's system UI makes 2-sample depth textures whatever
++//! `supportsTextureSampleCount:` answers; lavapipe, the Vulkan driver vphone-linux runs on WSL,
++//! renders 1 and 4 only (`framebufferColorSampleCounts`, `framebufferDepthSampleCounts`), so the
++//! runtime refuses such a texture (`Unsupported`, `TextureSampleCount`) and the guest dies with it.
++//!
++//! Instead a count the device lacks is drawn at the next count it renders ([`drawn`]): a
++//! texture's (`TextureFields::of`, [`crate::gpu::desc`]), a render or tile state's
++//! `rasterSampleCount` ([`crate::gpu::serialized`]) and a pass's `defaultRasterSampleCount`
++//! ([`crate::gpu::desc`]) alike, so a pass's attachments and the states that draw into them keep
++//! agreeing, as Metal's must. What then differs from Metal's is relayed
++//! ([`Inexact::SampleCount`]): a texture's `sampleCount` and a function's `get_num_samples()`
++//! answer the count drawn, a resolve averages that many samples, and a function's `sample_mask`
++//! reaches the samples it names alone. A device that renders every count asked draws each as
++//! asked, and before a device is made ([`learn`]) every count is drawn as asked.
++
++use std::sync::atomic::{AtomicU8, Ordering};
++
++use metal2vulkan_runtime as rt;
++
++use crate::answer::{Inexact, inexact};
++
++/// The counts the process's first device renders textures at (`supportsTextureSampleCount:`),
++/// bit `n` for `2^n` samples; 0 before a device is made.
++static RENDERED: AtomicU8 = AtomicU8::new(0);
++
++/// Keeps the counts `device` renders textures at, where no device's are kept yet
++/// ([`crate::gpu::device::adopt`]).
++pub(crate) fn learn(device: &rt::Device) {
++    let props = device.properties();
++    let rendered = (0..8u32)
++        .filter(|&n| props.supports_texture_sample_count(1 << n) == Ok(true))
++        .fold(0u8, |mask, n| mask | 1 << n);
++    let _ = RENDERED.compare_exchange(0, rendered, Ordering::Relaxed, Ordering::Relaxed);
++}
++
++/// The count a texture, state or pass of `count` samples is drawn at ([`at`]), relayed at `sel`
++/// where it is not `count`.
++pub(crate) fn drawn<T: Copy + Into<u64> + TryFrom<u64>>(sel: &'static str, count: T) -> T {
++    let asked = count.into();
++    let drawn = at(RENDERED.load(Ordering::Relaxed), asked);
++    if drawn == asked {
++        return count;
++    }
++    inexact(sel, Inexact::SampleCount, || {
++        format!("{asked} samples, which the device does not render: drawn at {drawn}")
++    });
++    T::try_from(drawn).unwrap_or(count)
++}
++
++/// `count` where `rendered` (as [`RENDERED`]) holds it, is 0, or `count` is no power of two
++/// above 1; otherwise the next count above it that `rendered` holds, or `count` where none is,
++/// which the runtime refuses as before.
++fn at(rendered: u8, count: u64) -> u64 {
++    if rendered == 0 || count <= 1 || !count.is_power_of_two() || count >= 1 << 8 {
++        return count;
++    }
++    let n = count.trailing_zeros();
++    if rendered & (1 << n) != 0 {
++        return count;
++    }
++    (n + 1..8)
++        .find(|&m| rendered & (1 << m) != 0)
++        .map_or(count, |m| 1 << m)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::at;
++
++    #[test]
++    fn a_count_the_device_lacks_is_drawn_at_the_next_it_renders() {
++        let lavapipe = 0b101; // 1 and 4 samples
++        assert_eq!(at(lavapipe, 2), 4);
++        assert_eq!([at(lavapipe, 0), at(lavapipe, 1), at(lavapipe, 4)], [0, 1, 4]);
++        assert_eq!(at(lavapipe, 8), 8, "no count above it: refused as before");
++        assert_eq!(at(lavapipe, 3), 3, "no sample count");
++        let apple9 = 0b111;
++        assert_eq!([at(apple9, 1), at(apple9, 2), at(apple9, 4)], [1, 2, 4]);
++        assert_eq!(at(0, 2), 2, "before a device is made");
++    }
++}
+diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/serialized.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/serialized.rs
+index f5dd3e6e..c0c678a2 100644
+--- a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/serialized.rs
++++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/serialized.rs
+@@ -1393,7 +1393,7 @@ pub fn render(
+     desc.color_attachments = colors.map(|c| format(c.pixel_format).map(|_| c));
+     desc.depth_format = format(depth);
+     desc.stencil_format = format(stencil);
+-    desc.raster_sample_count = samples;
++    desc.raster_sample_count = crate::gpu::samples::drawn(RENDER_SEL, samples);
+     desc.alpha_to_coverage = alpha_to_coverage;
+     desc.alpha_to_one = alpha_to_one;
+     desc.rasterization_enabled = rasterization;
+@@ -1485,7 +1485,7 @@ pub fn tile(
+     });
+     let mut desc = TileRenderPipelineDescriptor::new(function);
+     desc.color_attachment_formats = formats.map(|f| (f != PixelFormat::Invalid).then_some(f));
+-    desc.raster_sample_count = samples;
++    desc.raster_sample_count = crate::gpu::samples::drawn(TILE_SEL, samples);
+     desc.threadgroup_size_matches_tile_size = matches_tile;
+     desc.max_total_threads_per_threadgroup = (max_threads != 0).then_some(max_threads);
+     desc.buffers = buffers;

@@ -281,6 +281,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     fn path_filter_hides_only_the_named_directory() {
         assert_eq!(path_without("/a:/h/.local/bin:/b", Path::new("/h/.local/bin")), "/a:/b");
     }

@@ -19,6 +19,7 @@ use russet_core::error::{Error, codes};
 use russet_secrets::{SecretBytes, SecretId, SecretKind, SecretStore};
 use russet_sign::{CertificateKind, CodeSigningIdentity, InMemoryIdentity, KeyInfoSigner, certificate_info};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::fsutil::{io_error, parse_rfc3339, rfc3339, shown, write_private};
 
@@ -76,6 +77,14 @@ impl CertKind {
         match self {
             Self::Development => "development",
             Self::Distribution => "distribution",
+        }
+    }
+
+    /// The App Store Connect `certificateType` a new certificate of this kind is created as.
+    pub fn certificate_type(self) -> &'static str {
+        match self {
+            Self::Development => "DEVELOPMENT",
+            Self::Distribution => "DISTRIBUTION",
         }
     }
 }
@@ -165,10 +174,20 @@ impl CodeSigningIdentity for LoadedIdentity {
     }
 }
 
-/// A private key generated for a CSR, before the certificate exists (W12).
-#[derive(Debug)]
+/// A private key generated for a CSR, before the certificate exists. It is sealed in the secret store as
+/// `signing-key/pending-<random>` before Apple sees the CSR, so a failure between Apple issuing the certificate and
+/// [`IdentityStore::commit`] loses no key.
 pub struct PendingKey {
-    _f0: (),
+    team: String,
+    kind: CertKind,
+    key_pkcs8: Zeroizing<Vec<u8>>,
+    secret: SecretId,
+}
+
+impl std::fmt::Debug for PendingKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingKey").field("kind", &self.kind).finish_non_exhaustive()
+    }
 }
 
 /// Signing identities (public parts on disk, private keys sealed).
@@ -290,10 +309,52 @@ impl IdentityStore {
         self.store(&identity, None, None).await
     }
 
-    /// Returns the pending key and the PEM CSR (W12).
-    pub fn new_csr(&self, _team: &str, _k: CertKind) -> Result<(PendingKey, String)> {
-        Err(Error::new(codes::core::NOT_IMPLEMENTED, "creating certificates is not available yet")
-            .with_hint("Wave 1 reuses an existing identity: `russet account import --from-xtool`. Certificate creation lands in W12."))
+    /// A new RSA-2048 key for `team`, sealed as a pending key, and its PKCS#10 CSR (PEM). Synchronous as in
+    /// ARCHITECTURE §5.3, like [`Self::load`]; async callers use [`Self::new_csr_async`].
+    pub fn new_csr(&self, team: &str, k: CertKind) -> Result<(PendingKey, String)> {
+        block_on_secrets(self.new_csr_async(team, k))
+    }
+
+    /// [`Self::new_csr`] for async callers.
+    pub async fn new_csr_async(&self, team: &str, kind: CertKind) -> Result<(PendingKey, String)> {
+        let (key_pkcs8, csr_pem) = tokio::task::spawn_blocking(crate::csr::generate)
+            .await
+            .map_err(|e| Error::new(codes::core::INTERNAL, format!("the key generation failed: {e}")))??;
+        // The name carries no team: `secrets.list` shows secret names.
+        let mut nonce = [0u8; 8];
+        russet_core::time::os_fill(&mut nonce);
+        let name = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let secret = SecretId { kind: SecretKind::SigningKey, name: format!("pending-{name}") };
+        self.secrets.put(&secret, "Signing key awaiting its certificate", SecretBytes::new(key_pkcs8.to_vec())).await?;
+        Ok((PendingKey { team: team.to_owned(), kind, key_pkcs8, secret }, csr_pem))
+    }
+
+    /// Stores the identity of `cert_der`, the certificate Apple issued for `pending`'s CSR (`asc_id` is its portal
+    /// id), and drops the pending key. Synchronous like [`Self::load`]; async callers use [`Self::commit_async`].
+    pub fn commit(&self, pending: PendingKey, cert_der: &[u8], asc_id: Option<String>) -> Result<SigningIdentity> {
+        block_on_secrets(self.commit_async(pending, cert_der, asc_id))
+    }
+
+    /// [`Self::commit`] for async callers.
+    pub async fn commit_async(
+        &self,
+        pending: PendingKey,
+        cert_der: &[u8],
+        asc_id: Option<String>,
+    ) -> Result<SigningIdentity> {
+        if !crate::csr::certifies(cert_der, &pending.key_pkcs8)? {
+            return Err(Error::new(
+                codes::sign::NO_IDENTITY,
+                "the new certificate is not for the key Russet sent; the key stays in the secret store",
+            )
+            .with_hint("Report it with `russet bugreport`."));
+        }
+        let identity = InMemoryIdentity::from_pkcs8(cert_der.to_vec(), &pending.key_pkcs8, Some(pending.team.clone()))?;
+        let date = rfc3339(SystemTime::now());
+        let label = format!("Russet {} certificate ({})", pending.kind.as_str(), date.get(..10).unwrap_or(&date));
+        let stored = self.store_with(&identity, Some(&label), Some("russet"), asc_id).await?;
+        self.secrets.delete(&pending.secret).await?;
+        Ok(stored)
     }
 
     /// Seals the key and writes the public part. Replaces an identity with the same id.
@@ -302,6 +363,17 @@ impl IdentityStore {
         identity: &InMemoryIdentity,
         label: Option<&str>,
         imported_from: Option<&str>,
+    ) -> Result<SigningIdentity> {
+        self.store_with(identity, label, imported_from, None).await
+    }
+
+    /// [`Self::store`] with the certificate's portal id, when Russet created it.
+    async fn store_with(
+        &self,
+        identity: &InMemoryIdentity,
+        label: Option<&str>,
+        imported_from: Option<&str>,
+        asc_certificate_id: Option<String>,
     ) -> Result<SigningIdentity> {
         let info = identity.info()?;
         let team = identity.team_id().to_owned();
@@ -330,7 +402,7 @@ impl IdentityStore {
             common_name: info.common_name.clone().unwrap_or_default(),
             not_after: info.not_after,
             label,
-            asc_certificate_id: None,
+            asc_certificate_id,
             sha1: info.sha1.clone(),
             imported_from: imported_from.map(str::to_owned),
             cert_der: identity.certificate_der().to_vec(),
@@ -348,7 +420,7 @@ impl IdentityStore {
             common_name: signing.common_name.clone(),
             not_after: rfc3339(info.not_after),
             label: signing.label.clone(),
-            asc_certificate_id: None,
+            asc_certificate_id: signing.asc_certificate_id.clone(),
             sha1: info.sha1,
             imported_from: signing.imported_from.clone(),
             secret: format!("secret:{}", signing.secret_id()),
@@ -412,4 +484,48 @@ fn read_identity(json_path: &Path) -> Result<SigningIdentity> {
         imported_from: f.imported_from,
         cert_der,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use russet_secrets::memory::MemoryStore;
+    use russet_sign::testpki;
+
+    const TEAM: &str = "SYNTHTEAM1";
+
+    #[tokio::test]
+    async fn a_created_certificate_becomes_a_sealed_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = Arc::new(MemoryStore::new());
+        let store = IdentityStore::new(dir.path(), secrets.clone());
+
+        // The key is sealed before Apple sees the CSR, under a name without the team.
+        let (pending, csr) = store.new_csr_async(TEAM, CertKind::Development).await.unwrap();
+        assert!(csr.starts_with("-----BEGIN CERTIFICATE REQUEST-----"));
+        let pending_secret = pending.secret.clone();
+        assert!(pending_secret.name.starts_with("pending-") && !pending_secret.name.contains(TEAM));
+        assert_eq!(secrets.get(&pending_secret).await.unwrap().unwrap().expose(), &pending.key_pkcs8[..]);
+
+        // A certificate for another key is refused, and that pending key stays sealed.
+        let (other, _) = store.new_csr_async(TEAM, CertKind::Development).await.unwrap();
+        let other_secret = other.secret.clone();
+        let stranger = testpki::development_identity(TEAM);
+        let err = store.commit_async(other, &stranger.cert_der, None).await.unwrap_err();
+        assert_eq!(err.code(), codes::sign::NO_IDENTITY);
+        assert!(secrets.get(&other_secret).await.unwrap().is_some());
+
+        // Apple's certificate for the CSR's key becomes a loadable identity; the pending key goes.
+        let issued =
+            testpki::identity_from_pkcs8(TEAM, &format!("Apple Development: Russet ({TEAM})"), &pending.key_pkcs8, 365);
+        let stored = store.commit_async(pending, &issued.cert_der, Some("CERT1".into())).await.unwrap();
+        assert_eq!((stored.team_id.as_str(), stored.kind), (TEAM, CertKind::Development));
+        assert_eq!(stored.imported_from.as_deref(), Some("russet"));
+        assert!(stored.label.starts_with("Russet development certificate ("), "{}", stored.label);
+        assert_eq!(store.get(&stored.id).unwrap().asc_certificate_id.as_deref(), Some("CERT1"));
+        assert_eq!(store.load_async(&stored.id).await.unwrap().certificate_der(), &issued.cert_der[..]);
+        assert!(secrets.get(&pending_secret).await.unwrap().is_none(), "the pending key is dropped");
+    }
 }

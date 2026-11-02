@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Property List",
+  "scopeName": "text.xml.plist",
+  "patterns": [
+    {
+      "include": "text.xml"
+    }
+  ]
+}

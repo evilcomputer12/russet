@@ -6,7 +6,7 @@
 //!
 //! W2 owns `mod.rs` and `server.rs`; `mirror.rs` belongs to W10 and `mcp.rs` to W20. Areas register their routes
 //! with [`WebEndpoint::route`] before the first [`WebEndpoint::ensure_started`]; the URL then goes into
-//! `russetd.json` (`web`) and `initialize.result.endpoints.web`. Wave 1 registers no routes.
+//! `russetd.json` (`web`) and `initialize.result.endpoints.web`. The daemon registers `/mirror/v1` as it starts.
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};

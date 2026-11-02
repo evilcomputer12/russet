@@ -219,6 +219,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     fn the_device_tree_parses() {
         crate::root_command().debug_assert();
         let m = parse(&["device", "ddi", "mount", "--dir", "/srv/ddi/27A266a/iOS", "--force"]);
@@ -236,6 +237,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     fn relative_paths_become_absolute() {
         assert!(std::path::Path::new(&absolute("ddi/iOS")).is_absolute());
         assert_eq!(absolute("/x"), "/x");

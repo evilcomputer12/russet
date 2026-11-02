@@ -13,9 +13,10 @@
 //!   with `-e _NSExtensionMain`.
 //! - **The invocation** gives the environment explicitly: never `SDKROOT` (it breaks SwiftPM's host manifest link
 //!   [V build V4]), `XCODE_EXTRA_PLATFORM_FOLDERS` = the platform view, the SDK's linker directory first on `PATH`
-//!   (Swift Build finds `dsymutil` there), and only an allowlist of the caller's variables, so Swift Build's
-//!   failure dumps cannot leak secrets [V build V7]. The SDK fix lives in the toolset, so dependency dylibs get
-//!   `sdk 27.0` too.
+//!   (Swift Build finds `dsymutil` there), the toolchain's `usr/lib/swift/linux` as `LD_LIBRARY_PATH` (its lld
+//!   needs the libraries bundled there on newer distros), and only an allowlist of the caller's variables, so
+//!   Swift Build's failure dumps cannot leak secrets [V build V7]. The SDK fix lives in the toolset, so dependency
+//!   dylibs get `sdk 27.0` too.
 //! - **Output** `[n / m]` lines become `progress` events and `file:line:col: error|warning|note:` lines
 //!   `diagnostic` events; lld's benign `does not support linking for platform iOS` is dropped and `env -i …` dumps
 //!   are redacted.
@@ -438,6 +439,16 @@ const ENV_ALLOWLIST: &[&str] = &[
     "ComSpec",
 ];
 
+/// The toolchain's runtime library directory (`<root>/usr/lib/swift/linux`), when it exists. Swift Build runs the
+/// toolchain's own lld while it plans a link, and a toolchain built for an older distro finds the libraries it
+/// bundles there (`libxml2.so.2` on Ubuntu 26.04) only through `LD_LIBRARY_PATH`, as LLDB does (ARCHITECTURE
+/// §16.2). Without them lld cannot start, and planning fails with "Could not parse output of `ld.lld
+/// -version_details` as JSON".
+pub fn toolchain_library_dir(swift: &Utf8Path) -> Option<Utf8PathBuf> {
+    let dir = swift.parent()?.parent()?.join("lib/swift/linux");
+    dir.is_dir().then_some(dir)
+}
+
 /// The explicit environment of a SwiftPM process: the allowlist, `PATH` with `prepend` first, `extra`; never
 /// `SDKROOT` (ARCHITECTURE §16.4; build §4.2).
 pub fn tool_env(prepend: &[&Utf8Path], extra: &[(&str, &str)]) -> BTreeMap<OsString, OsString> {
@@ -531,10 +542,12 @@ impl Invocation<'_> {
         }
         let tools = &self.facts.tools;
         let swift_bin = tools.swift.parent().unwrap_or(Utf8Path::new(""));
-        let env = tool_env(
-            &[&tools.linker_dir, swift_bin],
-            &[("XCODE_EXTRA_PLATFORM_FOLDERS", self.facts.platforms_view.as_str())],
-        );
+        let library_dir = toolchain_library_dir(&tools.swift);
+        let mut extra = vec![("XCODE_EXTRA_PLATFORM_FOLDERS", self.facts.platforms_view.as_str())];
+        if let Some(dir) = &library_dir {
+            extra.push(("LD_LIBRARY_PATH", dir.as_str()));
+        }
+        let env = tool_env(&[&tools.linker_dir, swift_bin], &extra);
         CommandSpec {
             program: tools.swift.as_std_path().to_owned(),
             args,
@@ -886,6 +899,17 @@ mod tests {
         // The process-environment form never has SDKROOT either, whatever the test runner's environment holds.
         let env = tool_env(&[Utf8Path::new("/linker/bin")], &[("XCODE_EXTRA_PLATFORM_FOLDERS", "/v")]);
         assert!(!env.contains_key(&OsString::from("SDKROOT")));
+    }
+
+    #[test]
+    fn the_toolchain_library_dir_is_used_only_when_present() {
+        let root = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(root.path()).unwrap();
+        let swift = root.join("usr/bin/swift");
+        assert_eq!(toolchain_library_dir(&swift), None);
+        std::fs::create_dir_all(root.join("usr/lib/swift/linux")).unwrap();
+        assert_eq!(toolchain_library_dir(&swift), Some(root.join("usr/lib/swift/linux")));
+        assert_eq!(toolchain_library_dir(Utf8Path::new("swift")), None);
     }
 
     #[test]

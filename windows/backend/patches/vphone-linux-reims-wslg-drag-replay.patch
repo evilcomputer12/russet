@@ -1,0 +1,102 @@
+diff --git a/reims-vgpu/crates/reims-vgpu-window/src/native/linux/input.rs b/reims-vgpu/crates/reims-vgpu-window/src/native/linux/input.rs
+index fc8b4aa4..7acc097c 100644
+--- a/reims-vgpu/crates/reims-vgpu-window/src/native/linux/input.rs
++++ b/reims-vgpu/crates/reims-vgpu-window/src/native/linux/input.rs
+@@ -168,8 +168,17 @@ pub(crate) struct Input {
+     /// Whether a click in the image captures input (vphone-linux, [`capture_input`]); off, a
+     /// click is only forwarded.
+     no_capture: bool,
++    /// Where the buttons held went down (the window's points), and whether the pointer moved
++    /// since: a drag with no motion is replayed at the release ([`Input::button_up`]).
++    pressed_at: Option<(f64, f64)>,
++    dragged: bool,
+ }
+ 
++/// How far (the window's points) a release must land from its press for a drag that brought no
++/// motion to be replayed, and in how many moves.
++const REPLAY_MIN_POINTS: f64 = 4.0;
++const REPLAY_STEPS: u32 = 8;
++
+ impl Input {
+     /// Nothing held, nothing captured, no keyboard.
+     pub(crate) fn new() -> Input {
+@@ -224,6 +233,9 @@ impl Input {
+     /// The pointer moved.
+     pub(crate) fn moved(&mut self, at: &At) {
+         if let (Some(point), Some(mode)) = (at.point, guest_mode(at)) {
++            if self.buttons != 0 && self.pressed_at.is_some_and(|from| from != point) {
++                self.dragged = true;
++            }
+             self.pointer(point, at, mode, false);
+         }
+     }
+@@ -252,6 +264,10 @@ impl Input {
+             self.capture.click_in_image(!focusing).forward
+         };
+         if forward {
++            if self.buttons == 0 {
++                self.pressed_at = Some(point);
++                self.dragged = false;
++            }
+             self.buttons |= bit;
+             self.pointer(point, at, mode, true);
+         }
+@@ -265,7 +281,23 @@ impl Input {
+         if self.buttons & bit == 0 {
+             return;
+         }
++        if let (Some(point), Some(mode), Some(from)) = (at.point, guest_mode(at), self.pressed_at) {
++            // vphone-linux: WSLg sends no motion while a button is held (microsoft/wslg#1300), so a
++            // swipe arrives as a press here and a release there, which the guest would take for a
++            // tap. Replay the way between them, held, as the drag it was.
++            let (dx, dy) = (point.0 - from.0, point.1 - from.1);
++            if !self.dragged && dx.hypot(dy) >= REPLAY_MIN_POINTS {
++                for step in 1..=REPLAY_STEPS {
++                    let t = f64::from(step) / f64::from(REPLAY_STEPS);
++                    self.pointer((from.0 + dx * t, from.1 + dy * t), at, mode, false);
++                }
++            }
++        }
+         self.buttons &= !bit;
++        if self.buttons == 0 {
++            self.pressed_at = None;
++            self.dragged = false;
++        }
+         if let (Some(point), Some(mode)) = (at.point, guest_mode(at)) {
+             self.pointer(point, at, mode, true);
+         }
+@@ -465,6 +497,34 @@ mod tests {
+         assert_eq!(input.take(), vec![pointer(100, 50, BUTTON_RIGHT)]);
+     }
+ 
++    /// vphone-linux: WSLg brings no motion while a button is held (microsoft/wslg#1300): a press
++    /// and a release elsewhere are replayed as the drag between them, button held, then released;
++    /// a drag that did bring motion is sent as it came.
++    #[test]
++    fn a_drag_without_motion_is_replayed_as_a_swipe() {
++        let mut input = focused();
++        input.no_capture = true;
++        input.button_down(BUTTON_LEFT, 1_000_000_000, &at((80.0, 25.0)));
++        input.button_up(BUTTON_LEFT, &at((40.0, 25.0)));
++        let sent = input.take();
++        assert_eq!(sent.first(), Some(&pointer(160, 50, BUTTON_LEFT)));
++        assert_eq!(sent.len(), 1 + REPLAY_STEPS as usize + 1);
++        assert_eq!(sent[REPLAY_STEPS as usize], pointer(80, 50, BUTTON_LEFT));
++        assert_eq!(sent.last(), Some(&pointer(80, 50, 0)));
++
++        input.button_down(BUTTON_LEFT, 2_000_000_000, &at((80.0, 25.0)));
++        input.moved(&at((60.0, 25.0)));
++        input.button_up(BUTTON_LEFT, &at((40.0, 25.0)));
++        assert_eq!(
++            input.take(),
++            vec![pointer(160, 50, BUTTON_LEFT), pointer(120, 50, BUTTON_LEFT), pointer(80, 50, 0)]
++        );
++
++        input.button_down(BUTTON_LEFT, 3_000_000_000, &at((80.0, 25.0)));
++        input.button_up(BUTTON_LEFT, &at((81.0, 25.0)));
++        assert_eq!(input.take().len(), 2, "a tap stays a tap");
++    }
++
+     /// vphone-linux: without `REIMS_VGPU_CAPTURE_INPUT=1` a click in the image is sent and
+     /// captures nothing, so the pointer is never held in the window.
+     #[test]

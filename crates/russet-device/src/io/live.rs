@@ -492,6 +492,13 @@ impl ServiceConnector for LiveConnector {
         self.with_tunnel(udid, &format!("tunnel port {port}"), move |t| Box::pin(t.connect_port(port, timeout))).await
     }
 
+    async fn tunnel_udp(&self, udid: &Udid) -> Result<crate::tunnel::TunnelUdp> {
+        self.with_tunnel(udid, "a media stream socket", |t| {
+            Box::pin(async move { t.bind_udp().await.map_err(crate::tunnel::TunnelConnectError::Refused) })
+        })
+        .await
+    }
+
     async fn usbmux_port(&self, udid: &Udid, port: u16) -> Result<Box<dyn ReadWrite>> {
         self.provider(udid).await?.connect_raw(port).await
     }

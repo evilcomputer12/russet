@@ -92,7 +92,7 @@ async fn initialize(cx: DaemonCtx, rq: RequestCtx, params: InitializeParams) -> 
         capabilities: ServerCapabilities {
             methods: russet_protocol::registry().iter().map(|m| m.name.to_owned()).collect(),
             notifications: russet_protocol::notifications().iter().map(|n| n.name.to_owned()).collect(),
-            features: ServerFeatures { mirror: false, wifi_devices: false, mcp_http: false },
+            features: ServerFeatures { mirror: true, wifi_devices: false, mcp_http: false },
         },
         endpoints: ServerEndpoints { web: cx.web.url() },
     })

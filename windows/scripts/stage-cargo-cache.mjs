@@ -1,0 +1,12 @@
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+const here=path.dirname(fileURLToPath(import.meta.url));
+const python=path.join(process.env.USERPROFILE,'.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe');
+const source=spawn(python,[path.join(here,'cargo-cache-archive.py')],{windowsHide:true,stdio:['ignore','pipe','inherit']});
+const destination=spawn(path.join(process.env.SystemRoot,'System32/wsl.exe'),['-d','Russet-Dev','-u','russet','--exec','tar','-xf','-','-C','/home/russet/.cargo'],{windowsHide:true,stdio:['pipe','ignore','inherit']});
+source.stdout.pipe(destination.stdin);
+destination.stdin.on('error',()=>source.kill());
+const [[a],[b]]=await Promise.all([once(source,'exit'),once(destination,'exit')]);
+if(a||b)throw new Error(`Registry staging failed (${a},${b})`);

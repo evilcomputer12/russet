@@ -14,7 +14,6 @@ import {
   type MessageConnection,
 } from "vscode-jsonrpc/node";
 import {
-  RussetClient as GeneratedClient,
   type Methods,
   type Notifications,
   type ClientMethods,
@@ -22,6 +21,8 @@ import {
 } from "../generated/protocol";
 import { Emitter } from "../util/disposables";
 import { defaultSocketPath, russetBinary } from "./locate";
+import type { WindowsBackend, BackendRelay } from "./windowsBackend";
+import { IdeRpcClient } from "./rpcClient";
 
 export type ConnectionState =
   | "stopped"
@@ -35,6 +36,7 @@ export interface RussetClientOptions {
   binDir: string;
   autoStart: boolean;
   clientVersion: string;
+  backend?: WindowsBackend;
 }
 
 const PROTOCOL_MAJOR = 1;
@@ -50,7 +52,9 @@ export class RussetClient implements vscode.Disposable {
 
   private socket?: net.Socket;
   private connection?: MessageConnection;
-  private rpc?: GeneratedClient;
+  private rpc?: IdeRpcClient;
+  private backendRelay?: BackendRelay;
+  private connecting?: Promise<void>;
 
   private _state: ConnectionState = "stopped";
   private readonly _onDidChangeState = new Emitter<ConnectionState>();
@@ -103,7 +107,14 @@ export class RussetClient implements vscode.Disposable {
     await this.connectWithBackoff();
   }
 
-  private async connectWithBackoff(): Promise<void> {
+  private connectWithBackoff(): Promise<void> {
+    if (!this.connecting) {
+      this.connecting = this.runConnectWithBackoff().finally(() => { this.connecting = undefined; });
+    }
+    return this.connecting;
+  }
+
+  private async runConnectWithBackoff(): Promise<void> {
     if (this.disposed) {
       return;
     }
@@ -118,7 +129,7 @@ export class RussetClient implements vscode.Disposable {
         return;
       } catch (err) {
         this.log.debug(`[daemon] connect attempt ${attempt + 1} failed: ${String(err)}`);
-        if (this.opts.autoStart && !autoStartTried && attempt >= 1) {
+        if (this.opts.autoStart && !this.opts.backend && !autoStartTried && attempt >= 1) {
           autoStartTried = true;
           this.tryAutoStart();
         }
@@ -132,14 +143,19 @@ export class RussetClient implements vscode.Disposable {
     }
   }
 
-  private connectOnce(): Promise<void> {
+  private async connectOnce(): Promise<void> {
+    const relay = await this.opts.backend?.open();
+    if (this.disposed) { relay?.dispose(); return; }
+    this.backendRelay = relay;
     return new Promise<void>((resolve, reject) => {
-      const socket = net.connect(this.socketPath);
+      const socket = net.connect(relay?.endpoint ?? this.socketPath);
       let settled = false;
 
       socket.once("error", (err) => {
         if (!settled) {
           settled = true;
+          socket.destroy();
+          relay?.dispose();
           reject(err);
         }
       });
@@ -152,16 +168,22 @@ export class RussetClient implements vscode.Disposable {
           new SocketMessageWriter(socket),
         );
         this.connection = connection;
-        this.rpc = new GeneratedClient(connection);
+        this.rpc = new IdeRpcClient(connection);
 
-        connection.onClose(() => this.handleDrop("connection closed"));
-        connection.onError(() => this.handleDrop("connection error"));
-        socket.once("close", () => this.handleDrop("socket closed"));
+        const dropped = (reason: string): void => {
+          if (this.socket === socket) this.handleDrop(reason);
+        };
+        connection.onClose(() => dropped("connection closed"));
+        connection.onError(() => dropped("connection error"));
+        socket.once("close", () => dropped("socket closed"));
 
         this.replayHandlers();
         connection.listen();
 
-        this.initialize().then(resolve).catch(reject);
+        this.initialize().then(resolve).catch((error: unknown) => {
+          this.teardownConnection();
+          reject(error);
+        });
       });
     });
   }
@@ -219,6 +241,12 @@ export class RussetClient implements vscode.Disposable {
   }
 
   private teardownConnection(): void {
+    const connection = this.connection;
+    const socket = this.socket;
+    // Clear identity before dispose fires close/error callbacks, so an old
+    // connection cannot launch another concurrent reconnect or tear down a new one.
+    this.connection = undefined;
+    this.socket = undefined;
     for (const d of this.perConnectionDisposables.splice(0)) {
       try {
         d.dispose();
@@ -227,18 +255,20 @@ export class RussetClient implements vscode.Disposable {
       }
     }
     try {
-      this.connection?.dispose();
+      connection?.dispose();
     } catch {
       /* ignore */
     }
     try {
-      this.socket?.destroy();
+      socket?.destroy();
     } catch {
       /* ignore */
     }
     this.connection = undefined;
     this.rpc = undefined;
     this.socket = undefined;
+    this.backendRelay?.dispose();
+    this.backendRelay = undefined;
   }
 
   private replayHandlers(): void {

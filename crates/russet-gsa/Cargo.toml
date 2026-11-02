@@ -14,10 +14,38 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# `GsaFake`: a local GrandSlam + developerservices2 server for the mocked suites of the crates above (W22).
+fake = ["dep:wiremock", "russet-anisette/fake"]
+
 [dependencies]
 aes-gcm.workspace = true
+async-trait.workspace = true
+base64 = "0.22.1"
+cbc = { version = "0.2.1", features = ["alloc"] }
+flate2.workspace = true
 num-bigint.workspace = true
+plist.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+ring.workspace = true
 russet-anisette.workspace = true
 russet-asc.workspace = true
 russet-core.workspace = true
 russet-doctor.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time = { workspace = true, features = ["formatting", "parsing"] }
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+url.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+wiremock = { version = "0.6.5", optional = true }
+zeroize.workspace = true
+
+[dev-dependencies]
+russet-anisette = { workspace = true, features = ["fake"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber.workspace = true
+wiremock = "0.6.5"

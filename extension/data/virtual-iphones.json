@@ -1,0 +1,32 @@
+{
+  "_meta": {
+    "schemaVersion": 1,
+    "source": "vphone-linux setup/data/compatibility.json (synced 2026-10-26), iPhone pairings only",
+    "comment": "Device and iOS pairings the virtual-iphone setup step can create. linuxTested marks pairings verified end to end on a Linux host. screen is the panel size in pixels, used for the device frame until live frames report their own size."
+  },
+  "default": { "device": "iPhone17,3", "ios": "27.0.1" },
+  "devices": [
+    { "id": "iPhone17,3", "name": "iPhone 16 Pro", "screen": [1206, 2622] },
+    { "id": "iPhone18,1", "name": "iPhone 17 Pro", "screen": [1206, 2622] },
+    { "id": "iPhone18,2", "name": "iPhone 17 Pro Max", "screen": [1320, 2868] },
+    { "id": "iPhone19,2", "name": "iPhone 18 Pro", "screen": [1206, 2622] },
+    { "id": "iPhone19,4", "name": "iPhone Duo", "screen": [1398, 2034] },
+    { "id": "iPhone11,6", "name": "iPhone XS Max", "screen": [1242, 2688] }
+  ],
+  "pairings": [
+    { "device": "iPhone17,3", "ios": "27.0.1", "build": "24A446", "linuxTested": true },
+    { "device": "iPhone17,3", "ios": "26.6.2", "build": "23G90", "linuxTested": true },
+    { "device": "iPhone17,3", "ios": "27.0", "build": "24A435", "linuxTested": false },
+    { "device": "iPhone17,3", "ios": "26.6", "build": "23G71", "linuxTested": false },
+    { "device": "iPhone17,3", "ios": "26.5", "build": "23F77", "linuxTested": false },
+    { "device": "iPhone17,3", "ios": "26.4", "build": "23E246", "linuxTested": false },
+    { "device": "iPhone18,1", "ios": "27.0.1", "build": "24A446", "linuxTested": false },
+    { "device": "iPhone18,1", "ios": "26.6.2", "build": "23G90", "linuxTested": false },
+    { "device": "iPhone18,2", "ios": "27.0.1", "build": "24A446", "linuxTested": false },
+    { "device": "iPhone19,2", "ios": "27.0.1", "build": "24A446", "linuxTested": false },
+    { "device": "iPhone19,4", "ios": "27.1", "build": "24A94425", "linuxTested": true },
+    { "device": "iPhone11,6", "ios": "18.7.2", "build": "22H124", "linuxTested": false },
+    { "device": "iPhone11,6", "ios": "18.6", "build": "22G86", "linuxTested": false },
+    { "device": "iPhone11,6", "ios": "18.1", "build": "22B83", "linuxTested": false }
+  ]
+}

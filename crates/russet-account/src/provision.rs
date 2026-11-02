@@ -512,8 +512,8 @@ impl Provisioner {
     /// Then the mutations run in dependency order and every chosen profile — reused or just created — is
     /// downloaded and cached for `russet sign`.
     ///
-    /// Certificate creation is a separate step (§6.6): a plan whose only path forward is `CreateCertificate` is
-    /// refused here with a hint to import or reuse one, since the CSR flow is not wired yet.
+    /// A plan with `CreateCertificate` creates the signing identity before anything else, so the new profiles can
+    /// bind its certificate.
     pub async fn apply(&self, plan: &ProvisionPlan, approval: &ApprovalRef) -> Result<ProvisionOutcome> {
         if !plan.mutations.is_empty() && approval.approval_id.is_none() {
             let summary: Vec<String> = plan.mutations.iter().map(Mutation::summary).collect();
@@ -539,26 +539,39 @@ impl Provisioner {
     /// Runs a (re-planned, digest-matched) plan's mutations and caches its profiles.
     async fn execute(&self, plan: &ProvisionPlan, approval: &ApprovalRef) -> Result<ProvisionOutcome> {
         let creating = plan.mutations.iter().any(|m| matches!(m, Mutation::CreateProfile { .. }));
-        if plan.mutations.iter().any(|m| matches!(m, Mutation::CreateCertificate { .. })) {
-            return Err(Error::new(
-                codes::sign::NO_IDENTITY,
-                "this plan needs a new signing certificate, which Russet cannot create during apply yet",
-            )
-            .with_hint(
-                "Import or reuse a certificate (`russet account import --from-xtool`, or a .p12 with \
-                 `russet account import-p12`), then plan and apply again.",
-            ));
+
+        // A plan without a usable local identity creates one first (SIGN §6.3): a new key, sealed before Apple
+        // sees its CSR, and the certificate Apple issues for it. New profiles bind to that certificate.
+        let mut identity = plan.identity.clone();
+        let mut created_cert = None;
+        for m in &plan.mutations {
+            if let Mutation::CreateCertificate { kind } = m {
+                let (pending, csr) = self.identities.new_csr_async(self.portal.team_id(), *kind).await?;
+                let cert = self.portal.create_certificate(kind.certificate_type(), &csr, approval).await?;
+                let der = cert.content_der.as_deref().ok_or_else(|| {
+                    Error::new(
+                        codes::account::APPLE_SERVICE_UNAVAILABLE,
+                        "Apple created the certificate but did not return it; its key stays in the secret store",
+                    )
+                    .with_hint("Plan again: the certificate is listed by the portal and can be downloaded.")
+                })?;
+                let stored = self.identities.commit_async(pending, der, Some(cert.id.clone())).await?;
+                identity = Some(stored.id);
+                created_cert = Some(cert.id);
+            }
         }
 
         // The portal certificate id of the plan's identity, needed to bind new profiles.
-        let cert_ids = if creating {
-            let id = plan.identity.as_ref().ok_or_else(|| {
-                Error::new(codes::sign::NO_IDENTITY, "the plan has no signing identity to bind the new profiles to")
-                    .with_hint("Add an identity (`russet account import --from-xtool` or a .p12) and plan again.")
-            })?;
-            vec![self.portal_certificate_id(id, plan.distribution).await?]
-        } else {
-            Vec::new()
+        let cert_ids = match (creating, created_cert) {
+            (false, _) => Vec::new(),
+            (true, Some(id)) => vec![id],
+            (true, None) => {
+                let id = identity.as_ref().ok_or_else(|| {
+                    Error::new(codes::sign::NO_IDENTITY, "the plan has no signing identity to bind the new profiles to")
+                        .with_hint("Add an identity (`russet account import --from-xtool` or a .p12) and plan again.")
+                })?;
+                vec![self.portal_certificate_id(id, plan.distribution).await?]
+            }
         };
 
         // Development and ad hoc profiles bind every enabled mobile device (SIGN §6.4 step 5); register the
@@ -647,7 +660,7 @@ impl Provisioner {
         bundles.sort_by_key(|b| {
             plan.request.bundles.iter().position(|s| s.bundle_id == b.bundle_id).unwrap_or(usize::MAX)
         });
-        Ok(ProvisionOutcome { identity: plan.identity.clone(), bundles })
+        Ok(ProvisionOutcome { identity, bundles })
     }
 
     /// The bundle-ID record for `bundle`: one just registered, else looked up (it must already exist).

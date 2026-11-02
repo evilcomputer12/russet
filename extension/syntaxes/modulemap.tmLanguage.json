@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Module Map",
+  "scopeName": "source.modulemap",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash",
+      "match": "//.*$"
+    },
+    {
+      "name": "comment.block",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    {
+      "name": "keyword.other.modulemap",
+      "match": "\\b(module|framework|explicit|extern|header|umbrella|exclude|private|textual|export|export_as|use|link|requires|config_macros|conflict)\\b"
+    },
+    {
+      "name": "entity.other.attribute-name",
+      "match": "\\[\\s*\\w+\\s*\\]"
+    },
+    {
+      "name": "string.quoted.double",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape",
+          "match": "\\\\(?:[\\\\\"'nrt0]|U[0-9A-Fa-f]{4}|u[0-9A-Fa-f]{4}|.)"
+        },
+        {
+          "name": "constant.other.placeholder",
+          "match": "%(?:\\d+\\$)?[-+ #0]*\\d*(?:\\.\\d+)?(?:hh|h|ll|l|q|L|z|t|j)?[@dDiuUxXoOfeEgGcCsSpaAF%]"
+        }
+      ]
+    },
+    {
+      "name": "keyword.operator.wildcard",
+      "match": "\\*"
+    },
+    {
+      "name": "punctuation.section",
+      "match": "[{}]"
+    }
+  ]
+}

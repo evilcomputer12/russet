@@ -1,5 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
-# toolchain
+# Swift toolchain
 
-This step is part of the Russet setup walkthrough. See the Russet documentation for details.
+Russet installs the Swift toolchain that matches your iOS SDK (Xcode 27 needs
+Swift 6.4). On Windows it lives in the Russet backend; **Open Setup** shows its
+status and repairs it if needed.

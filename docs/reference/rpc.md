@@ -269,9 +269,9 @@ Methods:
 
 | Method | Class | L | Confirm | Params | Result |
 |---|---|---|---|---|---|
-| `screen.screenshot` | read |  | plain | `Unspecified` | `Unspecified` |
-| `screen.mirror.start` | device (per call) |  | plain | `Unspecified` | `Unspecified` |
-| `screen.mirror.stop` | read |  | plain | `Unspecified` | `Unspecified` |
+| `screen.screenshot` | read |  | plain | `ScreenScreenshotParams` | `ScreenScreenshotResult` |
+| `screen.mirror.start` | device (per call) |  | plain | `ScreenMirrorStartParams` | `ScreenMirrorStartResult` |
+| `screen.mirror.stop` | read |  | plain | `ScreenMirrorStopParams` | `ScreenMirrorStopResult` |
 | `screen.elements` | read |  | plain | `Unspecified` | `Unspecified` |
 | `screen.press` | device |  | plain | `Unspecified` | `Unspecified` |
 
@@ -393,11 +393,11 @@ Methods:
 | `account.verify` | read |  | plain | `AccountVerifyParams` | `AccountVerifyResult` |
 | `account.remove` | secrets |  | plain | `AccountRemoveParams` | `AccountRemoveResult` |
 | `account.setDefault` | secrets |  | plain | `AccountSetDefaultParams` | `AccountSetDefaultResult` |
-| `account.appleId.begin` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.appleId.requestCode` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.appleId.submitCode` | secrets |  | plain | `Unspecified` | `Unspecified` |
-| `account.anisette.status` | read |  | plain | `Unspecified` | `Unspecified` |
-| `account.anisette.fetchLibraries` | system | L | plain | `Unspecified` | `Unspecified` |
+| `account.appleId.begin` | secrets |  | plain | `AccountAppleIdBeginParams` | `AccountAppleIdBeginResult` |
+| `account.appleId.requestCode` | secrets |  | plain | `AccountAppleIdRequestCodeParams` | `AccountAppleIdRequestCodeResult` |
+| `account.appleId.submitCode` | secrets |  | plain | `AccountAppleIdSubmitCodeParams` | `Account` |
+| `account.anisette.status` | read |  | plain | `AccountAnisetteStatusParams` | `AccountAnisetteStatusResult` |
+| `account.anisette.fetchLibraries` | system | L | plain | `AccountAnisetteFetchLibrariesParams` | `AccountAnisetteFetchLibrariesResult` |
 
 Notifications:
 

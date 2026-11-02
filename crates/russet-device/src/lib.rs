@@ -55,7 +55,10 @@ pub use perf::{SysmonOptions, SysmonStream};
 pub use process::{
     ExitInfo, ExitReporter, ExitWatcher, LaunchRequest, LaunchVia, LaunchedProcess, ProcessInfo, exit_channel,
 };
-pub use screen::{InputEvent, MirrorHandle, MirrorOptions, Screenshot};
+pub use screen::{
+    AccessUnit, ButtonAction, HardwareButton, HevcConfig, InputEvent, MirrorHandle, MirrorOptions, Screenshot,
+    TouchPhase, hevc_config,
+};
 
 /// A plaintext device stream, as [`io::ServiceConnector`] returns it.
 pub type ReadWriteBox = Box<dyn idevice::ReadWrite>;

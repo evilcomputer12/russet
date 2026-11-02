@@ -207,6 +207,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     fn russet_home_moves_all_five() {
         let dirs =
             RussetDirs::from_vars(env(&[("RUSSET_HOME", "/w/.russet-dev"), ("HOME", "/home/u")])).expect("resolves");
@@ -215,6 +216,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     fn per_directory_overrides_win() {
         let dirs = RussetDirs::from_vars(env(&[
             ("RUSSET_HOME", "/w/h"),

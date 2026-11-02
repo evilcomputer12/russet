@@ -1,0 +1,52 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Xcode Build Configuration",
+  "scopeName": "source.xcconfig",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash",
+      "match": "//.*$"
+    },
+    {
+      "match": "^\\s*(#include\\??)\\s*(\"[^\"]*\")",
+      "captures": {
+        "1": {
+          "name": "keyword.control.directive"
+        },
+        "2": {
+          "name": "string.quoted.double"
+        }
+      }
+    },
+    {
+      "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)(\\[[^\\]]*\\])*\\s*(=)",
+      "captures": {
+        "1": {
+          "name": "variable.other.setting"
+        },
+        "2": {
+          "name": "entity.other.attribute-name.condition"
+        },
+        "3": {
+          "name": "keyword.operator.assignment"
+        }
+      }
+    },
+    {
+      "name": "variable.other.reference",
+      "match": "\\$[({][A-Za-z_][A-Za-z0-9_:=,]*[)}]|\\$[A-Za-z_][A-Za-z0-9_]*"
+    },
+    {
+      "name": "constant.language",
+      "match": "\\b(YES|NO)\\b"
+    },
+    {
+      "name": "string.quoted.double",
+      "match": "\"[^\"]*\""
+    },
+    {
+      "name": "constant.numeric",
+      "match": "\\b\\d+(\\.\\d+)*\\b"
+    }
+  ]
+}

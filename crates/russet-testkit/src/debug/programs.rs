@@ -202,6 +202,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "needs Unix processes and a shell; the engine runs in Linux (WSL on Windows)")]
     fn processes_and_maps() {
         let me = std::process::id();
         assert!(process_alive(me));

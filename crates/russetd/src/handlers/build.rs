@@ -322,6 +322,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(windows, ignore = "Unix path expectations; the engine runs in Linux (WSL on Windows)")]
     fn params_become_requests() {
         let p = p::BuildStartParams {
             project: "/p".into(),

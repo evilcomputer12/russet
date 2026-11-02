@@ -413,7 +413,15 @@ pub(crate) async fn download(
     let mut last_pct = u8::MAX;
     loop {
         let chunk = tokio::select! {
-            c = resp.chunk() => c.map_err(|e| download_failed(format!("GET {url}: {e}")))?,
+            c = resp.chunk() => match c {
+                Ok(c) => c,
+                Err(e) => {
+                    // What arrived is the resume's start: tokio's File writes in the background
+                    // until flushed, and a retry right away would otherwise find less of it.
+                    let _ = file.flush().await;
+                    return Err(download_failed(format!("GET {url}: {e}")));
+                }
+            },
             () = cancel.cancelled() => {
                 let _ = file.flush().await;
                 return Err(cancelled());

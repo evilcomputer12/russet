@@ -1,0 +1,6 @@
+{
+  "name": "windows-installed-f5",
+  "publisher": "russet-local-tests",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.135.0" }
+}

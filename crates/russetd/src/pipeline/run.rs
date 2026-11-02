@@ -229,7 +229,9 @@ impl Pipeline {
                 codes::perm::APPROVAL_REQUIRED,
                 format!("provisioning needs {} Apple-side change(s)", provisioned.mutations),
             )
-            .with_hint("Review the plan with `russet provision --dry-run`; applying mutations lands with W12."));
+            .with_hint(
+                "Review the plan with `russet provision --dry-run`; Run cannot ask for the approval to apply it yet.",
+            ));
         }
         cancelled(cancel)?;
 
@@ -371,7 +373,16 @@ impl Pipeline {
             init_commands: prepared.lldb.init_commands.clone(),
             attach_commands: prepared.lldb.attach_commands.clone(),
             dap_config,
-            dap: None,
+            dap: prepared.dap.as_ref().map(|endpoint| match endpoint {
+                russet_debug::DapEndpoint::Unix { path } => russet_protocol::debug::DapInfo {
+                    transport: russet_protocol::debug::DapTransport::Unix,
+                    path: path.to_string_lossy().into_owned(),
+                },
+                russet_debug::DapEndpoint::NamedPipe { name } => russet_protocol::debug::DapInfo {
+                    transport: russet_protocol::debug::DapTransport::Pipe,
+                    path: name.clone(),
+                },
+            }),
             attach_script: prepared.attach_script.as_ref().map(|p| p.to_string_lossy().into_owned()),
             attach_mode,
         };

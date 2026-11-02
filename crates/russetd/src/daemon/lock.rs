@@ -157,6 +157,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(windows, ignore = "needs Unix processes and a shell; the engine runs in Linux (WSL on Windows)")]
     fn a_lock_excludes_a_second_holder_until_dropped() {
         let tmp = russet_core::fsx::TempDir::new("lock-test").expect("tempdir");
         let path = tmp.path().join("live.lock");
