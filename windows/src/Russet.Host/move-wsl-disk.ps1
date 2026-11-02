@@ -106,7 +106,7 @@ while (-not $move.WaitForExit(1000)) {
 Write-Progress -Activity "Moving $Distribution's disk" -Completed
 $moved = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' |
     ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath } | Where-Object { $_.DistributionName -eq $Distribution } | Select-Object -First 1
-if ($move.ExitCode -ne 0 -or ($moved.BasePath -replace '^\\\\\?\\', '').TrimEnd('\') -ine $to.TrimEnd('\')) {
+if ($move.ExitCode -ne 0 -or ($moved.BasePath -replace '^\\\\\?\\', '').TrimEnd('\') -ne $to.TrimEnd('\')) {
     Done 1 "WSL did not move the disk (exit $($move.ExitCode)); it stays in $from and Russet works as before."
 }
 
