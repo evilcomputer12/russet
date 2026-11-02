@@ -54,6 +54,8 @@ internal static partial class Setup
             return await RunSwiftMaintenance(args[1]);
         if (args is ["run", "wsl-limits" or "wsl-restart", ..])
             return await RunLimits(args[1], args[2..]);
+        if (args is ["run", "wsl-move", ..])
+            return await RunMove(args[2..]);
         if (args.Length >= 2 && args[0] == "run" && Maintenance.TryGetValue(args[1], out var command))
         {
             var command2 = command.ToList();

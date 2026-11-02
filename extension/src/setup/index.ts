@@ -361,6 +361,66 @@ export function installExperience(
     }
   });
 
+  // The backend's WSL disk, moved to a folder the owner picks (wsl --manage --move in a window of
+  // its own while Russet is closed), or, before the backend exists, created there.
+  reg("russet.wsl.move", async () => {
+    if (!runner) {
+      void vscode.window.showInformationMessage("Moving Russet's WSL disk needs Russet's Windows backend.");
+      return;
+    }
+    let now;
+    try {
+      now = await runner.limits();
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Russet could not find its WSL disk: ${(err as Error).message}`);
+      return;
+    }
+    const installed = now.diskBytes !== undefined;
+    const size = Math.round((now.diskBytes ?? 0) / 2 ** 30);
+    const picked = await vscode.window.showOpenDialog({
+      title: installed ? `Move Russet's WSL disk (${size} GB) to…` : "Create Russet's WSL disk in…",
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: installed ? "Move Here" : "Create Here",
+    });
+    const folder = picked?.[0]?.fsPath;
+    if (!folder) {
+      return;
+    }
+    const target = `${folder.replace(/\\$/, "")}\\Russet-Dev`;
+    if (installed) {
+      const pick = await vscode.window.showWarningMessage(
+        `Move Russet's WSL disk (${size} GB) to ${target}?`,
+        {
+          modal: true,
+          detail:
+            "Russet stops the virtual iPhone and closes; a window shows the move, then Russet reopens. Across drives the whole disk is " +
+            "copied, a few minutes per 10 GB. Only Russet's WSL distribution stops; other WSL distributions keep running.",
+        },
+        "Move Disk",
+      );
+      if (pick !== "Move Disk") {
+        return;
+      }
+      if (virtualRunning) {
+        await virtualRun("virtual-iphone-stop", "Stopping the virtual iPhone");
+      }
+    }
+    const outcome = await runner.run("wsl-move", { folder }, (e) => {
+      if (e.event === "progress" || e.event === "log") {
+        log().info(`[wsl-move] ${e.message}`);
+      }
+    });
+    if (outcome.kind === "failed") {
+      void vscode.window.showErrorMessage(outcome.message);
+    } else if (outcome.kind === "done" && installed) {
+      await vscode.commands.executeCommand("workbench.action.quit");
+    } else if (outcome.kind === "done") {
+      void vscode.window.showInformationMessage(`Russet's backend will be created in ${target}.`);
+    }
+  });
+
   // Keep the model fresh: on connect, on device changes, on setting changes.
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   const refreshSoon = (): void => {

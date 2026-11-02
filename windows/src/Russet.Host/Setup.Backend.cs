@@ -27,12 +27,13 @@ internal static partial class Setup
         if (FramedPaths.ToLinux(payload) is null)
             return fail("location", "Install Russet into a folder WSL can read, then retry.", false);
         var names = (await Capture(["--list", "--quiet"], Encoding.Unicode)).Output.Split('\n', StringSplitOptions.TrimEntries);
-        var data = Path.Combine(RussetData, "Backends", Distribution);
+        var data = BackendData();
         if (!names.Contains(Distribution))
         {
             Directory.CreateDirectory(data);
             if (new DriveInfo(Path.GetPathRoot(data)!).AvailableFreeSpace < BackendFreeBytes)
-                return fail("space", "Russet's backend needs 25 GB free on this drive.", true);
+                return fail("space", $"Russet's backend needs 25 GB free on {Path.GetPathRoot(data)}. Free space there, or choose another drive "
+                    + "(Russet: Move WSL Disk to Another Drive), then retry.", true);
             var rootfs = Path.Combine(data, "ubuntu-26.04-wsl-amd64.wsl");
             if (!File.Exists(rootfs) || !await HashMatches(rootfs, RootfsSha256))
             {

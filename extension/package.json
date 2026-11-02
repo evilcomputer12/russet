@@ -258,6 +258,11 @@
         "category": "Russet"
       },
       {
+        "command": "russet.wsl.move",
+        "title": "Move WSL Disk to Another Drive…",
+        "category": "Russet"
+      },
+      {
         "command": "russet.importXcode",
         "title": "Import Xcode (.xip or Xcode.app)…",
         "category": "Russet"

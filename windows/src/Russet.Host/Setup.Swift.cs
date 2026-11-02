@@ -105,10 +105,11 @@ internal static partial class Setup
     static async Task<int> InstallSwift(string step, Action<object> emit, Func<string, string, bool, int> fail, SwiftRelease release)
     {
         void Progress(string message, double fraction) => emit(new { step, @event = "progress", message, fraction });
-        var data = Path.Combine(RussetData, "Backends", Distribution);
+        // Beside the backend's disk, on the drive the toolchain lands on.
+        var data = BackendData();
         Directory.CreateDirectory(data);
         if (new DriveInfo(Path.GetPathRoot(data)!).AvailableFreeSpace < (8L << 30))
-            return fail("space", "Swift needs about 8 GB free on this drive (the download, the toolchain and the previous one).", true);
+            return fail("space", $"Swift needs about 8 GB free on {Path.GetPathRoot(data)} (the download, the toolchain and the previous one).", true);
         var tarball = Path.Combine(data, Path.GetFileName(new Uri(release.Url).AbsolutePath));
         var signature = tarball + ".sig";
         var keys = Path.Combine(data, "swift-keys.asc");
