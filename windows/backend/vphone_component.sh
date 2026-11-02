@@ -63,6 +63,10 @@ prepare_root() {
   echo 'KERNEL=="vhost-vsock", GROUP="kvm", MODE="0660"' > /etc/udev/rules.d/90-vhost-vsock.rules
   udevadm control --reload
   usermod -aG kvm "$user"
+  # The build's apt, git and downloads need names: public DNS where WSL's answers nothing.
+  local dns
+  dns=$(dirname "${BASH_SOURCE[0]}")/russet_dns.sh
+  [ ! -x "$dns" ] || "$dns" || true
   log "managed user $user prepared"
 }
 

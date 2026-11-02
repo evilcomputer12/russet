@@ -127,6 +127,11 @@ internal static partial class Setup
         if (FramedPaths.ToLinux(tarball) is not { } linuxTarball || FramedPaths.ToLinux(keys) is not { } linuxKeys)
             return fail("location", "Russet's data folder is not readable from WSL.", false);
         Progress("Installing the libraries Swift needs (apt)", 0.65);
+        // Public DNS first where WSL's answers nothing on this network (russet_dns.sh).
+        var dns = await Capture(["--distribution", Distribution, "--user", "root", "--exec", "sh", "-c",
+            $"[ ! -x {Lib}/russet_dns.sh ] || {Lib}/russet_dns.sh"]);
+        foreach (var line in dns.Output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            emit(new { step, @event = "log", message = line.TrimStart('=', '>', ' ') });
         // apt's errors go to standard output with the rest, for the log and the message. Retries
         // ride out a dropped connection; packages already fetched stay in apt's cache for a retry.
         var packages = await Capture(["--distribution", Distribution, "--user", "root", "--exec", "sh", "-c",

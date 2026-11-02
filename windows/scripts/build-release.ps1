@@ -78,7 +78,7 @@ $lib = Join-Path $stage 'backend\lib'
 New-Item -ItemType Directory -Path $bin, (Join-Path $lib 'patches') | Out-Null
 Copy-Item -LiteralPath (Join-Path $Engine 'russet') -Destination (Join-Path $bin 'russet-dev')
 Copy-Item -LiteralPath (Join-Path $Engine 'russet-adi-host') -Destination $bin
-foreach ($script in 'vphone_component.sh', 'vphone_debug.py', 'xtool_component.sh', 'socket_relay.py', 'device_mux.py') {
+foreach ($script in 'vphone_component.sh', 'vphone_debug.py', 'xtool_component.sh', 'socket_relay.py', 'device_mux.py', 'russet_dns.sh') {
     Copy-Item -LiteralPath (Join-Path $windows "backend\$script") -Destination $lib
 }
 Copy-Item -Path (Join-Path $windows 'backend\patches\*.patch') -Destination (Join-Path $lib 'patches')

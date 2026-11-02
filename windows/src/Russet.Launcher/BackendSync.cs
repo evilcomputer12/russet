@@ -42,7 +42,9 @@ internal static class BackendSync
     internal const int RestartExit = 10;
 
     // wsl.exe arguments that copy a payload (as WSL sees it) under /opt/russet as root. The
-    // identity is written last, so a copy that stopped part way is copied again. It also gives the
+    // identity is written last, so a copy that stopped part way is copied again. It installs the
+    // distribution's DNS check (russet_dns.sh, which keeps apt and git working on networks where
+    // WSL's DNS answers nothing) and runs it once. It also gives the
     // distribution Russet's /etc/wsl.conf where it lacks it (the first one was its default user
     // alone): systemd, which the virtual iPhone's udev rules and module loads need, and drvfs
     // metadata, so builds can chmod and date the Windows files they write.
@@ -52,6 +54,8 @@ internal static class BackendSync
         $"set -e; rm -f {Stamp}; install -d -m 755 /opt/russet/bin /opt/russet/lib; " +
         "install -m 755 \"$1/bin/russet-dev\" \"$1/bin/russet-adi-host\" /opt/russet/bin/; " +
         "cp -R \"$1/lib/.\" /opt/russet/lib/; chmod 755 /opt/russet/lib/*.sh; " +
+        // Public DNS where WSL's answers nothing, checked at every start of the distribution.
+        "/opt/russet/lib/russet_dns.sh install || true; " +
         $"install -d -m 700 -o russet -g russet /home/russet/.russet; printf '%s\\n' \"$2\" > {Stamp}; " +
         "if grep -qx 'systemd=true' /etc/wsl.conf 2>/dev/null && grep -q 'metadata' /etc/wsl.conf; then exit 0; fi; " +
         "[ ! -f /etc/wsl.conf ] || [ -f /etc/wsl.conf.russet-bak ] || cp /etc/wsl.conf /etc/wsl.conf.russet-bak; " +
