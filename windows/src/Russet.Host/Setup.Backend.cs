@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -38,8 +37,9 @@ internal static partial class Setup
             if (!File.Exists(rootfs) || !await HashMatches(rootfs, RootfsSha256))
             {
                 Progress("Downloading Ubuntu for WSL", 0);
-                if (!await Download(RootfsUrl, rootfs, fraction => Progress("Downloading Ubuntu for WSL", fraction * 0.6)))
-                    return fail("download", "Ubuntu for WSL did not download; check the connection, then retry.", true);
+                // A retry carries on from what an earlier attempt received.
+                if (!await Downloads.Get(RootfsUrl, rootfs, fraction => Progress("Downloading Ubuntu for WSL", fraction * 0.6)))
+                    return fail("download", "Ubuntu for WSL did not download; check the connection, then retry: it carries on where it stopped.", true);
                 if (!await HashMatches(rootfs, RootfsSha256))
                 {
                     File.Delete(rootfs);
@@ -86,42 +86,6 @@ internal static partial class Setup
     {
         await using var stream = File.OpenRead(file);
         return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream)) == sha256;
-    }
-
-    // Decodes a gzip or brotli Content-Encoding: swift.org sends its PGP keys gzip-encoded whatever
-    // the request asks for, and the saved file must be the keys themselves.
-    static HttpClient Http(TimeSpan timeout) =>
-        new(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All }) { Timeout = timeout };
-
-    static async Task<bool> Download(string url, string destination, Action<double> progress)
-    {
-        try
-        {
-            using var http = Http(TimeSpan.FromHours(1));
-            using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            var total = response.Content.Headers.ContentLength ?? 0;
-            var partial = destination + ".partial";
-            await using (var output = File.Create(partial))
-            await using (var input = await response.Content.ReadAsStreamAsync())
-            {
-                var buffer = new byte[1 << 20];
-                long done = 0, reported = 0;
-                int read;
-                while ((read = await input.ReadAsync(buffer)) > 0)
-                {
-                    await output.WriteAsync(buffer.AsMemory(0, read));
-                    done += read;
-                    if (total > 0 && done - reported > total / 50) { reported = done; progress((double)done / total); }
-                }
-            }
-            File.Move(partial, destination, overwrite: true);
-            return true;
-        }
-        catch (Exception error) when (error is HttpRequestException or IOException or TaskCanceledException)
-        {
-            return false;
-        }
     }
 
     // The daemon as the launcher starts it, for a backend installed after the editor opened.
