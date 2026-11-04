@@ -38,6 +38,7 @@ path = [
     "LICENSE",
     ".gitignore",
     "docs/**",
+    "extension/docs/**",
     "demo/**",
     "crates/*/README.md",
     "tests/lab/README.md",
