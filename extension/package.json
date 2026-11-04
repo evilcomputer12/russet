@@ -221,6 +221,12 @@
         "category": "Russet"
       },
       {
+        "command": "russet.build.showLog",
+        "title": "Show Build Log",
+        "category": "Russet",
+        "icon": "$(output)"
+      },
+      {
         "command": "russet.selectDevice",
         "title": "Select Run Destination",
         "category": "Russet",
@@ -512,6 +518,11 @@
       {
         "command": "russet.update.check",
         "title": "Check for Russet Updates",
+        "category": "Russet"
+      },
+      {
+        "command": "russet.about",
+        "title": "About Russet",
         "category": "Russet"
       }
     ],
@@ -1228,7 +1239,13 @@
             "onError",
             "never"
           ],
-          "default": "onError"
+          "enumDescriptions": [
+            "Show the Russet Build output whenever a build or run starts.",
+            "Show it when a build or run fails.",
+            "Never show it by itself (Russet: Show Build Log, or click the build status)."
+          ],
+          "default": "onError",
+          "description": "When the Russet Build output (the compiler's output and each step's time) comes to the front."
         },
         "russet.run.openConsole": {
           "type": "boolean",

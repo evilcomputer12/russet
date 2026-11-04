@@ -26,6 +26,10 @@ export interface BuildStatus {
   phase: "idle" | "building" | "ok" | "error";
   durationMs?: number;
   errorCount?: number;
+  /** While building: 0–100 across build, sign, install and launch (run/buildLog.ts). */
+  percent?: number;
+  /** While building: what runs now, e.g. "Compiling". */
+  step?: string;
 }
 
 export interface StoreSnapshot {

@@ -28,6 +28,10 @@ export interface SetupStepStatus {
   state: SetupStepState;
   title: string;
   detail?: string;
+  /** How far a step running outside this window is (a virtual iPhone's creation): "Step 7 of 9: restoring iOS". */
+  progress?: string;
+  /** 0–1, with `progress`, when the step knows its percentage. */
+  fraction?: number;
 }
 
 export interface SetupStatus {
@@ -91,14 +95,23 @@ export function parseStatus(line: string): SetupStatus {
     if (!raw || typeof raw !== "object") {
       continue;
     }
-    const s = raw as { id?: unknown; state?: unknown; title?: unknown; detail?: unknown };
+    const s = raw as { id?: unknown; state?: unknown; title?: unknown; detail?: unknown; progress?: unknown; fraction?: unknown };
     if (!isStepId(s.id) || seen.has(s.id)) {
       continue;
     }
     seen.add(s.id);
     const state = typeof s.state === "string" && STATES.has(s.state) ? (s.state as SetupStepState) : "unavailable";
     const detail = cleanText(s.detail);
-    steps.push({ id: s.id, state, title: cleanText(s.title, 120) || s.id, ...(detail ? { detail } : {}) });
+    const progress = cleanText(s.progress, 200);
+    const fraction = typeof s.fraction === "number" && Number.isFinite(s.fraction) ? Math.min(1, Math.max(0, s.fraction)) : undefined;
+    steps.push({
+      id: s.id,
+      state,
+      title: cleanText(s.title, 120) || s.id,
+      ...(detail ? { detail } : {}),
+      ...(progress ? { progress } : {}),
+      ...(progress && fraction !== undefined ? { fraction } : {}),
+    });
   }
   return { version: 1, steps };
 }

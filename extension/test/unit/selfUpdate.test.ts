@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("vscode", () => ({}));
-const { newer, pickUpdate, planPatch } = await import("../../src/setup/selfUpdate");
+const { newer, pickUpdate, planPatch, unappliedReason } = await import("../../src/setup/selfUpdate");
 
 const asset = (name: string) => ({ name, browser_download_url: `https://example.invalid/${name}` });
 
@@ -57,5 +57,16 @@ describe("Russet's own updates", () => {
     expect(planPatch({ ...installed, editor: "ed0" }, manifest, assets)).toBeUndefined();
     expect(planPatch(undefined, manifest, assets)).toBeUndefined();
     expect(planPatch(installed, manifest, {})).toBeUndefined();
+  });
+});
+
+describe("an update that did not apply", () => {
+  it("is reported with the applier's reason, and an applied one is not", () => {
+    const stayed = "2026-11-04T10:00:00.0+01:00 not applied: Russet stayed open (Russet)\r\n";
+    expect(unappliedReason(stayed)).toBe("Russet stayed open (Russet)");
+    const partial = "2026-11-04T10:00:00.0+01:00 replaced host\n2026-11-04T10:00:01.0+01:00 stopped after [host]: access denied\n";
+    expect(unappliedReason(partial)).toBe("stopped after [host]: access denied");
+    const done = "2026-11-04T10:00:00.0+01:00 replaced extension\n2026-11-04T10:00:01.0+01:00 Russet 0.6.11: extension\n";
+    expect(unappliedReason(done)).toBeUndefined();
   });
 });

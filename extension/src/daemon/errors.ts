@@ -18,6 +18,11 @@ export function errorDataOf(err: unknown): ErrorData | undefined {
   return undefined;
 }
 
+/** A request the user cancelled (`-32800`, `core.cancelled`, ARCHITECTURE §7.6). */
+export function isCancelled(err: unknown): boolean {
+  return (err instanceof ResponseError && err.code === -32800) || errorDataOf(err)?.russetCode === "core.cancelled";
+}
+
 export function messageOf(err: unknown): string {
   if (err instanceof ResponseError) {
     return err.message;
@@ -28,24 +33,33 @@ export function messageOf(err: unknown): string {
   return String(err);
 }
 
-/** Show a daemon error as a notification with a Docs button when available. */
-export async function showDaemonError(err: unknown, context: string): Promise<void> {
+/** An extra button on an error notification, such as "Show Build Log". */
+export interface ErrorAction {
+  label: string;
+  run: () => unknown;
+}
+
+/** Show a daemon error as a notification with a Docs button when available, plus any `actions`. */
+export async function showDaemonError(err: unknown, context: string, actions: ErrorAction[] = []): Promise<void> {
   const data = errorDataOf(err);
   const base = messageOf(err);
+  const labels = actions.map((a) => a.label);
   if (!data) {
-    await vscode.window.showErrorMessage(`${context}: ${base}`);
+    const picked = await vscode.window.showErrorMessage(`${context}: ${base}`, ...labels);
+    await actions.find((a) => a.label === picked)?.run();
     return;
   }
   const detail = data.hint ? `${base} — ${data.hint}` : base;
-  const buttons: string[] = [];
   if (data.docs) {
-    buttons.push("Open Docs");
+    labels.push("Open Docs");
   }
   const choice = await vscode.window.showErrorMessage(
     `${context}: ${detail} (${data.russetCode})`,
-    ...buttons,
+    ...labels,
   );
   if (choice === "Open Docs" && data.docs) {
     await vscode.env.openExternal(vscode.Uri.parse(data.docs));
+    return;
   }
+  await actions.find((a) => a.label === choice)?.run();
 }

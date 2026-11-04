@@ -43,6 +43,8 @@ export class StatusBar implements vscode.Disposable {
     this.device = vscode.window.createStatusBarItem("russet.device", left, 100);
     this.target = vscode.window.createStatusBarItem("russet.target", left, 99);
     this.build = vscode.window.createStatusBarItem("russet.build", left, 98);
+    this.build.command = "russet.build.showLog";
+    this.build.name = "Russet Build";
     this.account = vscode.window.createStatusBarItem("russet.account", left, 97);
 
     this.device.command = "russet.selectDevice";
@@ -131,17 +133,22 @@ export class StatusBar implements vscode.Disposable {
     // Build state
     switch (s.build.phase) {
       case "building":
-        this.build.text = "$(sync~spin) Building…";
+        this.build.text = `$(sync~spin) ${s.build.step ?? "Building"}${s.build.percent !== undefined ? ` ${s.build.percent}%` : "…"}`;
+        this.build.tooltip = "Building and running. Click to show the build log.";
         this.build.backgroundColor = undefined;
         this.build.show();
         break;
       case "ok":
         this.build.text = `$(check) ${((s.build.durationMs ?? 0) / 1000).toFixed(1)} s`;
+        this.build.tooltip = "The last build and run succeeded. Click to show the build log.";
         this.build.backgroundColor = undefined;
         this.build.show();
         break;
       case "error":
-        this.build.text = `$(error) ${s.build.errorCount ?? 0}`;
+        this.build.text = s.build.errorCount ? `$(error) ${s.build.errorCount}` : "$(error) Failed";
+        this.build.tooltip = s.build.errorCount
+          ? `${s.build.errorCount} build error(s). Click to show the build log; the Problems view lists them.`
+          : "The last build or run failed. Click to show the build log.";
         this.build.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
         this.build.show();
         break;

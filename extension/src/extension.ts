@@ -19,6 +19,7 @@ import {
 import { Diagnostics } from "./run/diagnostics";
 import { RunManager } from "./run/session";
 import { RussetTaskProvider } from "./run/taskProvider";
+import { BuildLog } from "./run/buildLog";
 import { ConsoleViewProvider } from "./panels/consoleView";
 import { MirrorViewProvider } from "./panels/mirrorView";
 import { DevicesTreeProvider } from "./views/devicesTree";
@@ -36,7 +37,7 @@ import { installExperience } from "./setup";
 import { applyMinimalDefaults } from "./setup/minimal";
 import { registerAppleFiles } from "./apple";
 import { registerAi } from "./ai";
-import { registerSelfUpdate } from "./setup/selfUpdate";
+import { registerSelfUpdate, russetVersion } from "./setup/selfUpdate";
 import { log, disposeLog } from "./util/log";
 import type { DeviceSummary } from "./generated/protocol";
 
@@ -49,7 +50,9 @@ export interface RussetApi {
 
 export function activate(context: vscode.ExtensionContext): RussetApi {
   const logger = log();
-  logger.info(`Russet extension ${context.extension.packageJSON.version} activating`);
+  const extensionVersion = String(context.extension.packageJSON.version);
+  // A release reports its own version (installation.json); the extension's package version stays as built.
+  void russetVersion().then((v) => logger.info(`Russet ${v ?? "development build"} (extension ${extensionVersion}) activating`));
   void applyMinimalDefaults(context).catch((err: unknown) => logger.warn(`[setup] minimal defaults: ${String(err)}`));
   registerAppleFiles(context);
 
@@ -83,7 +86,34 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
     vscode.window.registerWebviewViewProvider(MirrorViewProvider.viewId, mirrorView),
   );
 
-  const run = new RunManager(client, store, consoleView, diagnostics);
+  // The Russet Build output; its progress drives the status bar while a build or run is under way.
+  const buildLog = new BuildLog();
+  let lastProgress = "";
+  context.subscriptions.push(
+    buildLog,
+    buildLog.onDidProgress((p) => {
+      const build = store.state.build;
+      const key = `${p.step}|${p.percent}`;
+      if (build.phase !== "building" || key === lastProgress) return;
+      lastProgress = key;
+      store.setBuild({ ...build, percent: p.percent, step: p.step });
+    }),
+    vscode.commands.registerCommand("russet.build.showLog", () => buildLog.show()),
+  );
+
+  // Russet: About — the versions people quote in a bug report.
+  context.subscriptions.push(
+    vscode.commands.registerCommand("russet.about", async () => {
+      const russet = (await russetVersion()) ?? "development build";
+      const engine = client.hello ? `${client.hello.server.version} (${client.hello.server.buildId})` : "not connected";
+      const detail = [`Russet ${russet}`, `Engine ${engine}`, `Extension ${extensionVersion}`, `Editor ${vscode.version}`].join("\n");
+      const pick = await vscode.window.showInformationMessage("About Russet", { modal: true, detail }, "Check for Updates", "Copy");
+      if (pick === "Check for Updates") await vscode.commands.executeCommand("russet.update.check");
+      else if (pick === "Copy") await vscode.env.clipboard.writeText(detail);
+    }),
+  );
+
+  const run = new RunManager(client, store, consoleView, diagnostics, buildLog);
   context.subscriptions.push(run);
 
   // Trees.
@@ -109,7 +139,7 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
 
   // Context keys and the daemon event stream.
   installContextKeys(store, client, context.subscriptions);
-  installSubscriptions({ client, store, console: consoleView, diagnostics, run }, context.subscriptions);
+  installSubscriptions({ client, store, console: consoleView, diagnostics, run, buildLog }, context.subscriptions);
   registerIdeBridge(client, context.subscriptions);
 
   // Debug type `russet`.
@@ -132,7 +162,7 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
   context.subscriptions.push(
     vscode.tasks.registerTaskProvider(
       RussetTaskProvider.taskType,
-      new RussetTaskProvider(client, store, diagnostics),
+      new RussetTaskProvider(client, store, diagnostics, buildLog),
     ),
   );
 

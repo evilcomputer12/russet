@@ -9,6 +9,7 @@ import * as vscode from "vscode";
 import type { RussetClient } from "../daemon/client";
 import type { Store } from "../state/store";
 import type { Diagnostics } from "./diagnostics";
+import type { BuildLog } from "./buildLog";
 import { configToWire } from "./session";
 import { showDaemonError, messageOf } from "../daemon/errors";
 
@@ -27,6 +28,7 @@ export class RussetTaskProvider implements vscode.TaskProvider {
     private readonly client: RussetClient,
     private readonly store: Store,
     private readonly diagnostics: Diagnostics,
+    private readonly buildLog?: BuildLog,
   ) {}
 
   provideTasks(): vscode.Task[] {
@@ -55,7 +57,9 @@ export class RussetTaskProvider implements vscode.TaskProvider {
       vscode.TaskScope.Workspace,
       `${def.command}${def.target ? ` ${def.target}` : ""}`,
       "russet",
-      new vscode.CustomExecution(async () => new RussetPseudoterminal(def, this.client, this.store, this.diagnostics)),
+      new vscode.CustomExecution(
+        async () => new RussetPseudoterminal(def, this.client, this.store, this.diagnostics, this.buildLog),
+      ),
       ["$russet-swiftc"],
     );
     task.group =
@@ -79,6 +83,7 @@ class RussetPseudoterminal implements vscode.Pseudoterminal {
     private readonly client: RussetClient,
     private readonly store: Store,
     private readonly diagnostics: Diagnostics,
+    private readonly buildLog?: BuildLog,
   ) {}
 
   open(): void {
@@ -109,16 +114,21 @@ class RussetPseudoterminal implements vscode.Pseudoterminal {
         this.closeEmitter.fire(0);
         return;
       }
-      // build (default)
+      // build (default): the build job's output streams here as in the Russet Build output.
       this.diagnostics.reset();
-      this.store.setBuild({ phase: "building" });
+      this.store.setBuild({ phase: "building", percent: 0, step: "Starting" });
       this.line(`Building ${this.def.target ?? project?.name ?? "project"}…`);
       const started = Date.now();
-      const output = await this.client.call("build.start", {
-        project: root,
-        target: this.def.target,
-        configuration: configToWire(this.def.configuration),
+      const follow = this.buildLog?.onDidWrite(({ kind, line }) => {
+        if (kind === "build.start") this.line(line);
       });
+      const output = await this.client
+        .call("build.start", {
+          project: root,
+          target: this.def.target,
+          configuration: configToWire(this.def.configuration),
+        })
+        .finally(() => follow?.dispose());
       const errs = this.diagnostics.errorCount;
       for (const lint of output.lints) {
         this.line(`lint ${lint.id}: ${lint.message}`);

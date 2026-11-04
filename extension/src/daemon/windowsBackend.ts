@@ -11,9 +11,13 @@ export interface BackendRelay {
   dispose(): void;
 }
 
+/** The longest a daemon start may take: the host gives `daemon start` 60 s. */
+const DAEMON_START_MS = 90_000;
+
 export class WindowsBackend {
   private readonly children = new Set<ChildProcess>();
   private disposed = false;
+  private starting?: Promise<boolean>;
 
   constructor(
     private readonly executable: string,
@@ -80,6 +84,29 @@ export class WindowsBackend {
       child.once("error", fail);
       child.once("exit", fail);
     });
+  }
+
+  /**
+   * Starts the daemon in WSL as the launcher does (`--setup daemon-start`), for one that stopped
+   * while Russet is open: the launcher starts it only when Russet opens. Resolves with whether it
+   * runs; calls made meanwhile share the start in progress.
+   */
+  startDaemon(): Promise<boolean> {
+    if (this.disposed) return Promise.resolve(false);
+    this.starting ??= new Promise<boolean>((resolve) => {
+      const child = spawn(this.executable, ["--setup", "daemon-start"], { windowsHide: true, stdio: "ignore" });
+      this.children.add(child);
+      const timer = setTimeout(() => child.kill(), DAEMON_START_MS);
+      const done = (started: boolean): void => {
+        clearTimeout(timer);
+        this.children.delete(child);
+        this.starting = undefined;
+        resolve(started);
+      };
+      child.once("error", () => done(false));
+      child.once("exit", (code) => done(code === 0));
+    });
+    return this.starting;
   }
 
   dispose(): void {

@@ -10,7 +10,8 @@ import type { RussetClient } from "../daemon/client";
 import type { Store } from "../state/store";
 import type { ConsoleViewProvider } from "../panels/consoleView";
 import type { Diagnostics } from "./diagnostics";
-import { showDaemonError } from "../daemon/errors";
+import type { BuildLog } from "./buildLog";
+import { isCancelled, showDaemonError } from "../daemon/errors";
 
 export function configToWire(label: string | undefined): string {
   return (label ?? "Debug").toLowerCase();
@@ -31,6 +32,7 @@ export class RunManager implements vscode.Disposable {
     private readonly store: Store,
     private readonly console: ConsoleViewProvider,
     private readonly diagnostics: Diagnostics,
+    private readonly buildLog?: BuildLog,
   ) {}
 
   get activeSessionId(): string | undefined {
@@ -62,20 +64,40 @@ export class RunManager implements vscode.Disposable {
       return;
     }
     this.diagnostics.reset();
-    this.store.setBuild({ phase: "building" });
+    this.store.setBuild({ phase: "building", percent: 0, step: "Starting" });
     const started = Date.now();
 
     try {
       const result = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: "Running on iPhone", cancellable: false },
-        () =>
-          this.client.call("run.start", {
-            project: ctx.projectRoot,
-            target: ctx.target,
-            configuration: ctx.configuration,
-            udid: ctx.udid,
-            build: true,
-          }),
+        { location: vscode.ProgressLocation.Notification, title: "Running on iPhone", cancellable: true },
+        (progress, token) => {
+          // The run job's stages and percentage (run/buildLog.ts): "Compiling · 37%".
+          let shown = 0;
+          const follow = this.buildLog?.onDidProgress((p) => {
+            if (p.kind !== "run.start") return;
+            progress.report({ message: `${p.step} · ${p.percent}%`, increment: Math.max(0, p.percent - shown) });
+            shown = Math.max(shown, p.percent);
+          });
+          const cts = new vscode.CancellationTokenSource();
+          const cancel = token.onCancellationRequested(() => cts.cancel());
+          return this.client
+            .call(
+              "run.start",
+              {
+                project: ctx.projectRoot,
+                target: ctx.target,
+                configuration: ctx.configuration,
+                udid: ctx.udid,
+                build: true,
+              },
+              cts.token,
+            )
+            .finally(() => {
+              follow?.dispose();
+              cancel.dispose();
+              cts.dispose();
+            });
+        },
       );
       const errs = this.diagnostics.errorCount;
       this.store.setBuild(
@@ -94,9 +116,16 @@ export class RunManager implements vscode.Disposable {
         await this.console.reveal(result.pid);
       }
     } catch (err) {
+      if (isCancelled(err)) {
+        // Cancel on the notification: nothing failed.
+        this.store.setBuild({ phase: "idle" });
+        this.store.setRun({ state: "idle", isDebug: false });
+        return;
+      }
       this.store.setBuild({ phase: "error", errorCount: this.diagnostics.errorCount });
       this.store.setRun({ state: "failed", isDebug: false });
-      await showDaemonError(err, "Run failed");
+      const showLog = this.buildLog ? [{ label: "Show Build Log", run: () => this.buildLog?.show() }] : [];
+      await showDaemonError(err, "Run failed", showLog);
     }
   }
 

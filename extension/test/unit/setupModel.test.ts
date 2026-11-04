@@ -15,9 +15,14 @@ class ScriptedRunner implements SetupRunnerLike {
   readonly runs: Array<{ id: string; args: Record<string, string> }> = [];
   outcomes = new Map<string, SetupRunOutcome>();
   hold?: { resolve: () => void };
+  /** What the status says about a step's progress (a creation running outside the window). */
+  readonly progress = new Map<string, { progress: string; fraction?: number }>();
 
   async status(): Promise<SetupStatus> {
-    return { version: 1, steps: [...this.states].map(([id, state]) => ({ id, state, title: `Title ${id}` })) };
+    return {
+      version: 1,
+      steps: [...this.states].map(([id, state]) => ({ id, state, title: `Title ${id}`, ...this.progress.get(id) })),
+    };
   }
 
   async run(id: string, args: Readonly<Record<string, string>>, onEvent: (e: SetupRunEvent) => void, signal?: AbortSignal): Promise<SetupRunOutcome> {
@@ -179,6 +184,13 @@ describe("SetupModel", () => {
     const step = snap.steps.find((x) => x.id === "virtual-iphone");
     expect(step).toMatchObject({ state: "running", actions: [] });
     expect(step?.blockedReason).toBeUndefined();
+    // How far it is comes from the status, and shows as the step's progress.
+    runner!.progress.set("virtual-iphone", { progress: "Step 7 of 9: restoring iOS", fraction: 0.56 });
+    await model.refresh();
+    expect(model.snapshot().steps.find((x) => x.id === "virtual-iphone")?.progress).toEqual({
+      message: "Step 7 of 9: restoring iOS",
+      fraction: 0.56,
+    });
     expect(snap.steps.find((x) => x.id === "xcode-sdk")?.blockedReason).toBe("Another step is running.");
     await expect(model.runStep("xcode-sdk")).resolves.toBeUndefined();
     await model.runAll();

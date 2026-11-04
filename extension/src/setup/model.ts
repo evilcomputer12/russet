@@ -385,13 +385,18 @@ export class SetupModel {
           blockedReason = "Another step is running.";
         }
       }
+      // A step running outside this window (a creation that outlived Russet) shows how far it is from the status.
+      const progress =
+        s.id === background && s.progress
+          ? { message: s.progress, ...(s.fraction === undefined ? {} : { fraction: s.fraction }) }
+          : rt?.progress;
       steps.push({
         id: s.id,
         title: s.title,
         ...(s.detail ? { detail: s.detail } : {}),
         state: s.state,
         source: "runner",
-        ...(rt?.progress ? { progress: rt.progress } : {}),
+        ...(progress ? { progress } : {}),
         log: rt ? rt.log.slice(-50) : [],
         ...(rt?.error && !isMine && s.state !== "done" ? { error: rt.error } : {}),
         actions,

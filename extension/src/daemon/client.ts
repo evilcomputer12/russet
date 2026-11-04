@@ -129,7 +129,7 @@ export class RussetClient implements vscode.Disposable {
         return;
       } catch (err) {
         this.log.debug(`[daemon] connect attempt ${attempt + 1} failed: ${String(err)}`);
-        if (this.opts.autoStart && !this.opts.backend && !autoStartTried && attempt >= 1) {
+        if (this.opts.autoStart && !autoStartTried && attempt >= 1) {
           autoStartTried = true;
           this.tryAutoStart();
         }
@@ -294,6 +294,15 @@ export class RussetClient implements vscode.Disposable {
   }
 
   private tryAutoStart(): void {
+    const backend = this.opts.backend;
+    if (backend) {
+      // On Windows the daemon runs in WSL: Russet's host starts it as the launcher does.
+      this.log.info("[daemon] auto-starting through Russet's Windows host");
+      void backend.startDaemon().then((started) => {
+        if (!started) this.log.warn("[daemon] auto-start failed; reopen Russet to start the daemon");
+      });
+      return;
+    }
     try {
       const bin = russetBinary(this.opts.binDir);
       this.log.info(`[daemon] auto-starting via ${bin} daemon start --detach`);

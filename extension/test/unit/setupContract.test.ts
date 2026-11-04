@@ -26,6 +26,19 @@ describe("setup runner contract", () => {
     });
   });
 
+  it("reads how far a step running outside the window is, and clamps its fraction", () => {
+    const s = parseStatus(JSON.stringify({
+      version: 1,
+      steps: [
+        { id: "virtual-iphone", state: "running", title: "V", detail: "Being created.", progress: "Step 7 of 9: restoring iOS", fraction: 1.4 },
+        { id: "backend", state: "done", title: "B", progress: null, fraction: 0.5 },
+      ],
+    }));
+    expect(s.steps[0]).toMatchObject({ progress: "Step 7 of 9: restoring iOS", fraction: 1 });
+    expect(s.steps[1].progress).toBeUndefined();
+    expect(s.steps[1].fraction).toBeUndefined();
+  });
+
   it("rejects other versions and non-JSON, and tolerates unknown states and ids", () => {
     expect(() => parseStatus('{"version":2,"steps":[]}')).toThrow(SetupProtocolError);
     expect(() => parseStatus("not json")).toThrow(SetupProtocolError);

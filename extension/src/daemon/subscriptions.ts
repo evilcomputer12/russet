@@ -11,6 +11,7 @@ import type { Store } from "../state/store";
 import type { ConsoleViewProvider } from "../panels/consoleView";
 import type { Diagnostics } from "../run/diagnostics";
 import type { RunManager } from "../run/session";
+import type { BuildLog } from "../run/buildLog";
 import { log } from "../util/log";
 
 export interface SubscriptionDeps {
@@ -19,10 +20,12 @@ export interface SubscriptionDeps {
   console: ConsoleViewProvider;
   diagnostics: Diagnostics;
   run: RunManager;
+  /** The Russet Build output and the build/run progress. */
+  buildLog?: BuildLog;
 }
 
 export function installSubscriptions(deps: SubscriptionDeps, disposables: vscode.Disposable[]): void {
-  const { client, store, console: consoleView, diagnostics, run } = deps;
+  const { client, store, console: consoleView, diagnostics, run, buildLog } = deps;
 
   disposables.push(
     client.onEvent("device.changed", (p) => {
@@ -66,15 +69,20 @@ export function installSubscriptions(deps: SubscriptionDeps, disposables: vscode
     }),
   );
 
+  // Build, run and debug jobs: their output goes to the Russet Build output (the console is the app's).
+  disposables.push(
+    client.onEvent("job.updated", (p) => {
+      buildLog?.update(p.job);
+    }),
+  );
   disposables.push(
     client.onEvent("job.events", (p) => {
       for (const ev of p.events) {
         if (ev.kind === "diagnostic") {
           diagnostics.add(ev);
-        } else if (ev.kind === "log") {
-          consoleView.appendRaw([ev.line], ev.stream === "stderr" ? "stderr" : "stdout");
         }
       }
+      buildLog?.events(p.jobId, p.events);
     }),
   );
 

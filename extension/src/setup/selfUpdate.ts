@@ -125,6 +125,11 @@ async function installation(): Promise<Installation | undefined> {
   }
 }
 
+/** The installed Russet release's version (installation.json), not the extension's own package version. */
+export async function russetVersion(): Promise<string | undefined> {
+  return (await installation())?.version;
+}
+
 async function download(url: string, file: string, progress: (fraction: number) => void): Promise<string> {
   const response = await fetch(url);
   if (!response.ok || !response.body) throw new Error(`download failed (${response.status})`);
@@ -140,6 +145,42 @@ async function download(url: string, file: string, progress: (fraction: number) 
   }
   await new Promise<void>((resolve, reject) => out.end((err?: Error | null) => (err ? reject(err) : resolve())));
   return hash.digest("hex");
+}
+
+/**
+ * Why a downloaded patch did not apply, from its apply.log (windows/src/Russet.Host/Update.cs): the last line
+ * when it says "not applied: …" or "stopped after …"; undefined when the patch applied.
+ */
+export function unappliedReason(applyLog: string): string | undefined {
+  const last = applyLog.trim().split(/\r?\n/).pop() ?? "";
+  const m = /^\S+ (?:not applied: (.+)|(stopped after .+))$/.exec(last);
+  return m ? (m[1] ?? m[2]) : undefined;
+}
+
+/** The newest staged update above `current` that did not apply: its version, apply.log and the reason. */
+async function unappliedUpdate(current: string): Promise<{ version: string; file: string; reason: string } | undefined> {
+  const dir = path.join(process.env.LOCALAPPDATA ?? os.tmpdir(), "Russet", "Updates");
+  let versions: string[];
+  try {
+    versions = (await fs.readdir(dir)).filter((v) => /^\d+\.\d+\.\d+$/.test(v) && newer(v, current));
+  } catch {
+    return undefined;
+  }
+  const version = versions.sort((a, b) => (newer(a, b) ? -1 : 1))[0];
+  if (!version) return undefined;
+  const file = path.join(dir, version, "apply.log");
+  try {
+    const reason = unappliedReason(await fs.readFile(file, "utf8"));
+    return reason ? { version, file, reason } : undefined;
+  } catch {
+    // Downloaded, but the applier never wrote a line: it did not start (blocked, or Russet was closed meanwhile).
+    try {
+      await fs.access(path.join(dir, version, "patch.json"));
+      return { version, file: path.join(dir, version), reason: "the updater did not start" };
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 export function registerSelfUpdate(context: vscode.ExtensionContext): void {
@@ -219,9 +260,15 @@ export function registerSelfUpdate(context: vscode.ExtensionContext): void {
       },
     );
     if (!ok) return;
-    // The installer closes Russet, replaces it and starts it again (windows/installer/russet.iss, /UPDATE=1).
-    spawn(file, ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/UPDATE=1"], { detached: true, stdio: "ignore" }).unref();
-    log().info(`[update] installing Russet ${update.version}`);
+    // The installer replaces Russet and starts it again (windows/installer/russet.iss, /UPDATE=1); Russet closes
+    // itself first, so unsaved editors are kept as on any quit. Its log tells why an update did not install.
+    const setupLog = path.join(os.tmpdir(), `RussetSetup-${update.version}.log`);
+    spawn(file, ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/UPDATE=1", `/LOG=${setupLog}`], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+    log().info(`[update] installing Russet ${update.version} (log: ${setupLog})`);
+    await vscode.commands.executeCommand("workbench.action.quit");
   };
 
   // A patch: the changed parts' packages, checked against update.json, then Russet.Host's
@@ -270,6 +317,25 @@ export function registerSelfUpdate(context: vscode.ExtensionContext): void {
     log().info(`[update] patching Russet to ${update.version}: ${patch.map((p) => p.name).join(", ")}`);
     await vscode.commands.executeCommand("workbench.action.quit");
   };
+
+  // A patch that was downloaded but did not apply leaves this version running: say so once, and why.
+  const reportUnapplied = async (): Promise<void> => {
+    const install = await installation();
+    const failed = install && (await unappliedUpdate(install.version));
+    if (!install || !failed) return;
+    const seen = `${failed.version}:${failed.reason}`;
+    if (context.globalState.get<string>("russet.selfUpdate.reportedFailure") === seen) return;
+    await context.globalState.update("russet.selfUpdate.reportedFailure", seen);
+    log().warn(`[update] Russet ${failed.version} did not apply: ${failed.reason}`);
+    const pick = await vscode.window.showWarningMessage(
+      `Russet ${failed.version} was downloaded but not installed, so this is still ${install.version} (${failed.reason}).`,
+      "Try Again",
+      "Show Details",
+    );
+    if (pick === "Try Again") await check(true);
+    else if (pick === "Show Details") await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(failed.file));
+  };
+  void reportUnapplied().catch((err: unknown) => log().warn(`[update] ${String(err)}`));
 
   context.subscriptions.push(vscode.commands.registerCommand("russet.update.check", () => check(true)));
   const first = setTimeout(() => void check(false), 60_000);
