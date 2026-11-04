@@ -724,6 +724,15 @@ pub fn succeeded(out: &CommandOutput) -> bool {
 }
 
 /// `build.compileFailed` or `build.linkFailed` from a failed `swift build`, with the first errors attached.
+const OUT_OF_MEMORY_HINT: &str = "Close the virtual iPhone or other memory-hungry apps, or raise WSL's memory limit \
+                                  (Russet: Change WSL Limits), then build again.";
+
+/// swift-build's line for a task that failed ("SwiftCompile normal arm64 … failed with a nonzero exit code"): it names
+/// the task; the compiler printed the error itself above it.
+fn is_task_summary(d: &Diagnostic) -> bool {
+    d.file.is_none() && d.message.ends_with("failed with a nonzero exit code")
+}
+
 pub fn build_failure(diagnostics: &[Diagnostic], tail: &[String], log: Option<&Utf8Path>) -> Error {
     let errors: Vec<&Diagnostic> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
     let link = errors.iter().any(|d| {
@@ -733,16 +742,24 @@ pub fn build_failure(diagnostics: &[Diagnostic], tail: &[String], log: Option<&U
             || d.message.contains("Linking")
     }) || tail.iter().any(|l| l.contains("ld64.lld: error"));
     let code = if link { codes::build::LINK_FAILED } else { codes::build::COMPILE_FAILED };
-    let first = errors.first().map(|d| crate::events::render_diagnostic(d)).or_else(|| tail.last().cloned());
+    // The compiler's own error, not swift-build's line for the task that failed, which names no error.
+    let real = errors.iter().find(|d| !is_task_summary(d));
+    // Only task lines: the compiler printed no error because it was stopped, most often by WSL's memory running out.
+    let killed = real.is_none()
+        && !errors.is_empty()
+        && tail.iter().any(|l| l.contains("signal 9") || l.contains("Killed") || l.contains("out of memory"));
+    let first = real.or(errors.first()).map(|d| crate::events::render_diagnostic(d)).or_else(|| tail.last().cloned());
     let what = if link { "linking failed" } else { "compilation failed" };
-    let message = match first {
-        Some(f) => format!("{what}: {f}"),
-        None => what.to_owned(),
+    let message = match (killed, first) {
+        (true, _) => format!("{what}: the compiler was stopped before it finished (WSL ran out of memory)"),
+        (false, Some(f)) => format!("{what}: {f}"),
+        (false, None) => what.to_owned(),
     };
     let first20: Vec<&Diagnostic> = errors.iter().take(20).copied().collect();
-    let hint = match log {
-        Some(l) => format!("Fix the errors listed in the build's diagnostics; the full log is {l}."),
-        None => "Fix the errors listed in the build's diagnostics.".to_owned(),
+    let hint = match (killed, log) {
+        (true, _) => OUT_OF_MEMORY_HINT.to_owned(),
+        (false, Some(l)) => format!("Fix the errors listed in the build's diagnostics; the full log is {l}."),
+        (false, None) => "Fix the errors listed in the build's diagnostics.".to_owned(),
     };
     Error::new(code, message)
         .with_hint(hint)
@@ -945,5 +962,25 @@ mod tests {
         let e = build_failure(&[link], &[], Some(Utf8Path::new("/p/.russet/logs/job_1.jsonl")));
         assert_eq!(e.code(), codes::build::LINK_FAILED);
         assert!(e.hint().is_some_and(|h| h.contains("job_1.jsonl")));
+    }
+
+    #[test]
+    fn the_compilers_error_wins_over_swift_builds_task_line() {
+        let task = parse_diagnostic(
+            "error: SwiftCompile normal arm64 /p/Sources/App/App.swift failed with a nonzero exit code",
+        )
+        .unwrap();
+        let real = parse_diagnostic("/p/Sources/App/App.swift:3:5: error: cannot find 'Foo' in scope").unwrap();
+        let e = build_failure(&[task.clone(), real], &[], None);
+        assert!(e.message().contains("cannot find 'Foo' in scope"), "{}", e.message());
+
+        // Only the task line, and the compiler was killed: say so, and what to do.
+        let tail = vec!["error: compile command failed due to signal 9 (use -v to see invocation)".to_owned()];
+        let e = build_failure(std::slice::from_ref(&task), &tail, None);
+        assert!(e.message().contains("WSL ran out of memory"), "{}", e.message());
+        assert!(e.hint().is_some_and(|h| h.contains("Change WSL Limits")));
+        // Only the task line otherwise: it is still the best there is.
+        let e = build_failure(&[task], &[], None);
+        assert!(e.message().contains("failed with a nonzero exit code"), "{}", e.message());
     }
 }

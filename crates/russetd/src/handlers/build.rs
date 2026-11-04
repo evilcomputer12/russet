@@ -4,16 +4,15 @@
 //! `build` handlers (§8.3). Owner: W5 (Wave 1), W16 (build.settings).
 //!
 //! The handlers are thin: they turn wire params into `russet_build` requests and domain results into the DTOs
-//! of `russet_protocol::build`. `build.start` runs the build inside the request, which stays open until it
-//! returns `BuildOutput` (ARCHITECTURE §7.6); wrapping it in a `job.*` job (events, `background: true`, the
-//! project lock key) needs W2's JobManager (freeze F1; F0's has no API yet). A project whose
+//! of `russet_protocol::build`. `build.start` runs as a job (the daemon's layer, ARCHITECTURE §7.6) and builds
+//! into the job's reporter, so its stages, output, progress and diagnostics reach `job.events`. A project whose
 //! `[signing] bundle-id-policy` is `xtool-prefix` gets the default account's prefix ([`with_account_policy`]).
 //! `build.settings` is W16's (Wave 2).
 
 use std::future::Future;
 use std::sync::Arc;
 
-use russet_build::{BuildEnv, BuildRequest, Builder, CleanScope, NullSink, Utf8Path, Utf8PathBuf};
+use russet_build::{BuildEnv, BuildRequest, Builder, CleanScope, Utf8Path, Utf8PathBuf};
 use russet_core::Result;
 use russet_core::error::{Error, codes};
 use russet_core::proc::{CommandRunner, ProcessRunner};
@@ -280,7 +279,7 @@ pub async fn build_project(
 }
 
 async fn build_start(cx: DaemonCtx, rq: RequestCtx, p: p::BuildStartParams) -> Result<p::BuildOutput> {
-    let out = build_project(&cx, request_from(&p)?, &NullSink, rq.cancel.clone()).await?;
+    let out = build_project(&cx, request_from(&p)?, &rq.progress, rq.cancel.clone()).await?;
     Ok(output_dto(&out))
 }
 

@@ -71,7 +71,7 @@ pub async fn archive(cx: &DaemonCtx, rq: RequestCtx, params: p::ShipArchiveParam
     let method = method(&params.method)?;
     let mut request = russet_build::BuildRequest::new(project.clone());
     request.configuration = params.configuration.clone().or(Some("release".to_owned()));
-    let out = build_project(cx, request, &russet_build::NullSink, rq.cancel.clone()).await?;
+    let out = build_project(cx, request, &rq.progress, rq.cancel.clone()).await?;
 
     let archive = {
         let app = out.app.path.clone();

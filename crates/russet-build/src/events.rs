@@ -279,7 +279,10 @@ impl<'a> Emitter<'a> {
             }
             _ => {}
         }
-        if let Some(kind) = to_job_event(&e) {
+        // A log line reached the sink through `log` above: a job's sink records that as its `log` event already.
+        if !matches!(e, BuildEvent::Log { .. })
+            && let Some(kind) = to_job_event(&e)
+        {
             self.sink.emit(kind);
         }
     }

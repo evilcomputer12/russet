@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use russet_core::Result;
 use russet_core::error::{Error, codes};
-use russet_core::progress::{EventSink, LogStream};
+use russet_core::progress::{EventSink, JobEventKind, LogStream, Stage, StepState};
 use russet_debug::async_trait;
 use russet_debug::launch::LaunchStrategy;
 use russet_debug::lldb::{InitSettings, LldbPlatform};
@@ -181,10 +181,18 @@ fn cancelled(cancel: &CancellationToken) -> Result<()> {
     Ok(())
 }
 
-/// Reports a pipeline stage (`JobEvent` kind `stage`, ARCHITECTURE §9.2) through the sink's progress.
+/// Reports a pipeline stage: a `stage` event (ARCHITECTURE §9.2) when the name is one of [`Stage`]'s, the sink's
+/// progress and a log line, and the daemon log, whose timestamps time each stage when a run is slow.
 pub fn stage(sink: &dyn EventSink, name: &str, state: &str) {
+    tracing::info!(stage = name, state, "pipeline");
     sink.report(Some(&format!("{name}: {state}")), None);
     sink.log(LogStream::Info, &format!("stage {name} {state}"));
+    let wire = |s: &str| serde_json::Value::String(s.to_owned());
+    if let (Ok(stage), Ok(state)) =
+        (serde_json::from_value::<Stage>(wire(name)), serde_json::from_value::<StepState>(wire(state)))
+    {
+        sink.emit(JobEventKind::Stage { stage, state });
+    }
 }
 
 fn strategy(m: LaunchMode) -> LaunchStrategy {
@@ -295,7 +303,13 @@ impl Pipeline {
             return Ok((r, None));
         }
         stage(sink, "launch", "started");
-        let h = self.debug.run(self.run_request(&p, &app)).await?;
+        let h = match self.debug.run(self.run_request(&p, &app)).await {
+            Ok(h) => h,
+            Err(e) => {
+                stage(sink, "launch", "failed");
+                return Err(e);
+            }
+        };
         stage(sink, "launch", "finished");
         let r = RunStartResult {
             session_id: Some(h.id().clone()),
@@ -468,30 +482,5 @@ pub fn broker_info(e: &BrokerEndpoint, lldb_url: &str) -> BrokerInfo {
             port: Some(addr.port()),
             lldb_url: lldb_url.to_owned(),
         },
-    }
-}
-
-/// An [`EventSink`] that only traces (until the job's sink from W2's JobManager is wired in).
-#[derive(Debug, Default, Clone, Copy)]
-pub struct TracingSink;
-
-impl russet_core::progress::ProgressSink for TracingSink {
-    fn begin(&self, title: &str, _cancellable: bool) {
-        tracing::info!(title, "pipeline");
-    }
-    fn report(&self, msg: Option<&str>, pct: Option<u8>) {
-        tracing::info!(msg, pct, "pipeline");
-    }
-    fn end(&self, msg: Option<&str>) {
-        tracing::info!(msg, "pipeline done");
-    }
-    fn log(&self, stream: LogStream, line: &str) {
-        tracing::debug!(?stream, line, "pipeline");
-    }
-}
-
-impl EventSink for TracingSink {
-    fn emit(&self, e: russet_core::progress::JobEventKind) {
-        tracing::debug!(?e, "pipeline event");
     }
 }

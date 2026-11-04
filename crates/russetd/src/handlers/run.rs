@@ -15,7 +15,6 @@ use russet_protocol::run as p;
 
 use crate::DaemonCtx;
 use crate::pipeline::live::pipeline_for;
-use crate::pipeline::run::TracingSink;
 use crate::pipeline::subscribe::{RunNotification, forward_session};
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
@@ -61,7 +60,8 @@ pub fn bind_owner(cx: &DaemonCtx, rq: &RequestCtx, h: &SessionHandle) {
 
 async fn start(cx: DaemonCtx, rq: RequestCtx, params: p::RunStartParams) -> Result<p::RunStartResult> {
     let pipeline = pipeline_for(&cx)?;
-    let (result, session) = pipeline.start(params, &TracingSink, &rq.cancel).await?;
+    // The job's reporter: the IDE sees the stages, the build output and the install progress (job.events).
+    let (result, session) = pipeline.start(params, &rq.progress, &rq.cancel).await?;
     if let Some(h) = &session {
         bind_owner(&cx, &rq, h);
     }

@@ -23,7 +23,6 @@ use russet_protocol::debug::{self as p, DebugFrontend};
 use super::run::bind_owner;
 use crate::DaemonCtx;
 use crate::pipeline::live::pipeline_for;
-use crate::pipeline::run::TracingSink;
 use crate::pipeline::run::{broker_info, debug_dir};
 
 /// Registers every method of this namespace (the handler seam of ARCHITECTURE §5.3).
@@ -48,7 +47,7 @@ pub fn register(r: &mut Router<DaemonCtx>) {
 
 async fn prepare(cx: DaemonCtx, rq: RequestCtx, params: p::DebugPrepareParams) -> Result<p::DebugPrepareResult> {
     let pipeline = pipeline_for(&cx)?;
-    let (result, session) = pipeline.prepare_debug(params, &TracingSink, &rq.cancel).await?;
+    let (result, session) = pipeline.prepare_debug(params, &rq.progress, &rq.cancel).await?;
     bind_owner(&cx, &rq, &session);
     Ok(result)
 }
