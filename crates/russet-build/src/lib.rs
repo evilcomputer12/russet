@@ -926,13 +926,16 @@ impl Builder {
     ) -> Result<Vec<u8>> {
         let scratch = res.work_dir().join("swiftpm");
         let spec = spm::package_command(&res.facts.tools.swift, &res.package_dir(), Some(&scratch), args);
-        self.run_tool(&spec, &format!("swift package {}", args.first().copied().unwrap_or_default()), em, cancel).await
+        let command = args.first().copied().unwrap_or_default();
+        self.run_tool(&spec, &format!("swift package {command}"), command == "describe", em, cancel).await
     }
 
+    /// Runs one tool as a build task; `stdout_is_data`: its stdout is the result, not build output.
     async fn run_tool(
         &self,
         spec: &CommandSpec,
         title: &str,
+        stdout_is_data: bool,
         em: &Emitter<'_>,
         cancel: &CancellationToken,
     ) -> Result<Vec<u8>> {
@@ -953,7 +956,7 @@ impl Builder {
             state: TaskState::Started,
             duration_ms: None,
         });
-        let lines = spm::LineSink::new(em);
+        let lines = if stdout_is_data { spm::LineSink::stderr_only(em) } else { spm::LineSink::new(em) };
         let out = self.env.runner.run(spec, &lines, cancel).await;
         let ms = Some(t0.elapsed().as_millis() as u64);
         let state = if out.as_ref().is_ok_and(spm::succeeded) { TaskState::Finished } else { TaskState::Failed };
@@ -1021,7 +1024,7 @@ impl Builder {
                     Some(&scratch),
                     &["describe", "--type", "json"],
                 );
-                self.run_tool(&spec, &format!("swift package describe ({})", node.name), em, cancel).await?
+                self.run_tool(&spec, &format!("swift package describe ({})", node.name), true, em, cancel).await?
             };
             dumps.insert(node.identity.clone(), spm::parse_describe(&stdout)?);
             stack.extend(node.dependencies.iter());
@@ -1404,7 +1407,7 @@ impl Builder {
                     nice: Some(10),
                     timeout: None,
                 };
-                self.run_tool(&spec, "dsymutil", em, cancel).await?;
+                self.run_tool(&spec, "dsymutil", false, em, cancel).await?;
                 dsyms.push(out);
             } else {
                 em.warn(warn::DSYM, "no dsymutil in the SDK bundle; the build has no dSYM", None);
@@ -1422,7 +1425,7 @@ impl Builder {
                         nice: Some(10),
                         timeout: Some(Duration::from_secs(120)),
                     };
-                    self.run_tool(&spec, "llvm-strip", em, cancel).await?;
+                    self.run_tool(&spec, "llvm-strip", false, em, cancel).await?;
                     bundle::set_times(&assembled.app.path, self.env.epoch)?;
                 }
                 None => em.warn(

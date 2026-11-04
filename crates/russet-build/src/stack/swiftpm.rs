@@ -710,11 +710,19 @@ pub fn redact_env_dump(line: &str) -> String {
 pub struct LineSink<'e, 'a> {
     emitter: &'e Emitter<'a>,
     tail: Mutex<Vec<String>>,
+    /// Whether stdout lines are build output; not for a command whose stdout is data (`swift package describe`'s
+    /// JSON), which the build log would only clutter.
+    stdout: bool,
 }
 
 impl<'e, 'a> LineSink<'e, 'a> {
     pub fn new(emitter: &'e Emitter<'a>) -> Self {
-        Self { emitter, tail: Mutex::new(Vec::new()) }
+        Self { emitter, tail: Mutex::new(Vec::new()), stdout: true }
+    }
+
+    /// For a command whose stdout is data the caller reads: only its stderr is build output.
+    pub fn stderr_only(emitter: &'e Emitter<'a>) -> Self {
+        Self { stdout: false, ..Self::new(emitter) }
     }
 
     /// The last output lines (for error messages).
@@ -728,6 +736,9 @@ impl ProgressSink for LineSink<'_, '_> {
     fn report(&self, _msg: Option<&str>, _pct: Option<u8>) {}
     fn end(&self, _msg: Option<&str>) {}
     fn log(&self, stream: LogStream, line: &str) {
+        if stream == LogStream::Stdout && !self.stdout {
+            return;
+        }
         if let Some(event) = parse_line(stream, line) {
             if let BuildEvent::Log { line, .. } = &event
                 && let Ok(mut t) = self.tail.lock()
