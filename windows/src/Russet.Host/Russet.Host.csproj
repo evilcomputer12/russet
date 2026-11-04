@@ -10,6 +10,7 @@
     <!-- The backend's secret-store passphrase, shared with the launcher (the setup page starts the daemon too). -->
     <Compile Include="..\Russet.Launcher\BackendSecrets.cs" Link="BackendSecrets.cs" />
     <Compile Include="..\Russet.Launcher\BackendSync.cs" Link="BackendSync.cs" />
+    <Compile Include="..\Russet.Launcher\BackendDaemon.cs" Link="BackendDaemon.cs" />
     <!-- "Russet: Move WSL Disk to Another Drive" (Setup.Move.cs), which also runs on its own. -->
     <None Include="move-wsl-disk.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

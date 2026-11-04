@@ -1,7 +1,8 @@
 ; Russet's Windows installer (Inno Setup 6): a per-user install, no administrator rights.
 ; scripts\build-release.ps1 stages the files and passes Version, Stage, Output and Icon.
-; An update runs it with /SILENT /CLOSEAPPLICATIONS /UPDATE=1: it closes Russet, replaces the
-; editor, host and backend payload, and starts Russet again. Uninstalling leaves Russet's WSL
+; An update runs it with /SILENT /CLOSEAPPLICATIONS /UPDATE=1 while Russet quits itself: it ends what
+; outlives the editor (PrepareToInstall), replaces the editor, host and backend payload, and starts
+; Russet again. Uninstalling leaves Russet's WSL
 ; distribution and projects in place.
 
 #ifndef Version
@@ -59,4 +60,25 @@ Filename: "{app}\Russet.Launcher.exe"; Flags: nowait; Check: IsUpdate
 function IsUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
+// An update from the IDE (which quits itself): once Russet's windows have closed, end the processes of this
+// installation that outlive the editor and hold the files being replaced: the Russet IDE MCP server an agent
+// keeps running, a socket relay, a setup step. Only those processes: their WSL processes and a VM keep running.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Root: String;
+  Code: Integer;
+begin
+  Result := '';
+  if not IsUpdate then Exit;
+  Root := ExpandConstant('{app}') + '\';
+  StringChangeEx(Root, '''', '''''', True);
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "$r = ''' + Root + '''; ' +
+    'function Mine { Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($r, [StringComparison]::OrdinalIgnoreCase) } }; ' +
+    '$end = (Get-Date).AddMinutes(10); ' +
+    'while ((Mine | Where-Object { $_.MainWindowHandle -ne 0 }) -and (Get-Date) -lt $end) { Start-Sleep 1 }; ' +
+    'if (Mine) { Start-Sleep 20; Mine | Where-Object { $_.MainWindowHandle -eq 0 } | Stop-Process -Force }"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;

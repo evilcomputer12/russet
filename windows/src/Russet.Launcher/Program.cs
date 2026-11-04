@@ -17,34 +17,16 @@ try
     var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Russet", release ? "IDE" : "IDE-Development");
     Directory.CreateDirectory(profile);
     var home = release ? "/home/russet/.russet/ide" : "/home/russet/.russet-dev/ide-development";
-    var muxSocket = home + "/runtime/host-usbmuxd.sock";
+    var muxSocket = BackendDaemon.MuxSocket(home);
     var wsl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe");
     // A first run has no backend yet: the editor opens anyway, and its setup page installs WSL
     // and the backend, then starts the daemon itself.
     var backendInstalled = Installation.BackendInstalled(wsl);
     if (backendInstalled && release) Installation.SyncBackend(wsl, root);
-    // Physical iPhones through Apple Devices; a development engine admits the live backend
-    // only with RUSSET_LANE=A, and its host-wide device lock arbitrates with other users.
+    // Physical iPhones through Apple Devices.
     System.Diagnostics.Process? bridge = null;
     var devices = backendInstalled && DeviceBridge.Start(wsl, host, muxSocket, out bridge);
-    string[] deviceEnvironment = devices
-        ? ["RUSSET_DEVICE_BACKEND=live", "RUSSET_LANE=A", $"USBMUXD_SOCKET_ADDRESS={muxSocket}"]
-        : ["RUSSET_DEVICE_BACKEND=none"];
-    var start = new ProcessStartInfo(wsl)
-    {
-        UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-    };
-    // The sign-in survives restarts in the backend's passphrase store; WSLENV forwards the
-    // passphrase into the Linux environment so it never appears in an argument list.
-    start.Environment["RUSSET_SECRETS_PASSPHRASE"] = BackendSecrets.Passphrase(profile);
-    var forwarded = Environment.GetEnvironmentVariable("WSLENV");
-    start.Environment["WSLENV"] = string.IsNullOrEmpty(forwarded) ? "RUSSET_SECRETS_PASSPHRASE" : forwarded + ":RUSSET_SECRETS_PASSPHRASE";
-    foreach (var value in new[] { "-d", "Russet-Dev", "-u", "russet", "--exec", "env", $"RUSSET_HOME={home}" }
-        .Concat(deviceEnvironment)
-        .Concat(["RUSSET_SECRETS_BACKEND=passphrase", "PATH=/usr/lib/swift/usr/bin:/usr/local/bin:/usr/bin:/bin",
-        // Development build: Apple sign-in stages, header names and Apple's status codes, never values.
-        "RUSSET_LOG=info,russet_gsa=debug,hyper=warn",
-        "/opt/russet/bin/russet-dev", "daemon", "start", "--idle-timeout", "10m", "--json"])) start.ArgumentList.Add(value);
+    var start = BackendDaemon.Start(wsl, home, profile, devices);
     if (backendInstalled)
     using (var backend = Process.Start(start) ?? throw new IOException("Cannot start the Russet backend."))
     {

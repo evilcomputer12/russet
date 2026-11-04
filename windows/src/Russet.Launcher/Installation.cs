@@ -33,6 +33,8 @@ internal static class Installation
         if (BackendSync.Payload(root) is not { } payload || BackendSync.LinuxPath(payload) is not { } linux) return;
         var id = BackendSync.Id(payload);
         if (Run(wsl, BackendSync.Recorded("Russet-Dev"), 60, out var recorded) == 0 && recorded.Trim() == id) return;
+        // An editor already open (a second launch) must not start the old engine meanwhile.
+        using var maintenance = new Mutex(false, BackendDaemon.MaintenanceMutex);
         Run(wsl, BackendSync.StopDaemons("Russet-Dev"), 60, out _);
         // A changed /etc/wsl.conf applies once the distribution restarts; the daemon starts it again.
         if (Run(wsl, BackendSync.Install("Russet-Dev", linux, id), 300, out _) == BackendSync.RestartExit)

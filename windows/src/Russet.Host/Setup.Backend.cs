@@ -22,6 +22,8 @@ internal static partial class Setup
     {
         void Progress(string message, double? fraction = null) =>
             emit(fraction is { } f ? new { step = "backend", @event = "progress", message, fraction = f } : new { step = "backend", @event = "progress", message });
+        // The IDE leaves the daemon to this step until it ends (daemon-start): it stops the daemons below.
+        using var maintenance = new Mutex(false, BackendDaemon.MaintenanceMutex);
         if (BackendPayload() is not { } payload)
             return fail("missing", "This installation carries no backend. Install Russet from its GitHub release, then retry.", false);
         if (FramedPaths.ToLinux(payload) is null)
@@ -89,21 +91,29 @@ internal static partial class Setup
         return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream)) == sha256;
     }
 
-    // The daemon as the launcher starts it, for a backend installed after the editor opened.
+    // `--setup daemon-start`: the IDE's start of a daemon that stopped while Russet is open (the
+    // launcher starts it only when Russet opens). 0 once it runs; while the backend step installs
+    // the engine, 0 at once, since that step starts the daemon itself when done.
+    static async Task<int> RestartDaemon()
+    {
+        if (Mutex.TryOpenExisting(BackendDaemon.MaintenanceMutex, out var maintenance))
+        {
+            maintenance.Dispose();
+            return 0;
+        }
+        return await StartDaemon() ? 0 : 1;
+    }
+
+    // The daemon as the launcher started it, with iPhones through the launcher's Apple Devices
+    // bridge when it runs (RUSSET_DEVICE_BACKEND=live): for a backend installed after the editor
+    // opened, or a daemon that stopped since.
     static async Task<bool> StartDaemon()
     {
         var profile = Environment.GetEnvironmentVariable("RUSSET_IDE_PROFILE");
         var home = Environment.GetEnvironmentVariable("RUSSET_BACKEND_HOME");
         if (string.IsNullOrEmpty(profile) || string.IsNullOrEmpty(home) || !home.StartsWith("/home/russet/", StringComparison.Ordinal)) return false;
-        var start = new ProcessStartInfo(Wsl) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        start.Environment["RUSSET_SECRETS_PASSPHRASE"] = BackendSecrets.Passphrase(profile);
-        var forwarded = Environment.GetEnvironmentVariable("WSLENV");
-        start.Environment["WSLENV"] = string.IsNullOrEmpty(forwarded) ? "RUSSET_SECRETS_PASSPHRASE" : forwarded + ":RUSSET_SECRETS_PASSPHRASE";
-        foreach (var argument in new[] { "--distribution", Distribution, "--user", "russet", "--exec", "env", $"RUSSET_HOME={home}",
-                     "RUSSET_DEVICE_BACKEND=none", "RUSSET_SECRETS_BACKEND=passphrase", "PATH=/usr/lib/swift/usr/bin:/usr/local/bin:/usr/bin:/bin",
-                     "/opt/russet/bin/russet-dev", "daemon", "start", "--idle-timeout", "10m", "--json" })
-            start.ArgumentList.Add(argument);
-        using var daemon = Process.Start(start);
+        var devices = Environment.GetEnvironmentVariable("RUSSET_DEVICE_BACKEND") == "live";
+        using var daemon = Process.Start(BackendDaemon.Start(Wsl, home, profile, devices));
         if (daemon is null) return false;
         var output = daemon.StandardOutput.ReadToEndAsync();
         var errors = daemon.StandardError.ReadToEndAsync();

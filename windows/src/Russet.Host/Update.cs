@@ -49,9 +49,15 @@ internal static class Update
             Log($"not applied: {error.Message}");
             return 1;
         }
-        if (!await WaitForRussetToClose(root, TimeSpan.FromMinutes(10)))
+        if (await WaitForRussetToClose(root, TimeSpan.FromMinutes(10), Log) is { } open)
         {
-            Log("not applied: Russet stayed open");
+            // The IDE reads this line on its next start and offers the update again (selfUpdate.ts).
+            Log($"not applied: Russet stayed open ({open})");
+            // Reopened unless its window is still there (quitting was cancelled).
+            var prefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var left = Open(prefix);
+            if (!left.Any(HasWindow)) Reopen(root);
+            foreach (var process in left) process.Dispose();
             return 1;
         }
         var done = new List<string>();
@@ -68,6 +74,7 @@ internal static class Update
             }
             if (parts.ContainsKey("backend"))
             {
+                using var maintenance = new Mutex(false, BackendDaemon.MaintenanceMutex);
                 await Setup.StopDaemons();
                 Log(await Setup.InstallPayload(Path.Combine(root, "backend"))
                     ? "installed the new engine into WSL"
@@ -87,9 +94,12 @@ internal static class Update
             Log($"stopped after [{string.Join(", ", done)}]: {error.Message}");
         }
         // Russet opens again either way: a part that was not replaced works as it did.
-        Process.Start(new ProcessStartInfo(Path.Combine(root, "Russet.Launcher.exe")) { UseShellExecute = true })?.Dispose();
+        Reopen(root);
         return 0;
     }
+
+    static void Reopen(string root) =>
+        Process.Start(new ProcessStartInfo(Path.Combine(root, "Russet.Launcher.exe")) { UseShellExecute = true })?.Dispose();
 
     // A folder part moves in whole: the old one moves aside first and comes back if the move
     // fails. The launcher part is one file.
@@ -116,21 +126,66 @@ internal static class Update
         if (Directory.Exists(old)) Directory.Delete(old, recursive: true);
     }
 
-    // Every process of this installation (not "Russet Development" beside it) has exited.
-    static async Task<bool> WaitForRussetToClose(string root, TimeSpan limit)
+    // Until every process of this installation (not "Russet Development" beside it) has exited: null, or what
+    // stayed open. The editor's windows close first (the IDE quit itself; a dialog about unsaved files may hold it
+    // up to `limit`), and the launcher then closes the device bridge. Some processes outlive the editor: the Russet
+    // IDE MCP server an agent keeps running (editor\Russet.exe as Node), a socket relay or a setup step whose IDE is
+    // gone. Those serve no editor any more and hold the files being replaced, so after a grace period they are ended
+    // (the process only: a setup step's WSL process and a VM it started keep running).
+    static async Task<string?> WaitForRussetToClose(string root, TimeSpan limit, Action<string> log)
     {
         var prefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var deadline = DateTime.UtcNow + limit;
+        DateTime? windowsClosed = null;
         while (DateTime.UtcNow < deadline)
         {
-            var processes = Process.GetProcesses();
-            var open = processes.Any(p => p.Id != Environment.ProcessId && PathOf(p) is { } path
-                && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-            foreach (var process in processes) process.Dispose();
-            if (!open) return true;
+            var open = Open(prefix);
+            try
+            {
+                if (open.Count == 0) return null;
+                if (open.Any(p => HasWindow(p))) windowsClosed = null;
+                else windowsClosed ??= DateTime.UtcNow;
+                if (windowsClosed is { } since && DateTime.UtcNow - since > TimeSpan.FromSeconds(20))
+                {
+                    foreach (var process in open)
+                    {
+                        log($"ending {process.ProcessName} ({process.Id}), which outlived the editor");
+                        try { process.Kill(entireProcessTree: false); }
+                        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+                    }
+                    windowsClosed = DateTime.UtcNow;
+                }
+            }
+            finally
+            {
+                foreach (var process in open) process.Dispose();
+            }
             await Task.Delay(1000);
         }
-        return false;
+        var left = Open(prefix);
+        var names = string.Join(", ", left.Select(p => p.ProcessName).Distinct());
+        foreach (var process in left) process.Dispose();
+        return names.Length > 0 ? names : null;
+    }
+
+    static List<Process> Open(string prefix)
+    {
+        var open = new List<Process>();
+        foreach (var process in Process.GetProcesses())
+        {
+            if (process.Id != Environment.ProcessId && PathOf(process) is { } path
+                && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                open.Add(process);
+            else
+                process.Dispose();
+        }
+        return open;
+    }
+
+    static bool HasWindow(Process process)
+    {
+        try { return process.MainWindowHandle != 0; }
+        catch (InvalidOperationException) { return false; }
     }
 
     static string? PathOf(Process process)

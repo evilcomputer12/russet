@@ -50,6 +50,8 @@ internal static partial class Setup
             Console.WriteLine(JsonSerializer.Serialize(await Limits()));
             return 0;
         }
+        if (args is ["daemon-start"])
+            return await RestartDaemon();
         if (args is ["run", "swift-update" or "swift-retry-update" or "swift-rollback"])
             return await RunSwiftMaintenance(args[1]);
         if (args is ["run", "wsl-limits" or "wsl-restart", ..])
@@ -140,7 +142,8 @@ internal static partial class Setup
         return 0;
     }
 
-    sealed record StepStatus(string id, string state, string title, string detail);
+    // progress and fraction: how far a step running outside the IDE's window is (a virtual iPhone's creation).
+    sealed record StepStatus(string id, string state, string title, string detail, string? progress = null, double? fraction = null);
 
     static async Task<List<StepStatus>> Status()
     {
@@ -194,7 +197,11 @@ internal static partial class Setup
         Add("vphone", built ? "done" : "needed", built ? "Built." : "Not built yet (about an hour).");
         var ready = vphone?.GetProperty("vmsReady").GetInt32() ?? 0;
         if (Creating(vphone))
-            Add("virtual-iphone", "running", "Being created. This carries on while Russet is closed; the step shows done when it finishes.");
+        {
+            var (where, fraction) = CreationProgress(vphone!.Value);
+            steps.Add(new("virtual-iphone", "running", Titles["virtual-iphone"],
+                "Being created. This carries on while Russet is closed; the step shows done when it finishes.", where, fraction));
+        }
         else
             Add("virtual-iphone", ready > 0 ? "done" : built ? "needed" : "unavailable",
                 ready > 0 ? $"{ready} ready." : "Create a virtual iPhone (several hours on first boot).");
@@ -207,7 +214,20 @@ internal static partial class Setup
     static bool Creating(JsonElement? vphone) =>
         vphone is { } status && status.TryGetProperty("creating", out var creating) && creating.ValueKind == JsonValueKind.True;
 
-    const string StillCreating = "A virtual iPhone is still being created (it carries on while Russet is closed). Wait for it to finish; Set up Russet shows it done.";
+    // "Step 7 of 9: restoring iOS" and 0.64 (the page shows "64% · …"), or "…, 52 min so far" and no
+    // fraction, from vphone_component.sh status.
+    static (string? Where, double? Fraction) CreationProgress(JsonElement status)
+    {
+        int? Number(string name) => status.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
+        if (Number("createStep") is not { } step || Number("createSteps") is not { } total
+            || !status.TryGetProperty("createLabel", out var label) || label.GetString() is not { Length: > 0 } what)
+            return (null, null);
+        var percent = Number("createPercent");
+        var where = $"Step {step} of {total}: {what}";
+        return percent is { } p ? (where, p / 100.0) : ($"{where}, {Number("createMinutes") ?? 0} min so far", null);
+    }
+
+    const string StillCreating ="A virtual iPhone is still being created (it carries on while Russet is closed). Wait for it to finish; Set up Russet shows it done.";
 
     static async Task<int> RunStep(string id, Dictionary<string, string> arguments)
     {
@@ -412,7 +432,7 @@ internal static partial class Setup
     [GeneratedRegex(@"\x1B\[[0-9;?]*[A-Za-z]")]
     private static partial Regex Ansi();
     // xtool's "[Extracting XIP] 42%" redraws.
-    [GeneratedRegex(@"^\[([A-Za-z][A-Za-z ]{0,40})\] (\d{1,3})%$")]
+    [GeneratedRegex(@"^\[([A-Za-z][A-Za-z0-9 :,]{0,60})\] (\d{1,3})%$")]
     private static partial Regex Phase();
     [GeneratedRegex(@"/mnt/[a-z]/Users/[^/\s]+", RegexOptions.IgnoreCase)]
     private static partial Regex UserMount();

@@ -229,12 +229,86 @@ create() {
   # the VM's name: clear it so upstream names the VM after the device and iOS.
   # In a session of its own: the VM it leaves running outlives this step's WSL session,
   # whose end would otherwise hang it up (QEMU: "terminating on signal 1").
-  local since status
+  # It writes to a log of its own, never into this step's output, which ends with Russet (an update closes
+  # it): this step shows the log and how far the creation is (creation_progress) while both run.
+  local since status pid follow last= line
   since=$(date +%s)
-  env -u NAME setsid --wait "$ROOT/setup/create-vm.sh" "$@" && return 0
-  status=$?
+  mkdir -p "${CREATE_LOG%/*}"
+  if [ -s "$CREATE_LOG" ]; then mv -f "$CREATE_LOG" "$CREATE_LOG.1"; fi
+  env -u NAME setsid --wait "$ROOT/setup/create-vm.sh" "$@" >> "$CREATE_LOG" 2>&1 < /dev/null &
+  pid=$!
+  tail -n +1 -f --pid "$pid" "$CREATE_LOG" &
+  follow=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    line=$(progress_line) || line=
+    if [ -n "$line" ] && [ "$line" != "$last" ]; then printf '%s\n' "$line"; last=$line; fi
+    sleep 10
+  done
+  if wait "$pid"; then status=0; else status=$?; fi
+  wait "$follow" 2>/dev/null || true
+  [ "$status" -eq 0 ] && return 0
   if oom_since "$since"; then die "$(oom_hint)"; fi
   return "$status"
+}
+
+# create-vm.sh's output: one creation at a time, so one file (it survives the step and Russet).
+CREATE_LOG=$HOME/vphone-setup-work/logs/create.log
+# create-vm.sh's steps in order, as the setup page names them.
+CREATE_STEPS=(sanity bundle firmware gpu-driver prepare patch restore cfw booted)
+declare -A CREATE_LABELS=(
+  [sanity]="checking WSL" [bundle]="preparing the VM folder" [firmware]="downloading iOS"
+  [gpu-driver]="setting up the GPU driver" [prepare]="preparing the firmware" [patch]="patching the firmware"
+  [restore]="restoring iOS" [cfw]="installing the custom firmware" [booted]="starting iOS for the first time"
+)
+
+# The folder of the VM being created: the newest whose state file does not end in "booted".
+creating_vm() {
+  local state newest=
+  for state in "${VSETUP_DEVICES:-$HOME/vphone-setup-work/devices}"/*/.create-state; do
+    [ -f "$state" ] && ! grep -qx booted "$state" || continue
+    if [ -z "$newest" ] || [ "$state" -nt "$newest" ]; then newest=$state; fi
+  done
+  [ -n "$newest" ] && printf '%s\n' "${newest%/.create-state}"
+}
+
+# How far the creation is: "STEP TOTAL PERCENT MINUTES LABEL", PERCENT "-" when the step has none. The
+# step at work is the one after the last its state file records, since that file last changed. The
+# restore's percentage is the bar under the Apple logo, which the restore's serial log records: it
+# stays at 20 while ASR copies iOS in, so ASR's own percentage fills 20–95 meanwhile.
+creation_progress() {
+  local vm state n=0 key pct=- since user asr serial
+  vm=$(creating_vm) || vm=
+  state=${vm:+$vm/.create-state}
+  for key in "${CREATE_STEPS[@]}"; do
+    n=$((n + 1))
+    if [ -n "$state" ] && grep -qx "$key" "$state" 2>/dev/null; then continue; fi
+    break
+  done
+  since=$(stat -c %Y "$state" 2>/dev/null) || since=$(date +%s)
+  serial=$vm/.runs-dfu/serial.log
+  if [ "$key" = restore ] && [ -n "$vm" ] && [ -f "$serial" ] && [ "$serial" -nt "$state" ]; then
+    # One pass to the end (an early exit would fail the pipeline under pipefail); the last values win.
+    read -r user asr < <(LC_ALL=C awk '/restore-step-user-progress = [0-9]/ { u = $NF + 0 }
+      /ASR RESTORE PROGRESS: [0-9]/ { a = $NF + 0 } END { print (u == "" ? "-" : u), (a == "" ? "-" : a) }' "$serial")
+    if [ "$user" != - ] && [ "$asr" != - ] && [ "$user" -ge 20 ] && [ "$user" -lt 95 ]; then
+      pct=$(( 20 + asr * 75 / 100 ))
+    elif [ "$user" != - ]; then
+      pct=$user
+    fi
+  fi
+  printf '%s %s %s %s %s\n' "$n" "${#CREATE_STEPS[@]}" "$pct" "$(( ($(date +%s) - since) / 60 ))" "${CREATE_LABELS[$key]}"
+}
+
+# creation_progress as the setup page's progress line: "[Step 7 of 9: restoring iOS] 64%" (a bar),
+# or "==> Step 8 of 9: installing the custom firmware (52 min so far)".
+progress_line() {
+  local n total pct minutes label
+  read -r n total pct minutes label < <(creation_progress) || return 1
+  if [ "$pct" != - ]; then
+    printf '[Step %s of %s: %s] %s%%\n' "$n" "$total" "$label" "$pct"
+  else
+    printf '==> Step %s of %s: %s (%s min so far)\n' "$n" "$total" "$label" "$minutes"
+  fi
 }
 
 # Everything create-vm.sh needs from a build: QEMU, the APFS module, vphone-cli's tooling, the ROMs.
@@ -402,9 +476,17 @@ status() {
     vms=$((vms + 1))
     grep -qx booted "$state" && ready=$((ready + 1))
   done
-  printf '{"pin":"%s","checkout":"%s","qemuBuilt":%s,"built":%s,"vms":%s,"vmsReady":%s,"running":%s,"creating":%s}\n' \
+  # A creation at work also says how far it is (creation_progress).
+  local progress=
+  if creating; then
+    local n total pct minutes label
+    read -r n total pct minutes label < <(creation_progress)
+    progress=$(printf ',"createStep":%s,"createSteps":%s,"createPercent":%s,"createMinutes":%s,"createLabel":"%s"' \
+      "$n" "$total" "$([ "$pct" = - ] && echo null || echo "$pct")" "$minutes" "$label")
+  fi
+  printf '{"pin":"%s","checkout":"%s","qemuBuilt":%s,"built":%s,"vms":%s,"vmsReady":%s,"running":%s,"creating":%s%s}\n' \
     "${PIN:0:10}" "$head" "$qemu" "$built" "$vms" "$ready" "$(vm_running && echo true || echo false)" \
-    "$(creating && echo true || echo false)"
+    "$(creating && echo true || echo false)" "$progress"
 }
 
 vphoned() { CID=${CID:-3} VPHONED_TIMEOUT=${VPHONED_TIMEOUT:-30} timeout 60 "$ROOT/tools/vphoned.sh" "$@"; }
