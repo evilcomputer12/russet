@@ -97,6 +97,66 @@ describe("the Russet Build output", () => {
     expect(lines).not.toContain("unrelated");
   });
 
+  it("shows a failed build concisely: the compiler's error with its code, and a summary that lists it", () => {
+    // What Russet 0.6.13 printed for a run on the owner's work PC (the paths shortened).
+    const diagnostic = (d: object): JobEvent => ({ seq: ++seq, ts: at(0), kind: "diagnostic", severity: "error", ...d }) as JobEvent;
+    tracker.update(job("running"));
+    tracker.events("job_1", [
+      stage("compile", "started", 0),
+      log("Building for debugging..."),
+      log("[Computing dependencies]"),
+      log("[Provisioning 1 / 4]"),
+      log("[Using on-disk description]"),
+      diagnostic({ message: "SwiftCompile normal arm64 /mnt/c/T/TestApp.swift failed with a nonzero exit code. Command line:     cd /mnt/c/T/.russet/work" }),
+      log("error: SwiftCompile normal arm64 /mnt/c/T/TestApp.swift failed with a nonzero exit code. Command line:     cd /mnt/c/T/.russet/work", "stderr"),
+      log("    builtin-SwiftPerFileCompile TestApp.swift", "stderr"),
+      diagnostic({ message: "cannot find 'ContentView' in scope", file: "/mnt/c/T/TestApp.swift", line: 10, column: 13 }),
+      log("/mnt/c/T/TestApp.swift:10:13: error: cannot find 'ContentView' in scope", "stderr"),
+      log("10 |             ContentView()", "stderr"),
+      log("   |             `- error: cannot find 'ContentView' in scope", "stderr"),
+      log("Failed frontend command:", "stderr"),
+      log("/usr/lib/swift/usr/bin/swift-frontend -frontend -c /mnt/c/T/ContentView.swift …", "stderr"),
+      diagnostic({ message: "Build failed" }),
+      log("error: Build failed", "stderr"),
+      stage("compile", "failed", 14),
+    ]);
+    tracker.update(job("failed", {
+      durationMs: 24_200,
+      error: { russetCode: "build.compileFailed", retryable: false, chain: ["compilation failed: /mnt/c/T/TestApp.swift:10:13: error: cannot find 'ContentView' in scope"], hint: "Fix the errors listed in the build's diagnostics; the full log is /mnt/c/T/.russet/logs/job_1.jsonl." },
+    }));
+    expect(lines.slice(lines.indexOf("▸ Compiling…"))).toEqual([
+      "▸ Compiling…",
+      "/mnt/c/T/TestApp.swift:10:13: error: cannot find 'ContentView' in scope",
+      "10 |             ContentView()",
+      "   |             `- error: cannot find 'ContentView' in scope",
+      "✖ Compiling failed (14.0 s)",
+      "✖ Run failed in 24.2 s while compiling: 1 error",
+      "  /mnt/c/T/TestApp.swift:10:13: cannot find 'ContentView' in scope",
+      "    ↳ Nothing named 'ContentView' is visible here. Check the spelling, whether it was renamed or removed, that it is not `private` in another file, or add the missing `import`.",
+      "  Fix the errors listed in the build's diagnostics; the full log is /mnt/c/T/.russet/logs/job_1.jsonl.",
+    ]);
+  });
+
+  it("shows everything the tools print when asked for the full output", () => {
+    const full = new BuildTracker((_k, l) => lines.push(l), () => undefined, () => undefined, () => false);
+    full.update(job("running"));
+    full.events("job_1", [log("[Computing dependencies]"), log("Failed frontend command:"), log("/usr/bin/swift-frontend -c x")]);
+    expect(lines.slice(-3)).toEqual(["[Computing dependencies]", "Failed frontend command:", "/usr/bin/swift-frontend -c x"]);
+  });
+
+  it("tells a run's iPhone lookup from the build's own check of the project", () => {
+    tracker.update(job("running"));
+    tracker.events("job_1", [
+      stage("resolve", "started", 0), stage("resolve", "finished", 0),
+      stage("resolve", "started", 0), stage("resolve", "finished", 8),
+    ]);
+    expect(lines.filter((l) => l.startsWith("✔"))).toEqual(["✔ Finding the iPhone (0.0 s)", "✔ Checking the project (8.0 s)"]);
+    // A build alone has no iPhone to find.
+    tracker.update(job("running", { jobId: "job_2", kind: "build.start" }));
+    tracker.events("job_2", [stage("resolve", "started", 0)]);
+    expect(lines[lines.length - 1]).toBe("▸ Checking the project…");
+  });
+
   it("formats durations", () => {
     expect(seconds(1234)).toBe("1.2 s");
     expect(seconds(125_000)).toBe("2 min 5 s");

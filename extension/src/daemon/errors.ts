@@ -7,6 +7,8 @@
 import * as vscode from "vscode";
 import { ResponseError } from "vscode-jsonrpc/node";
 import type { ErrorData } from "../generated/protocol";
+import { openErrorDocs, windowsPaths } from "../util/docs";
+import { explain } from "../run/explain";
 
 export function errorDataOf(err: unknown): ErrorData | undefined {
   if (err instanceof ResponseError && err.data && typeof err.data === "object") {
@@ -42,14 +44,18 @@ export interface ErrorAction {
 /** Show a daemon error as a notification with a Docs button when available, plus any `actions`. */
 export async function showDaemonError(err: unknown, context: string, actions: ErrorAction[] = []): Promise<void> {
   const data = errorDataOf(err);
-  const base = messageOf(err);
+  // The backend's paths as Windows shows them (/mnt/c/… → C:\…).
+  const base = windowsPaths(messageOf(err));
   const labels = actions.map((a) => a.label);
   if (!data) {
     const picked = await vscode.window.showErrorMessage(`${context}: ${base}`, ...labels);
     await actions.find((a) => a.label === picked)?.run();
     return;
   }
-  const detail = data.hint ? `${base} — ${data.hint}` : base;
+  // A compiler error the IDE can say in plain words says that rather than the generic hint.
+  const meaning = explain(/: error: (.+)$/.exec(base)?.[1] ?? "");
+  const hint = meaning ?? (data.hint ? windowsPaths(data.hint) : undefined);
+  const detail = hint ? `${base} — ${hint}` : base;
   if (data.docs) {
     labels.push("Open Docs");
   }
@@ -58,7 +64,8 @@ export async function showDaemonError(err: unknown, context: string, actions: Er
     ...labels,
   );
   if (choice === "Open Docs" && data.docs) {
-    await vscode.env.openExternal(vscode.Uri.parse(data.docs));
+    // The error's section of Russet's bundled error reference (docs/errors.md).
+    await openErrorDocs(data.docs);
     return;
   }
   await actions.find((a) => a.label === choice)?.run();

@@ -9,6 +9,8 @@
 import * as vscode from "vscode";
 import type { JobEvent, JobInfo, Stage, StepState } from "../generated/protocol";
 import { Emitter } from "../util/disposables";
+import { windowsPaths } from "../util/docs";
+import { explain } from "./explain";
 
 /** The job kinds that build, and how the output names them. */
 const JOB_LABEL: Record<string, string> = {
@@ -53,6 +55,20 @@ const BUILD_END = 70;
 
 /** The pipeline's own log line for a stage, which the stage events already show. */
 const STAGE_LOG_LINE = /^stage \w+ (started|finished|failed)$/;
+/**
+ * Tool chatter the concise output leaves out (the job's log file keeps all of it): swift-build's planning steps, its
+ * lines for a task or build that failed (they name no error; the compiler's own line above does), and the
+ * compiler's invocation.
+ */
+const CHATTER = [
+  /^Building for (debugging|production)\.\.\.$/,
+  /^\[(Computing dependencies|Using on-disk description|Provisioning \d+ \/ \d+)\]$/,
+  /^\s*builtin-\w+/,
+  /^error: .* failed with a nonzero exit code\./,
+  /^error: Build failed$/,
+];
+/** The compiler's line before its whole command line, which the concise output leaves out with it. */
+const INVOCATION = "Failed frontend command:";
 /** Terminal colours, which an output channel shows as text. */
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -78,8 +94,16 @@ interface Track {
   label: string;
   percent: number;
   stage?: Stage;
-  started: Map<Stage, number>;
-  timings: [Stage, number][];
+  /** What the stage at work is called: a run's first resolve finds the iPhone, the build's own checks the project. */
+  step?: string;
+  started: Map<Stage, { at: number; step: string }>;
+  timings: [string, number][];
+  resolved: boolean;
+  /** The compiler's errors at their place in the code, once each: the summary lists them. */
+  errors: { at: string; message: string }[];
+  warnings: number;
+  /** The next log line is the compiler's command line (after "Failed frontend command:"). */
+  skipNext: boolean;
   ended: boolean;
   waiting?: string;
 }
@@ -104,6 +128,8 @@ export class BuildTracker {
     private readonly write: (kind: string, line: string) => void,
     private readonly onProgress: (p: BuildProgress) => void,
     private readonly onEnd: (e: BuildEnd) => void,
+    /** Whether tool chatter is left out (`russet.build.outputDetail`: concise, the default). */
+    private readonly concise: () => boolean = () => true,
   ) {}
 
   /** `job.updated`. */
@@ -111,7 +137,10 @@ export class BuildTracker {
     if (!isBuildJob(job.kind)) return;
     let t = this.jobs.get(job.jobId);
     if (!t) {
-      t = { kind: job.kind, label: JOB_LABEL[job.kind] ?? job.kind, percent: 0, started: new Map(), timings: [], ended: false };
+      t = {
+        kind: job.kind, label: JOB_LABEL[job.kind] ?? job.kind, percent: 0, started: new Map(), timings: [], resolved: false,
+        errors: [], warnings: 0, skipNext: false, ended: false,
+      };
       this.jobs.set(job.jobId, t);
       const project = job.project ? job.project.split(/[\\/]/).filter(Boolean).pop() : undefined;
       const at = new Date(time(job.createdAt) ?? Date.now()).toLocaleTimeString();
@@ -127,18 +156,27 @@ export class BuildTracker {
     t.ended = true;
     const succeeded = job.state === "succeeded";
     const took = job.durationMs !== undefined ? ` in ${seconds(job.durationMs)}` : "";
-    const parts = t.timings.map(([s, ms]) => `${STAGE_LABEL[s]} ${seconds(ms)}`).join(" · ");
+    const parts = t.timings.map(([step, ms]) => `${step} ${seconds(ms)}`).join(" · ");
     let summary: string;
+    const warned = t.warnings > 0 ? ` · ${t.warnings} warning${t.warnings === 1 ? "" : "s"}` : "";
     if (succeeded) {
-      summary = `✔ ${t.label} succeeded${took}${parts ? ` (${parts})` : ""}`;
+      summary = `✔ ${t.label} succeeded${took}${parts ? ` (${parts})` : ""}${warned}`;
     } else {
-      const why = job.error?.chain?.[0];
       const verb = job.state === "cancelled" ? "was cancelled" : job.state === "interrupted" ? "was interrupted" : "failed";
-      const step = t.stage && t.started.has(t.stage) ? STAGE_LABEL[t.stage] : undefined;
+      const step = t.stage && t.started.has(t.stage) ? t.step : undefined;
       const where = step ? ` while ${step.charAt(0).toLowerCase()}${step.slice(1)}` : "";
+      // The compiler's errors, listed below, say it better than the error's own message, which repeats the first.
+      const n = t.errors.length;
+      const why = n > 0 ? `${n} error${n === 1 ? "" : "s"}` : job.error?.chain?.[0];
       summary = `✖ ${t.label} ${verb}${took}${where}${why ? `: ${why}` : ""}`;
     }
     this.write(t.kind, summary);
+    for (const e of t.errors) {
+      this.write(t.kind, `  ${e.at}: ${e.message}`);
+      // What it means, in plain words, for the common ones (run/explain.ts).
+      const meaning = explain(e.message);
+      if (meaning) this.write(t.kind, `    ↳ ${meaning}`);
+    }
     if (!succeeded && job.error?.hint) this.write(t.kind, `  ${job.error.hint}`);
     if (succeeded) this.progress(job.jobId, t, "Done", 100);
     this.onEnd({ job, succeeded, summary });
@@ -152,7 +190,14 @@ export class BuildTracker {
     for (const ev of events) {
       switch (ev.kind) {
         case "log":
-          if (!(ev.stream === "info" && STAGE_LOG_LINE.test(ev.line))) this.write(t.kind, ev.line.replace(ANSI, ""));
+          this.log(t, ev.stream, ev.line.replace(ANSI, ""));
+          break;
+        case "diagnostic":
+          if (ev.severity === "warning") t.warnings += 1;
+          if (ev.severity === "error" && ev.file) {
+            const at = [ev.file, ev.line, ev.column].filter((x) => x !== undefined).join(":");
+            if (!t.errors.some((e) => e.at === at && e.message === ev.message)) t.errors.push({ at, message: ev.message });
+          }
           break;
         case "warning":
           this.write(t.kind, `warning: ${ev.message}${ev.hint ? ` (${ev.hint})` : ""}`);
@@ -164,7 +209,7 @@ export class BuildTracker {
           const fraction = ev.done !== undefined && ev.total ? ev.done / ev.total : ev.fraction;
           if (fraction !== undefined && t.stage) {
             const [lo, hi] = BAND[t.stage];
-            this.progress(jobId, t, STAGE_LABEL[t.stage], lo + (hi - lo) * Math.min(1, Math.max(0, fraction)));
+            this.progress(jobId, t, t.step ?? STAGE_LABEL[t.stage], lo + (hi - lo) * Math.min(1, Math.max(0, fraction)));
           }
           break;
         }
@@ -174,25 +219,52 @@ export class BuildTracker {
     }
   }
 
+  private log(t: Track, stream: string, line: string): void {
+    if (stream === "info" && STAGE_LOG_LINE.test(line)) return;
+    if (this.concise()) {
+      if (t.skipNext) {
+        t.skipNext = false;
+        return;
+      }
+      if (line === INVOCATION) {
+        t.skipNext = true;
+        return;
+      }
+      if (CHATTER.some((re) => re.test(line))) return;
+    }
+    this.write(t.kind, line);
+  }
+
   private stage(jobId: string, t: Track, stage: Stage, state: StepState, at: number): void {
     const [lo, hi] = BAND[stage];
     if (state === "started") {
+      const step = this.stepOf(t, stage);
       t.stage = stage;
-      t.started.set(stage, at);
-      this.write(t.kind, `▸ ${STAGE_LABEL[stage]}…`);
-      this.progress(jobId, t, STAGE_LABEL[stage], lo);
+      t.step = step;
+      t.started.set(stage, { at, step });
+      this.write(t.kind, `▸ ${step}…`);
+      this.progress(jobId, t, step, lo);
       return;
     }
     const since = t.started.get(stage);
-    const took = since !== undefined ? at - since : undefined;
-    if (took !== undefined) t.timings.push([stage, took]);
+    const step = since?.step ?? STAGE_LABEL[stage];
+    const took = since !== undefined ? at - since.at : undefined;
+    if (took !== undefined) t.timings.push([step, took]);
     const suffix = took !== undefined ? ` (${seconds(took)})` : "";
     if (state === "finished") {
-      this.write(t.kind, `✔ ${STAGE_LABEL[stage]}${suffix}`);
-      this.progress(jobId, t, STAGE_LABEL[stage], hi);
+      this.write(t.kind, `✔ ${step}${suffix}`);
+      this.progress(jobId, t, step, hi);
     } else {
-      this.write(t.kind, `✖ ${STAGE_LABEL[stage]} failed${suffix}`);
+      this.write(t.kind, `✖ ${step} failed${suffix}`);
     }
+  }
+
+  /** A run resolves twice: the pipeline finds the iPhone, then the build checks the project and its toolchain. */
+  private stepOf(t: Track, stage: Stage): string {
+    if (stage !== "resolve") return STAGE_LABEL[stage];
+    const device = !BUILD_ONLY.has(t.kind) && !t.resolved;
+    t.resolved = true;
+    return device ? STAGE_LABEL.resolve : "Checking the project";
   }
 
   private progress(jobId: string, t: Track, step: string, runPercent?: number): void {
@@ -220,7 +292,8 @@ export class BuildLog implements vscode.Disposable {
   constructor() {
     this.channel = vscode.window.createOutputChannel("Russet Build");
     this.tracker = new BuildTracker(
-      (kind, line) => {
+      (kind, raw) => {
+        const line = readable(raw);
         this.channel.appendLine(line);
         this._onDidWrite.fire({ kind, line });
       },
@@ -230,6 +303,7 @@ export class BuildLog implements vscode.Disposable {
         if (!e.succeeded && reveal() !== "never") this.show();
         this._onDidEnd.fire(e);
       },
+      () => vscode.workspace.getConfiguration("russet").get<string>("build.outputDetail", "concise") !== "full",
     );
   }
 
@@ -255,6 +329,20 @@ export class BuildLog implements vscode.Disposable {
     this._onDidEnd.dispose();
     this._onDidWrite.dispose();
   }
+}
+
+/** Past this, a line (a compiler's whole command line) is cut short in the output; the job's log file keeps it. */
+const LONGEST_LINE = 600;
+
+/**
+ * A line as the output shows it: the backend's Windows-drive paths as Windows paths (C:\…\App.swift:10:13, which the
+ * output makes a link), and a line too long to read cut short.
+ */
+export function readable(line: string, platform: NodeJS.Platform = process.platform): string {
+  const text = windowsPaths(line, platform);
+  return text.length > LONGEST_LINE
+    ? `${text.slice(0, 240)} … (${text.length - 240} more characters, in the build's log file)`
+    : text;
 }
 
 function reveal(): string {

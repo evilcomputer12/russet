@@ -20,6 +20,7 @@ import { Diagnostics } from "./run/diagnostics";
 import { RunManager } from "./run/session";
 import { RussetTaskProvider } from "./run/taskProvider";
 import { BuildLog } from "./run/buildLog";
+import { openDocs, setDocsRoot } from "./util/docs";
 import { ConsoleViewProvider } from "./panels/consoleView";
 import { MirrorViewProvider } from "./panels/mirrorView";
 import { DevicesTreeProvider } from "./views/devicesTree";
@@ -101,14 +102,21 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
     vscode.commands.registerCommand("russet.build.showLog", () => buildLog.show()),
   );
 
+  // Russet's documentation, bundled (docs/): Russet: Open Documentation, and errors' Open Docs.
+  setDocsRoot(context.extensionUri);
+  context.subscriptions.push(vscode.commands.registerCommand("russet.docs.open", () => openDocs()));
+
   // Russet: About — the versions people quote in a bug report.
   context.subscriptions.push(
     vscode.commands.registerCommand("russet.about", async () => {
       const russet = (await russetVersion()) ?? "development build";
       const engine = client.hello ? `${client.hello.server.version} (${client.hello.server.buildId})` : "not connected";
       const detail = [`Russet ${russet}`, `Engine ${engine}`, `Extension ${extensionVersion}`, `Editor ${vscode.version}`].join("\n");
-      const pick = await vscode.window.showInformationMessage("About Russet", { modal: true, detail }, "Check for Updates", "Copy");
-      if (pick === "Check for Updates") await vscode.commands.executeCommand("russet.update.check");
+      const pick = await vscode.window.showInformationMessage(
+        "About Russet", { modal: true, detail }, "Documentation", "Check for Updates", "Copy",
+      );
+      if (pick === "Documentation") await openDocs();
+      else if (pick === "Check for Updates") await vscode.commands.executeCommand("russet.update.check");
       else if (pick === "Copy") await vscode.env.clipboard.writeText(detail);
     }),
   );

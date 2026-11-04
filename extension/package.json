@@ -524,6 +524,12 @@
         "command": "russet.about",
         "title": "About Russet",
         "category": "Russet"
+      },
+      {
+        "command": "russet.docs.open",
+        "title": "Open Documentation",
+        "category": "Russet",
+        "icon": "$(book)"
       }
     ],
     "menus": {
@@ -1246,6 +1252,19 @@
           ],
           "default": "onError",
           "description": "When the Russet Build output (the compiler's output and each step's time) comes to the front."
+        },
+        "russet.build.outputDetail": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "full"
+          ],
+          "enumDescriptions": [
+            "Each step, the compiler's errors and warnings with their code, and a summary listing the errors.",
+            "Everything the build tools print, including swift-build's planning steps and the compiler's command lines."
+          ],
+          "default": "concise",
+          "description": "How much of the build tools' output the Russet Build output shows. The job's log file in the project's .russet\\logs folder always has all of it."
         },
         "russet.run.openConsole": {
           "type": "boolean",

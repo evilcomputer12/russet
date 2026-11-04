@@ -5,6 +5,8 @@
 
 import * as vscode from "vscode";
 import type { JobEvent } from "../generated/protocol";
+import { windowsPaths } from "../util/docs";
+import { explain } from "./explain";
 
 type DiagnosticEvent = Extract<JobEvent, { kind: "diagnostic" }>;
 
@@ -22,11 +24,15 @@ export class Diagnostics implements vscode.Disposable {
     if (!event.file) {
       return;
     }
-    const uri = vscode.Uri.file(event.file);
+    // The relay converts only path fields it knows; a diagnostic's file comes as WSL sees it (/mnt/c/…).
+    const uri = vscode.Uri.file(windowsPaths(event.file));
     const line = Math.max(0, (event.line ?? 1) - 1);
     const column = Math.max(0, (event.column ?? 1) - 1);
     const range = new vscode.Range(line, column, line, column + 1);
-    const diag = new vscode.Diagnostic(range, event.message, severityOf(event.severity));
+    // The compiler's message, then what it means in plain words for the common errors.
+    const meaning = explain(event.message);
+    const diag = new vscode.Diagnostic(range, meaning ? `${event.message}
+${meaning}` : event.message, severityOf(event.severity));
     diag.source = event.tool ?? "russet";
     if (event.code) {
       diag.code = event.code;
