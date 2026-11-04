@@ -30,6 +30,8 @@ export interface UpdatesUi {
   log(line: string): void;
   /** Opens "Russet: Change WSL Limits" and settles once the owner is done with it. */
   changeLimits?(): Promise<unknown>;
+  /** Russet's own update check ("Russet: Check for Russet Updates"). */
+  checkRussetUpdates?(): Promise<unknown>;
 }
 
 export class UpdateWatcher {
@@ -107,17 +109,26 @@ export class UpdateWatcher {
         return;
       case "failed":
         if (this.once(`failed:${key}`)) {
-          void this.ui
-            .warn(
-              `${c.title}: the update to ${c.upstream} failed${c.reason ? ` (${c.reason})` : ""}. The build in use (${c.current}) is unchanged.`,
-              "Retry",
-            )
-            .then((pick) => {
-              if (pick === "Retry") {
-                this.told.delete(`failed:${key}`);
-                void this.update(c, `${c.id}-retry-update`);
+          // A patch that does not apply fails the same way on every retry: upstream changed code Russet patches, and
+          // only a Russet update (with the patches fitted to it) gets past it.
+          const patches = /patch does not apply/.test(c.reason ?? "");
+          const message = patches
+            ? `${c.title}: upstream's ${c.upstream} changed code Russet patches, so it cannot be built yet; ${c.current} stays in use. A Russet update fits the patches to it.`
+            : `${c.title}: the update to ${c.upstream} failed${c.reason ? ` (${c.reason})` : ""}. The build in use (${c.current}) is unchanged.`;
+          const actions = patches && this.ui.checkRussetUpdates ? ["Check for Russet Updates", "Retry"] : ["Retry"];
+          void this.ui.warn(message, ...actions).then(async (pick) => {
+            if (pick === "Check for Russet Updates") {
+              await this.ui.checkRussetUpdates?.();
+            } else if (pick === "Retry") {
+              void this.ui.info(`${c.title}: trying the update to ${c.upstream} again in the background.`);
+              const outcome = await this.update(c, `${c.id}-retry-update`);
+              // Said now, not at the next check: a retry that fails again must not look like one that did nothing.
+              if (outcome?.kind === "failed") {
+                void this.ui.warn(`${c.title}: the update to ${c.upstream} failed again: ${outcome.message}`);
               }
-            });
+              this.told.add(`failed:${key}`);
+            }
+          });
         }
         return;
       case "built":
@@ -141,8 +152,8 @@ export class UpdateWatcher {
     }
   }
 
-  /** Runs `<id>-update` (or `run`), then reports a switch with Roll Back. */
-  private async update(c: ComponentUpdate, run = `${c.id}-update`): Promise<void> {
+  /** Runs `<id>-update` (or `run`), then reports a switch with Roll Back; resolves with the run's outcome. */
+  private async update(c: ComponentUpdate, run = `${c.id}-update`): Promise<SetupRunOutcome> {
     const outcome = await this.runner.run(run, {}, (e) => {
       if (e.event === "progress" || e.event === "log") {
         this.ui.log(`${run}: ${e.message}`);
@@ -163,11 +174,11 @@ export class UpdateWatcher {
           }
         });
       }
-      return;
+      return outcome;
     }
     if (outcome.kind !== "done") {
       // The next check reports the failed build once.
-      return;
+      return outcome;
     }
     const after = (await this.runner.updates()).find((x) => x.id === c.id);
     if (after && after.current === c.upstream && this.once(`switched:${c.id}:${c.upstream}`)) {
@@ -184,5 +195,6 @@ export class UpdateWatcher {
         }
       });
     }
+    return outcome;
   }
 }

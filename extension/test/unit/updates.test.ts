@@ -107,7 +107,13 @@ describe("UpdateWatcher", () => {
     await w.tick();
     expect(runs).toEqual([]);
     expect(shown).toEqual([
-      "warn: Virtual iPhone engine: the update to 888d17ca1726 failed (a Russet patch does not apply). The build in use (c3b9ecdaf621) is unchanged.",
+      "warn: Virtual iPhone engine: upstream's 888d17ca1726 changed code Russet patches, so it cannot be built yet; c3b9ecdaf621 stays in use. A Russet update fits the patches to it.",
+    ]);
+    // Any other failure says what failed.
+    const other = fakeUi();
+    await new UpdateWatcher(fakeRunner([[{ ...BASE, staged: "failed", reason: "the build failed" }]]).runner, other.ui).tick();
+    expect(other.shown).toEqual([
+      "warn: Virtual iPhone engine: the update to 888d17ca1726 failed (the build failed). The build in use (c3b9ecdaf621) is unchanged.",
     ]);
   });
 
@@ -117,6 +123,42 @@ describe("UpdateWatcher", () => {
     await new UpdateWatcher(runner, ui).tick();
     await settle();
     expect(runs).toEqual(["vphone-retry-update"]);
+  });
+
+  it("says at once when a retry fails again, and not again at the next check", async () => {
+    const failed = { ...BASE, staged: "failed" as const, reason: "the build failed" };
+    const again: SetupRunOutcome = { kind: "failed", code: "setup.vphone-retry-update.failed", message: "the build failed", retryable: true };
+    const { runner, runs } = fakeRunner([[failed]], again);
+    const shown: string[] = [];
+    let first = true;
+    const ui: UpdatesUi = {
+      info: (m) => (shown.push(`info: ${m}`), Promise.resolve(undefined)),
+      // Retry on the first notice only.
+      warn: (m) => (shown.push(`warn: ${m}`), Promise.resolve(first ? ((first = false), "Retry") : undefined)),
+      log: () => undefined,
+    };
+    const w = new UpdateWatcher(runner, ui);
+    await w.tick();
+    await settle();
+    await settle();
+    await w.tick();
+    expect(runs).toEqual(["vphone-retry-update"]);
+    expect(shown.slice(1)).toEqual([
+      "info: Virtual iPhone engine: trying the update to 888d17ca1726 again in the background.",
+      "warn: Virtual iPhone engine: the update to 888d17ca1726 failed again: the build failed",
+    ]);
+  });
+
+  it("offers Russet's own update when a patch does not apply", async () => {
+    const failed = { ...BASE, staged: "failed" as const, reason: "a Russet patch does not apply" };
+    let checked = 0;
+    const { ui } = fakeUi("Check for Russet Updates");
+    ui.checkRussetUpdates = () => Promise.resolve(checked++);
+    const { runner, runs } = fakeRunner([[failed]]);
+    await new UpdateWatcher(runner, ui).tick();
+    await settle();
+    expect(checked).toBe(1);
+    expect(runs).toEqual([]);
   });
 
   it("waits for a running virtual iPhone, and leaves skipped, building and current commits alone", async () => {

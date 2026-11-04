@@ -20,10 +20,10 @@
 #                           RESULT {json} with the sockets for LLDB and lldb-dap in DIR (vphone_debug.py)
 set -Eeuo pipefail
 
-# The newest commit Russet's patches are known to apply to (upstream main, 2026-11-01). A first
+# The newest commit Russet's patches are known to apply to (upstream main, 2026-11-03). A first
 # install takes upstream main, as updates do (below), and this one where the patches do not
 # apply there.
-PIN=${RUSSET_VPHONE_PIN:-888d17ca17268aaecd277c64f2d95385b184744b}
+PIN=${RUSSET_VPHONE_PIN:-c2dc1996c8398ddb994288a29a719360f354d268}
 UPSTREAM=https://github.com/YahiaAngelo/vphone-linux.git
 BRANCH=main
 # Updates: `check` asks GitHub for main's commit, one `git ls-remote`, cheap enough for the IDE

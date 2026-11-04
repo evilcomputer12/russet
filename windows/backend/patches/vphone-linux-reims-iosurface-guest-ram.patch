@@ -27,16 +27,18 @@ GPU (Undefined)").
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 ---
- crates/reims-vgpu-c/include/reims_vgpu.h |   6 ++
- crates/reims-vgpu-c/src/device.rs        | 120 +++++++++++++++++++++--
- crates/reims-vgpu-c/src/iosurface.rs     |  20 +++-
- 3 files changed, 134 insertions(+), 12 deletions(-)
+ crates/reims-vgpu-c/include/reims_vgpu.h   |   6 ++
+ crates/reims-vgpu-c/src/device.rs          | 120 +++++++++++++++++++++++++++--
+ crates/reims-vgpu-c/src/iosurface.rs       |  20 +++--
+ crates/reims-vgpu-c/src/iosurface/tests.rs |   3 +
+ crates/reims-vgpu-c/src/video/tests.rs     |   1 +
+ 5 files changed, 138 insertions(+), 12 deletions(-)
 
 diff --git a/reims-vgpu/crates/reims-vgpu-c/include/reims_vgpu.h b/reims-vgpu/crates/reims-vgpu-c/include/reims_vgpu.h
-index 2d5ea3d7..c2676fb2 100644
+index a285c885..1e75899a 100644
 --- a/reims-vgpu/crates/reims-vgpu-c/include/reims_vgpu.h
 +++ b/reims-vgpu/crates/reims-vgpu-c/include/reims_vgpu.h
-@@ -798,6 +798,12 @@ typedef struct {
+@@ -852,6 +852,12 @@ typedef struct {
    // the ring count these pages; give it the graphics device's. Any other value is
    // RVG_ERR_INVALID_ARGUMENT.
    uint32_t guest_page_shift;
@@ -50,7 +52,7 @@ index 2d5ea3d7..c2676fb2 100644
  
  // `send_to_guest(ctx, message, length)`: one host-to-guest message, the whole container, which
 diff --git a/reims-vgpu/crates/reims-vgpu-c/src/device.rs b/reims-vgpu/crates/reims-vgpu-c/src/device.rs
-index 15b1121b..32a50e52 100644
+index 879bd053..bdf6dfcb 100644
 --- a/reims-vgpu/crates/reims-vgpu-c/src/device.rs
 +++ b/reims-vgpu/crates/reims-vgpu-c/src/device.rs
 @@ -9,7 +9,7 @@
@@ -60,9 +62,9 @@ index 15b1121b..32a50e52 100644
 -use std::os::fd::{FromRawFd, OwnedFd};
 +use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
  use std::sync::Arc;
+ use std::time::Duration;
  
- use reims_vgpu::{
-@@ -419,20 +419,126 @@ pub(crate) unsafe fn memory_map(
+@@ -486,20 +486,126 @@ pub(crate) unsafe fn memory_map(
              },
              _ => None,
          };
@@ -252,6 +254,43 @@ index 99d13c45..8c42bf49 100644
              Ok(m) => m,
              Err(s) => return refuse(s),
          };
--- 
-2.56.0.windows.4
-
+diff --git a/reims-vgpu/crates/reims-vgpu-c/src/iosurface/tests.rs b/reims-vgpu/crates/reims-vgpu-c/src/iosurface/tests.rs
+index 4349904b..dba50ba0 100644
+--- a/reims-vgpu/crates/reims-vgpu-c/src/iosurface/tests.rs
++++ b/reims-vgpu/crates/reims-vgpu-c/src/iosurface/tests.rs
+@@ -42,6 +42,7 @@ fn made_over_a_memory_map() {
+         memory_map: std::ptr::null(),
+         callbacks: &cb,
+         guest_page_shift: 0,
++        memory_files: std::ptr::null(),
+     };
+     let mut d = std::ptr::null_mut();
+     // SAFETY: a live config; `d` is writable.
+@@ -175,6 +176,7 @@ fn map_through_the_ring(shift: u32) -> (i32, bool) {
+         memory_map: &map,
+         callbacks: &cb,
+         guest_page_shift: shift,
++        memory_files: std::ptr::null(),
+     };
+     let mut dev = std::ptr::null_mut();
+     // SAFETY: a live config and map; `dev` is writable; then the device made.
+@@ -242,6 +244,7 @@ fn another_guest_page_shift_is_refused() {
+             memory_map: &map,
+             callbacks: &cb,
+             guest_page_shift: shift,
++            memory_files: std::ptr::null(),
+         };
+         let mut d = std::ptr::null_mut();
+         // SAFETY: a live config; `d` is writable.
+diff --git a/reims-vgpu/crates/reims-vgpu-c/src/video/tests.rs b/reims-vgpu/crates/reims-vgpu-c/src/video/tests.rs
+index be5d6b31..68dd5b51 100644
+--- a/reims-vgpu/crates/reims-vgpu-c/src/video/tests.rs
++++ b/reims-vgpu/crates/reims-vgpu-c/src/video/tests.rs
+@@ -140,6 +140,7 @@ fn an_iosurface_device_is_borrowed() {
+         memory_map: &map,
+         callbacks: std::ptr::null(),
+         guest_page_shift: 0,
++        memory_files: std::ptr::null(),
+     };
+     let mut io = std::ptr::null_mut();
+     let mut d = std::ptr::null_mut();

@@ -499,6 +499,7 @@ export function installExperience(
         warn: (message, ...actions) => Promise.resolve(vscode.window.showWarningMessage(message, ...actions)),
         log: (line) => log().info(`[updates] ${line}`),
         changeLimits: () => Promise.resolve(vscode.commands.executeCommand("russet.wsl.limits")),
+        checkRussetUpdates: () => Promise.resolve(vscode.commands.executeCommand("russet.update.check")),
       },
       (components) => {
         const engine = components.find((c) => c.id === "vphone");

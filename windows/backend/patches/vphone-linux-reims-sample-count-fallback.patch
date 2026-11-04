@@ -1,8 +1,8 @@
 diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/answer.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/answer.rs
-index 31d3e138..11190fa5 100644
+index e57223f4..71597d07 100644
 --- a/reims-vgpu/crates/reims-vgpu-vulkan/src/answer.rs
 +++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/answer.rs
-@@ -2184,11 +2184,14 @@ pub enum Inexact {
+@@ -2167,11 +2167,14 @@ pub enum Inexact {
      /// Metal's carries them from a command that names no pipeline state, so the getter answers
      /// the runtime's 0 ([`crate::gpu::icb`]'s `Sides::copied_lengths`).
      IcbCopiedLength,
@@ -13,12 +13,12 @@ index 31d3e138..11190fa5 100644
  
  impl Inexact {
      /// Every kind, once.
--    pub const ALL: [Self; 14] = [
-+    pub const ALL: [Self; 15] = [
+-    pub const ALL: [Self; 13] = [
++    pub const ALL: [Self; 14] = [
          Self::HalfOutputBlend,
          Self::BfloatLoaded,
          Self::WriteRounding,
-@@ -2203,6 +2206,7 @@ impl Inexact {
+@@ -2185,6 +2188,7 @@ impl Inexact {
          Self::IcbIdentifierAfterEncoder,
          Self::IcbLengthPastTheLastCommand,
          Self::IcbCopiedLength,
@@ -26,7 +26,7 @@ index 31d3e138..11190fa5 100644
      ];
  
      /// The kind's code, which its line names.
-@@ -2222,6 +2226,7 @@ impl Inexact {
+@@ -2203,6 +2207,7 @@ impl Inexact {
              Self::IcbIdentifierAfterEncoder => "inexact-icb-identifier-after-encoder",
              Self::IcbLengthPastTheLastCommand => "inexact-icb-length-past-last-command",
              Self::IcbCopiedLength => "inexact-icb-copied-length",
@@ -34,7 +34,7 @@ index 31d3e138..11190fa5 100644
          }
      }
  }
-@@ -2861,7 +2866,8 @@ mod tests {
+@@ -2862,7 +2867,8 @@ mod tests {
                  | Inexact::UniqueIdentifier
                  | Inexact::IcbIdentifierAfterEncoder
                  | Inexact::IcbLengthPastTheLastCommand
@@ -45,7 +45,7 @@ index 31d3e138..11190fa5 100644
          }
      }
 diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu.rs
-index b31c5a4b..2d6da389 100644
+index 5bfe0d19..572434ee 100644
 --- a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu.rs
 +++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu.rs
 @@ -38,6 +38,7 @@ mod paging_discard;
@@ -57,7 +57,7 @@ index b31c5a4b..2d6da389 100644
  #[cfg(target_os = "macos")]
  mod rgbx;
 diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/desc.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/desc.rs
-index 106de019..09bd18f6 100644
+index 465b4dac..28f28c4f 100644
 --- a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/desc.rs
 +++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/desc.rs
 @@ -290,7 +290,7 @@ impl TextureFields {
@@ -69,7 +69,7 @@ index 106de019..09bd18f6 100644
          desc.array_length = d.array_length;
          let (usage, private_usage) = usage_set(d.usage);
          desc.usage = usage;
-@@ -1052,7 +1052,8 @@ impl RenderPassDescriptor<VulkanPlatform> for VulkanRenderPassDescriptor {
+@@ -1029,7 +1029,8 @@ impl RenderPassDescriptor<VulkanPlatform> for VulkanRenderPassDescriptor {
              d.render_target_height = v;
          }
          if let Some(v) = set.default_raster_sample_count {
@@ -80,17 +80,17 @@ index 106de019..09bd18f6 100644
          // `setDefaultColorSampleCount:` (SPI) is kept nowhere: on this host it changes nothing a
          // pass shows, with attachments or without (`mutgap_dec_render_default_color_samples`).
 diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/device.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/device.rs
-index 1053a266..d93db5ec 100644
+index 8fa1022e..c1db45d7 100644
 --- a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/device.rs
 +++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/device.rs
-@@ -246,6 +246,7 @@ pub fn adopt(sel: &'static str, raw: rt::Device) -> VulkanDevice {
+@@ -251,6 +251,7 @@ pub fn adopt(raw: rt::Device) -> VulkanDevice {
          return kept.clone_ref();
      }
      metal_space::count_sampler_ids(&raw);
 +    crate::gpu::samples::learn(&raw);
      crate::answer::native::device_made(raw.properties());
-     let made = Obj::new(DeviceObject {
-         raw,
+     #[cfg(target_os = "linux")]
+     crate::os::learn_view_imports(&raw);
 diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/samples.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/samples.rs
 new file mode 100644
 index 00000000..7186fc34
@@ -180,7 +180,7 @@ index 00000000..7186fc34
 +    }
 +}
 diff --git a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/serialized.rs b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/serialized.rs
-index f5dd3e6e..c0c678a2 100644
+index 020afe0b..a7e1021a 100644
 --- a/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/serialized.rs
 +++ b/reims-vgpu/crates/reims-vgpu-vulkan/src/gpu/serialized.rs
 @@ -1393,7 +1393,7 @@ pub fn render(

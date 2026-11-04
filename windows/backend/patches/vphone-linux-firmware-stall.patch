@@ -1,0 +1,14 @@
+diff --git a/setup/create-vm.sh b/setup/create-vm.sh
+index b669e20..8424e35 100755
+--- a/setup/create-vm.sh
++++ b/setup/create-vm.sh
+@@ -225,7 +225,8 @@ fetch() {
+     fi
+   fi
+   log "  downloading $(basename "$out")${want:+ ($((want / 1048576)) MiB)}"
+-  until curl -L --fail --retry 5 --retry-all-errors -C - -o "$out.part" "$url"; do
++  # A connection that stalls (under 1 KB/s for two minutes) ends and resumes, rather than hanging the run.
++  until curl -L --fail --retry 5 --retry-all-errors --speed-limit 1024 --speed-time 120 -C - -o "$out.part" "$url"; do
+     # 416: the part is already whole (or larger than the file); anything else: try again.
+     [ -n "$want" ] && [ "$(stat -c %s "$out.part" 2>/dev/null || echo 0)" -ge "$want" ] && break
+     warn "  the download stopped; resuming in 10 s (Ctrl+C stops; a re-run resumes too)"
