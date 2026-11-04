@@ -53,6 +53,9 @@ const BUILD_END = 70;
 
 /** The pipeline's own log line for a stage, which the stage events already show. */
 const STAGE_LOG_LINE = /^stage \w+ (started|finished|failed)$/;
+/** Terminal colours, which an output channel shows as text. */
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 
 export interface BuildProgress {
   jobId: string;
@@ -149,7 +152,7 @@ export class BuildTracker {
     for (const ev of events) {
       switch (ev.kind) {
         case "log":
-          if (!(ev.stream === "info" && STAGE_LOG_LINE.test(ev.line))) this.write(t.kind, ev.line);
+          if (!(ev.stream === "info" && STAGE_LOG_LINE.test(ev.line))) this.write(t.kind, ev.line.replace(ANSI, ""));
           break;
         case "warning":
           this.write(t.kind, `warning: ${ev.message}${ev.hint ? ` (${ev.hint})` : ""}`);

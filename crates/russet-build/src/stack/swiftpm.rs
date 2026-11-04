@@ -583,7 +583,8 @@ pub fn package_command(swift: &Utf8Path, package: &Utf8Path, scratch: Option<&Ut
 
 /// Parses one line of build output into an event; `None` drops the line.
 pub fn parse_line(stream: LogStream, line: &str) -> Option<BuildEvent> {
-    let trimmed = line.trim_end();
+    let clean = strip_ansi(line);
+    let trimmed = clean.trim_end();
     if trimmed.contains("does not support linking for platform iOS") {
         return None;
     }
@@ -595,6 +596,33 @@ pub fn parse_line(stream: LogStream, line: &str) -> Option<BuildEvent> {
         return Some(BuildEvent::Diagnostic { diagnostic: d });
     }
     Some(BuildEvent::Log { stream, line: redact_env_dump(trimmed) })
+}
+
+/// The line without terminal escape sequences. swift-build has the compiler colour its diagnostics
+/// (`…/App.swift:10:13: \e[1;31merror: \e[1;39mcannot find …`), which hides the `: error: ` the parser looks for, and
+/// the IDE's output shows the codes as text.
+fn strip_ansi(line: &str) -> std::borrow::Cow<'_, str> {
+    if !line.contains('\u{1b}') {
+        return std::borrow::Cow::Borrowed(line);
+    }
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        // CSI (`ESC [`): parameters up to the final byte, 0x40–0x7E. Any other escape loses its ESC only.
+        if chars.peek() == Some(&'[') {
+            chars.next();
+            for n in chars.by_ref() {
+                if ('\u{40}'..='\u{7e}').contains(&n) {
+                    break;
+                }
+            }
+        }
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 fn parse_progress(line: &str) -> Option<BuildEvent> {
@@ -727,10 +755,10 @@ pub fn succeeded(out: &CommandOutput) -> bool {
 const OUT_OF_MEMORY_HINT: &str = "Close the virtual iPhone or other memory-hungry apps, or raise WSL's memory limit \
                                   (Russet: Change WSL Limits), then build again.";
 
-/// swift-build's line for a task that failed ("SwiftCompile normal arm64 … failed with a nonzero exit code"): it names
-/// the task; the compiler printed the error itself above it.
+/// swift-build's lines for a task that failed ("SwiftCompile normal arm64 … failed with a nonzero exit code. Command
+/// line: …") and for the whole build ("Build failed"): they name no error; the compiler printed it itself.
 fn is_task_summary(d: &Diagnostic) -> bool {
-    d.file.is_none() && d.message.ends_with("failed with a nonzero exit code")
+    d.file.is_none() && (d.message.contains("failed with a nonzero exit code") || d.message == "Build failed")
 }
 
 pub fn build_failure(diagnostics: &[Diagnostic], tail: &[String], log: Option<&Utf8Path>) -> Error {
@@ -742,8 +770,8 @@ pub fn build_failure(diagnostics: &[Diagnostic], tail: &[String], log: Option<&U
             || d.message.contains("Linking")
     }) || tail.iter().any(|l| l.contains("ld64.lld: error"));
     let code = if link { codes::build::LINK_FAILED } else { codes::build::COMPILE_FAILED };
-    // The compiler's own error, not swift-build's line for the task that failed, which names no error.
-    let real = errors.iter().find(|d| !is_task_summary(d));
+    // The compiler's own error, at its place in the code where one has a place; never swift-build's summary lines.
+    let real = errors.iter().find(|d| d.file.is_some()).or_else(|| errors.iter().find(|d| !is_task_summary(d)));
     // Only task lines: the compiler printed no error because it was stopped, most often by WSL's memory running out.
     let killed = real.is_none()
         && !errors.is_empty()
@@ -965,13 +993,34 @@ mod tests {
     }
 
     #[test]
+    fn coloured_compiler_errors_are_diagnostics_and_lines_lose_their_colours() {
+        // As swift-build's per-file compile prints it (Russet 0.6.11 on Windows).
+        let line = "/mnt/c/p/Sources/Test/TestApp.swift:10:13: \u{1b}[1;31merror: \u{1b}[1;39mcannot find 'ContentView' \
+                    in scope\u{1b}[0;0m";
+        let Some(BuildEvent::Diagnostic { diagnostic: d }) = parse_line(LogStream::Stderr, line) else {
+            panic!("not a diagnostic: {line:?}");
+        };
+        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.message, "cannot find 'ContentView' in scope");
+        assert_eq!(d.file.as_deref(), Some("/mnt/c/p/Sources/Test/TestApp.swift"));
+        assert_eq!((d.line, d.column), (Some(10), Some(13)));
+        let snippet = " \u{1b}[0;36m9 |\u{1b}[0;0m         WindowGroup {";
+        let Some(BuildEvent::Log { line, .. }) = parse_line(LogStream::Stderr, snippet) else {
+            panic!("not a log line")
+        };
+        assert_eq!(line, " 9 |         WindowGroup {");
+    }
+
+    #[test]
     fn the_compilers_error_wins_over_swift_builds_task_line() {
         let task = parse_diagnostic(
-            "error: SwiftCompile normal arm64 /p/Sources/App/App.swift failed with a nonzero exit code",
+            "error: SwiftCompile normal arm64 /p/Sources/App/App.swift failed with a nonzero exit code. Command line:     \
+             cd /p/.russet/work",
         )
         .unwrap();
+        let done = parse_diagnostic("error: Build failed").unwrap();
         let real = parse_diagnostic("/p/Sources/App/App.swift:3:5: error: cannot find 'Foo' in scope").unwrap();
-        let e = build_failure(&[task.clone(), real], &[], None);
+        let e = build_failure(&[task.clone(), done, real], &[], None);
         assert!(e.message().contains("cannot find 'Foo' in scope"), "{}", e.message());
 
         // Only the task line, and the compiler was killed: say so, and what to do.

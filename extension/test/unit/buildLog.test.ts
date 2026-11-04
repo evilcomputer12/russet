@@ -44,6 +44,7 @@ describe("the Russet Build output", () => {
       log("stage resolve finished", "info"),
       stage("compile", "started", 1),
       log("[1/4] Compiling Test ContentView.swift"),
+      log("\u001b[0;36m9 |\u001b[0;0m     WindowGroup {", "stderr"),
       progress({ done: 1, total: 4 }),
       progress({ done: 4, total: 4 }),
       stage("compile", "finished", 31),
@@ -59,6 +60,8 @@ describe("the Russet Build output", () => {
     tracker.update(job("succeeded", { durationMs: 74_000 }));
 
     expect(lines).toContain("[1/4] Compiling Test ContentView.swift");
+    // Terminal colours do not reach the output.
+    expect(lines).toContain("9 |     WindowGroup {");
     expect(lines).toContain("✔ Compiling (30.0 s)");
     expect(lines).toContain("✔ Installing on the iPhone (40.0 s)");
     // The pipeline's own "stage … finished" line is not repeated.
