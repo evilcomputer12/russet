@@ -62,9 +62,11 @@ begin
   Result := ExpandConstant('{param:UPDATE|0}') = '1';
 end;
 
-// An update from the IDE (which quits itself): once Russet's windows have closed, end the processes of this
-// installation that outlive the editor and hold the files being replaced: the Russet IDE MCP server an agent
-// keeps running, a socket relay, a setup step. Only those processes: their WSL processes and a VM keep running.
+// An update from the IDE: Russet's windows close (asked to, every 10 s, as the Restart Manager would: Russet 0.6.10
+// and older start the installer without quitting), then the processes of this installation that outlive the
+// editor and hold the files being replaced end: the Russet IDE MCP server an agent keeps running, a socket relay,
+// a setup step. Only those processes: their WSL processes and a VM keep running. A window still open after 10
+// minutes (a question about unsaved files) is left to the Restart Manager.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Root: String;
@@ -77,8 +79,11 @@ begin
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -Command "$r = ''' + Root + '''; ' +
     'function Mine { Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($r, [StringComparison]::OrdinalIgnoreCase) } }; ' +
-    '$end = (Get-Date).AddMinutes(10); ' +
-    'while ((Mine | Where-Object { $_.MainWindowHandle -ne 0 }) -and (Get-Date) -lt $end) { Start-Sleep 1 }; ' +
-    'if (Mine) { Start-Sleep 20; Mine | Where-Object { $_.MainWindowHandle -eq 0 } | Stop-Process -Force }"',
+    'function Shown { Mine | Where-Object { $_.MainWindowHandle -ne 0 } }; ' +
+    '$end = (Get-Date).AddMinutes(10); $ask = Get-Date; ' +
+    'while ((Shown) -and (Get-Date) -lt $end) { ' +
+    'if ((Get-Date) -ge $ask) { Shown | ForEach-Object { $null = $_.CloseMainWindow() }; $ask = (Get-Date).AddSeconds(10) }; ' +
+    'Start-Sleep 1 }; ' +
+    'if (-not (Shown) -and (Mine)) { Start-Sleep 20; Mine | Where-Object { $_.MainWindowHandle -eq 0 } | Stop-Process -Force }"',
     '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
