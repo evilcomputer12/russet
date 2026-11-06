@@ -37,7 +37,8 @@ pub struct ScreenScreenshotParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub udid: Option<String>,
-    /// The encoding (default `png`). The device's screenshot service answers PNG only.
+    /// The encoding (default `png`). `jpeg` is smaller and quicker for the device; the older DVT screenshot service
+    /// answers PNG anyway, and the result's `format` says which it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub format: Option<ImageFormat>,
@@ -49,7 +50,7 @@ pub struct ScreenScreenshotParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub scale: Option<f64>,
-    /// JPEG quality, 1–100.
+    /// JPEG quality, 1–100 (not available yet: the device picks it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub quality: Option<u8>,

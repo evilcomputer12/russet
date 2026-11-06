@@ -203,10 +203,11 @@ pub async fn app_terminate(m: &DeviceManager, c: &Caller, p: pa::AppTerminatePar
     Ok(pa::AppTerminateResult {})
 }
 
-/// `screen.screenshot`: a PNG of the screen, returned as base64 or written to an absolute `toFile`.
+/// `screen.screenshot`: a PNG of the screen, or a JPEG when asked for and the device's capture service can (the
+/// older DVT service answers PNG; `format` says which), returned as base64 or written to an absolute `toFile`.
 pub async fn screen_screenshot(m: &DeviceManager, p: ps::ScreenScreenshotParams) -> Result<ps::ScreenScreenshotResult> {
-    if p.format == Some(ps::ImageFormat::Jpeg) || p.quality.is_some() {
-        return Err(invalid_argument("the device's screenshot service answers PNG only: ask for png, without quality"));
+    if p.quality.is_some() {
+        return Err(invalid_argument("the device picks the JPEG quality: omit quality"));
     }
     if p.max_dimension.is_some() || p.scale.is_some() {
         return Err(invalid_argument("downscaling screenshots is not available yet: omit maxDimension and scale"));
@@ -215,23 +216,23 @@ pub async fn screen_screenshot(m: &DeviceManager, p: ps::ScreenScreenshotParams)
     if let Some(path) = to_file.as_ref().filter(|p| !p.is_absolute()) {
         return Err(invalid_argument(format!("{path:?} is not an absolute path (ARCHITECTURE §7.3)")));
     }
-    let shot = handle(m, p.udid.as_deref())?.screenshot().await?;
+    let shot = handle(m, p.udid.as_deref())?.screenshot(p.format == Some(ps::ImageFormat::Jpeg)).await?;
     let (image_base64, path) = match to_file {
         Some(path) => {
-            std::fs::write(&path, &shot.png).map_err(|e| {
+            std::fs::write(&path, &shot.data).map_err(|e| {
                 russet_core::Error::new(codes::core::IO, format!("cannot write {}: {e}", path.display()))
             })?;
             (None, Some(path.display().to_string()))
         }
         None => {
             use base64::Engine as _;
-            (Some(base64::engine::general_purpose::STANDARD.encode(&shot.png)), None)
+            (Some(base64::engine::general_purpose::STANDARD.encode(&shot.data)), None)
         }
     };
     Ok(ps::ScreenScreenshotResult {
         image_base64,
         path,
-        format: ps::ImageFormat::Png,
+        format: if shot.jpeg { ps::ImageFormat::Jpeg } else { ps::ImageFormat::Png },
         width: shot.width,
         height: shot.height,
         orientation: if shot.width > shot.height { ps::Orientation::Landscape } else { ps::Orientation::Portrait },

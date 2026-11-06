@@ -7,19 +7,21 @@
 // A physical iPhone streams while this view is visible: `screen.mirror.start`
 // opens the device's HEVC display session, and the webview decodes it from
 // ws://127.0.0.1 (ARCHITECTURE §10.1) and sends touch, keys and buttons back.
-// When the stream cannot start or the webview cannot decode HEVC, the view polls
-// `screen.screenshot` instead (a few frames a second) and retries the stream
+// When the webview cannot decode HEVC, the stream stays open for input only and
+// the view polls JPEG screenshots (`screen.screenshot`), taking one right after
+// each touch; when the stream cannot start, it polls them and retries the stream
 // later. The message contract is backend-neutral (device vs virtual).
 
 import * as vscode from "vscode";
 import type { RussetClient } from "../daemon/client";
 import { errorDataOf, messageOf } from "../daemon/errors";
+import { log } from "../util/log";
 import type { Store } from "../state/store";
 import type { DestinationModel } from "./destinations";
 import { renderPage, localResourceRoots } from "./webviewHost";
 
-/** The shortest time between two screenshot requests (at most about 8 frames a second). */
-const FRAME_INTERVAL_MS = 125;
+/** The shortest time between two screenshot requests (at most 20 a second; the iPhone is usually slower). */
+const FRAME_INTERVAL_MS = 50;
 /**
  * Whether the view asks for the live HEVC stream (`russet.mirror.liveStream`, on unless turned off).
  * Engines before the fix that keeps the display session off the worker stacks abort opening it;
@@ -56,6 +58,12 @@ export class MirrorViewProvider implements vscode.WebviewViewProvider {
   private streamId?: string;
   /** Devices whose stream failed, until when (screenshots meanwhile). */
   private readonly streamBlocked = new Map<string, number>();
+  /** The device whose stream carries only input: the webview cannot decode it, so screenshots show the screen. */
+  private inputOnly?: string;
+  /** Ends the screenshot loop's wait at once (a touch, on screenshots). */
+  private wake?: () => void;
+  /** Whether the engine sends JPEG screenshots (an older one answers PNG only). */
+  private jpeg = true;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -102,6 +110,15 @@ export class MirrorViewProvider implements vscode.WebviewViewProvider {
           this.streamBlocked.set(m.udid, Date.now() + (m.unsupported ? STREAM_UNSUPPORTED_MS : STREAM_RETRY_MS));
           this.mirror();
         }
+      } else if (kind === "inputOnly") {
+        const m = msg as { udid?: string; codec?: string; reason?: string };
+        if (m.udid && m.udid === this.streamUdid) {
+          log().info(`[mirror] ${m.reason ?? "no video"} (${m.codec ?? "?"}): screenshots, with touch and keys through the stream`);
+          this.inputOnly = m.udid;
+          if (!this.polling) void this.poll();
+        }
+      } else if (kind === "touched") {
+        this.wake?.();
       } else if (kind === "openEditor") {
         void vscode.commands.executeCommand("russet.openVirtualIphone");
       }
@@ -226,6 +243,34 @@ export class MirrorViewProvider implements vscode.WebviewViewProvider {
   private forgetStream(): void {
     this.streamUdid = undefined;
     this.streamId = undefined;
+    this.inputOnly = undefined;
+  }
+
+  /** Waits `ms`, or less when a touch asks for the screen (wake). */
+  private pause(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(done, ms);
+      function done(): void {
+        clearTimeout(timer);
+        resolve();
+      }
+      this.wake = done;
+    });
+  }
+
+  /** A screenshot: JPEG (smaller, and quicker for the iPhone), or PNG from an engine that has only that. */
+  private async screenshot(client: RussetClient, udid: string): Promise<{ image?: string; format: string; width: number; height: number }> {
+    if (this.jpeg) {
+      try {
+        const shot = await client.call("screen.screenshot", { udid, format: "jpeg" });
+        return { image: shot.imageBase64, format: shot.format, width: shot.width, height: shot.height };
+      } catch (err) {
+        if (errorDataOf(err)?.russetCode !== "core.invalidArgument") throw err;
+        this.jpeg = false;
+      }
+    }
+    const shot = await client.call("screen.screenshot", { udid });
+    return { image: shot.imageBase64, format: shot.format, width: shot.width, height: shot.height };
   }
 
   private async poll(): Promise<void> {
@@ -234,23 +279,26 @@ export class MirrorViewProvider implements vscode.WebviewViewProvider {
     try {
       for (;;) {
         const target = this.target();
-        if (!this.view?.visible || !this.client || target?.kind !== "device" || this.streamUdid === target.udid) {
+        // A stream shows the screen itself, unless the webview cannot decode it (input only).
+        const streamed = this.streamUdid === target?.udid && this.inputOnly !== target?.udid;
+        if (!this.view?.visible || !this.client || target?.kind !== "device" || streamed) {
           return;
         }
-        if (liveStream() && Date.now() >= (this.streamBlocked.get(target.udid) ?? 0)) {
+        if (this.streamUdid !== target.udid && liveStream() && Date.now() >= (this.streamBlocked.get(target.udid) ?? 0)) {
           // Time to try the stream again; mirror() starts it once this loop has ended.
           setTimeout(() => this.mirror(), 0);
           return;
         }
         const started = Date.now();
         try {
-          const shot = await this.client.call("screen.screenshot", { udid: target.udid });
+          const shot = await this.screenshot(this.client, target.udid);
           failures = 0;
-          if (shot.imageBase64) {
+          if (shot.image) {
             void this.view?.webview.postMessage({
               kind: "frame",
               udid: target.udid,
-              png: shot.imageBase64,
+              image: shot.image,
+              format: shot.format,
               width: shot.width,
               height: shot.height,
             });
@@ -268,7 +316,7 @@ export class MirrorViewProvider implements vscode.WebviewViewProvider {
           }
           await delay(Math.min(2000 * failures, 10000));
         }
-        await delay(Math.max(0, FRAME_INTERVAL_MS - (Date.now() - started)));
+        await this.pause(Math.max(0, FRAME_INTERVAL_MS - (Date.now() - started)));
       }
     } finally {
       this.polling = false;

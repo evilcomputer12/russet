@@ -5,10 +5,13 @@
 // iPhone streams: the extension starts `screen.mirror.start` and hands over the
 // WebSocket ("stream" messages); this page decodes the HEVC access units with
 // WebCodecs (ARCHITECTURE §10.1) and sends touch, keys and the side buttons
-// back. When it cannot decode HEVC, it says so ("streamEnded" with
-// `unsupported`) and the extension polls PNG screenshots instead ("frame"
-// messages). The virtual iPhone's interactive screen is the "Virtual iPhone"
-// editor tab, which shares this frame (webview/shared/deviceFrame.ts).
+// back. When it cannot decode HEVC (an editor without the GPU's decoder), the
+// stream stays open for touch, keys and buttons ("inputOnly") while the
+// extension polls JPEG screenshots ("frame" messages), one right after each
+// touch; a stream without input ends ("streamEnded" with `unsupported`). The
+// label under the phone says which. The virtual iPhone's interactive screen is
+// the "Virtual iPhone" editor tab, which shares this frame
+// (webview/shared/deviceFrame.ts).
 
 import { vscodeApi } from "../shared/vscode";
 import { addStyles, h } from "../shared/dom";
@@ -41,13 +44,15 @@ const KEY_USAGES: Record<string, number> = {
 const SIDE_BUTTONS: Record<SideButton, string> = { volumeUp: "volume-up", volumeDown: "volume-down", lock: "lock" };
 
 const stage = h("div", { class: "stage" });
+/** How the screen arrives: live video, or screenshots and how many a second. */
+const mode = h("span", { class: "muted", style: "align-self:center;font-size:11px" });
 const open = h("button", { class: "secondary", onclick: () => vscode.postMessage({ kind: "openEditor" }) }, "Open in Editor");
 const home = h("button", { class: "secondary", title: "Go to the Home Screen", onclick: () => send({ t: "button", button: "home" }) }, "Home");
 home.hidden = true;
 // A virtual iPhone is shown and driven in its editor tab: no second phone frame here.
 const virtualNote = h("p", { class: "muted", style: "padding:12px;text-align:center" }, "The virtual iPhone runs in its editor tab.");
 virtualNote.hidden = true;
-document.getElementById("root")?.append(virtualNote, stage, h("div", { class: "foot" }, home, open));
+document.getElementById("root")?.append(virtualNote, stage, h("div", { class: "foot" }, home, open, mode));
 const frame = new DeviceFrame(stage, { interactive: true, onInput: input, onSideButton: (b) => send({ t: "button", button: SIDE_BUTTONS[b] }) });
 frame.setStatus({ title: "iPhone", detail: "Connect an iPhone or create a virtual iPhone to see its screen here." });
 
@@ -55,8 +60,14 @@ frame.setStatus({ title: "iPhone", detail: "Connect an iPhone or create a virtua
 let current: { udid?: string; name: string; detail: string; screen: [number, number] } | undefined;
 let shown: string | undefined;
 
-/** The live stream: its socket and decoder, while the extension has one running for `udid`. */
-let stream: { udid: string; ws: WebSocket; decoder?: VideoDecoder; input: boolean; ping?: number } | undefined;
+/**
+ * The live stream: its socket and decoder, while the extension has one running for `udid`. Without `pictures`
+ * (this editor cannot decode the video) it carries only touch, keys and buttons, and the screen comes from
+ * screenshots.
+ */
+let stream: { udid: string; ws: WebSocket; decoder?: VideoDecoder; input: boolean; pictures: boolean; ping?: number } | undefined;
+/** Screenshots shown in the last two seconds, for the frame rate under the phone. */
+const shots: number[] = [];
 /** The latest decoded picture, drawn on the next animation frame. */
 let pending: VideoFrame | undefined;
 
@@ -66,11 +77,22 @@ function send(message: object): void {
   }
 }
 
+/** On screenshots, the screen right after a touch or a key, not at the next tick. */
+function touched(): void {
+  if (stream && !stream.pictures) {
+    vscode.postMessage({ kind: "touched" });
+  }
+}
+
 function input(e: FrameInput): void {
   if (e.type === "touch") {
     const scale = (v: number): number => Math.max(0, Math.min(65535, Math.round(v * 65535)));
     send({ t: "touch", phase: e.phase, x: scale(e.x), y: scale(e.y) });
-  } else if (e.key.length === 1) {
+    if (e.phase === "up") touched();
+    return;
+  }
+  touched();
+  if (e.key.length === 1) {
     send({ t: "text", text: e.key });
   } else if (KEY_USAGES[e.key] !== undefined) {
     send({ t: "key", usage: KEY_USAGES[e.key], down: true });
@@ -86,6 +108,7 @@ function teardown(): NonNullable<typeof stream> | undefined {
   }
   stream = undefined;
   home.hidden = true;
+  mode.textContent = "";
   window.clearInterval(s.ping);
   try {
     s.ws.close();
@@ -96,6 +119,18 @@ function teardown(): NonNullable<typeof stream> | undefined {
     s.decoder.close();
   }
   return s;
+}
+
+/** The mode label: `text`, or for screenshots their rate. */
+function setMode(text: string | undefined): void {
+  if (text !== undefined) {
+    mode.textContent = text;
+    return;
+  }
+  const now = performance.now();
+  while (shots.length > 0 && now - shots[0] > 2000) shots.shift();
+  const control = stream?.input && !stream.pictures ? ", tap to control" : "";
+  mode.textContent = `Screenshots · ${Math.round(shots.length / 2)}/s${control}`;
 }
 
 /** Ends the stream and tells the extension, which polls screenshots meanwhile. */
@@ -133,9 +168,23 @@ function draw(): void {
   picture.close();
 }
 
+/**
+ * This editor cannot decode the stream: the screen comes from screenshots, and the stream stays open for touch,
+ * keys and buttons when the device takes them; without input there is no use for it.
+ */
+function noPictures(s: NonNullable<typeof stream>, codec: string, reason: string): void {
+  if (!s.input) {
+    return endStream(`${reason} Showing screenshots.`, true);
+  }
+  s.pictures = false;
+  home.hidden = false;
+  vscode.postMessage({ kind: "inputOnly", udid: s.udid, codec, reason });
+  setMode(undefined);
+}
+
 async function configure(s: NonNullable<typeof stream>, config: { codec: string; codedWidth?: number; codedHeight?: number }): Promise<void> {
   if (typeof VideoDecoder === "undefined") {
-    return endStream("This IDE cannot decode video; showing screenshots.", true);
+    return noPictures(s, config.codec, "This editor cannot decode video.");
   }
   const wanted: VideoDecoderConfig = {
     codec: config.codec,
@@ -147,8 +196,9 @@ async function configure(s: NonNullable<typeof stream>, config: { codec: string;
     return;
   }
   if (!support?.supported) {
-    return endStream("This IDE cannot decode the iPhone's HEVC stream; showing screenshots.", true);
+    return noPictures(s, config.codec, "This editor cannot decode the iPhone's HEVC video (it needs the GPU's HEVC decoder).");
   }
+  setMode("Live video");
   const decoder = new VideoDecoder({
     output: (picture) => {
       if (pending) {
@@ -168,7 +218,7 @@ function startStream(msg: { udid: string; url: string; token: string; width?: nu
   teardown();
   const ws = new WebSocket(msg.url, "russet.mirror.v1");
   ws.binaryType = "arraybuffer";
-  const s: NonNullable<typeof stream> = { udid: msg.udid, ws, input: false };
+  const s: NonNullable<typeof stream> = { udid: msg.udid, ws, input: false, pictures: true };
   stream = s;
   // Wait for a keyframe after every (re)configure.
   let needKey = true;
@@ -231,7 +281,8 @@ window.addEventListener("message", (event: MessageEvent) => {
     udid?: string;
     url?: string;
     token?: string;
-    png?: string;
+    image?: string;
+    format?: string;
     width?: number;
     height?: number;
     title?: string;
@@ -248,7 +299,9 @@ window.addEventListener("message", (event: MessageEvent) => {
   }
   if (msg.kind === "frame") {
     const target = current;
-    if (!target || msg.udid !== target.udid || !msg.png || !msg.width || !msg.height || stream?.udid === target.udid) {
+    // Screenshots stand in for a stream only while it has no pictures.
+    const live = stream?.udid === target?.udid && stream?.pictures;
+    if (!target || msg.udid !== target.udid || !msg.image || !msg.width || !msg.height || live) {
       return;
     }
     const [width, height] = [msg.width, msg.height];
@@ -264,8 +317,10 @@ window.addEventListener("message", (event: MessageEvent) => {
       frame.drawFrame(image, width, height);
       frame.setStatus(undefined);
       shown = target.udid;
+      shots.push(performance.now());
+      setMode(undefined);
     };
-    image.src = `data:image/png;base64,${msg.png}`;
+    image.src = `data:image/${msg.format === "jpeg" ? "jpeg" : "png"};base64,${msg.image}`;
     return;
   }
   if (msg.kind === "mirrorStatus") {

@@ -40,10 +40,12 @@ use crate::manager::DeviceHandle;
 use crate::model::Udid;
 use crate::tunnel::TunnelUdp;
 
-/// A screenshot (PNG) and its size in pixels.
+/// A screenshot and its size in pixels.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Screenshot {
-    pub png: Vec<u8>,
+    /// The image: PNG, or JPEG when asked for and the service can ([`Screenshot::jpeg`]).
+    pub data: Vec<u8>,
+    pub jpeg: bool,
     pub width: u32,
     pub height: u32,
 }
@@ -148,16 +150,21 @@ const IDLE: Duration = Duration::from_secs(15);
 /// How long one step of a screenshot service may take before the request fails with that step's name.
 const STEP: Duration = Duration::from_secs(15);
 
-type Reply = oneshot::Sender<Result<Vec<u8>>>;
+/// One screenshot request: JPEG or PNG, and where its image goes.
+struct Request {
+    jpeg: bool,
+    reply: oneshot::Sender<Result<Vec<u8>>>,
+}
 
 /// The request queue of each device's screenshot task, by UDID.
-fn sessions() -> &'static Mutex<HashMap<String, mpsc::Sender<Reply>>> {
-    static SESSIONS: OnceLock<Mutex<HashMap<String, mpsc::Sender<Reply>>>> = OnceLock::new();
+fn sessions() -> &'static Mutex<HashMap<String, mpsc::Sender<Request>>> {
+    static SESSIONS: OnceLock<Mutex<HashMap<String, mpsc::Sender<Request>>>> = OnceLock::new();
     SESSIONS.get_or_init(Default::default)
 }
 
-/// A screenshot of the device's screen.
-pub(crate) async fn screenshot(h: &DeviceHandle) -> Result<Screenshot> {
+/// A screenshot of the device's screen: JPEG when `jpeg` and CoreDevice's capture service answers (smaller, and
+/// quicker for the device to encode: a mirror polling screenshots gets more frames a second), else PNG.
+pub(crate) async fn screenshot(h: &DeviceHandle, jpeg: bool) -> Result<Screenshot> {
     let key = h.udid().as_str().to_owned();
     let queue = {
         let mut map = sessions().lock().map_err(|_| device_error(codes::core::INTERNAL, "screenshot sessions"))?;
@@ -177,15 +184,16 @@ pub(crate) async fn screenshot(h: &DeviceHandle) -> Result<Screenshot> {
     };
     let (reply, answer) = oneshot::channel();
     let gone = || device_error(codes::device::PROTOCOL, "the screenshot connection closed; try again");
-    queue.send(reply).await.map_err(|_| gone())?;
-    let png = answer.await.map_err(|_| gone())??;
-    let (width, height) = png_size(&png)?;
-    Ok(Screenshot { png, width, height })
+    queue.send(Request { jpeg, reply }).await.map_err(|_| gone())?;
+    let data = answer.await.map_err(|_| gone())??;
+    let jpeg = data.starts_with(&[0xFF, 0xD8]);
+    let (width, height) = if jpeg { jpeg_size(&data)? } else { png_size(&data)? };
+    Ok(Screenshot { data, jpeg, width, height })
 }
 
 /// One device's screenshot task: CoreDevice's screen capture service (device.md §6.8.1), or the DVT screenshot
-/// service when that cannot be opened; then a frame per request until [`IDLE`] or an error.
-async fn serve(conn: Arc<dyn ServiceConnector>, udid: Udid, mut requests: mpsc::Receiver<Reply>) {
+/// service (PNG only) when that cannot be opened; then a frame per request until [`IDLE`] or an error.
+async fn serve(conn: Arc<dyn ServiceConnector>, udid: Udid, mut requests: mpsc::Receiver<Request>) {
     let core = match timed("opening the screen capture service", conn.rsd_service(&udid, service::SCREEN_CAPTURE)).await
     {
         Ok(stream) => {
@@ -196,8 +204,9 @@ async fn serve(conn: Arc<dyn ServiceConnector>, udid: Udid, mut requests: mpsc::
     let unavailable = match core {
         Ok(mut client) => {
             tracing::info!("screenshots from CoreDevice's screen capture service");
-            while let Ok(Some(reply)) = tokio::time::timeout(IDLE, requests.recv()).await {
-                let frame = step("capturing the screen", client.take_screenshot(None, CaptureFormat::Png)).await;
+            while let Ok(Some(Request { jpeg, reply })) = tokio::time::timeout(IDLE, requests.recv()).await {
+                let format = if jpeg { CaptureFormat::Jpeg } else { CaptureFormat::Png };
+                let frame = step("capturing the screen", client.take_screenshot(None, format)).await;
                 let failed = frame.is_err();
                 let _ = reply.send(frame);
                 if failed {
@@ -224,7 +233,7 @@ async fn serve(conn: Arc<dyn ServiceConnector>, udid: Udid, mut requests: mpsc::
         Err(e) => return refuse_all(&mut requests, &unavailable, &e).await,
     };
     tracing::info!("screenshots from the DVT screenshot service");
-    while let Ok(Some(reply)) = tokio::time::timeout(IDLE, requests.recv()).await {
+    while let Ok(Some(Request { reply, .. })) = tokio::time::timeout(IDLE, requests.recv()).await {
         let frame = step("taking the DVT screenshot", client.take_screenshot()).await;
         let failed = frame.is_err();
         let _ = reply.send(frame);
@@ -235,9 +244,10 @@ async fn serve(conn: Arc<dyn ServiceConnector>, udid: Udid, mut requests: mpsc::
 }
 
 /// Answers every queued request with why neither screenshot service opened.
-async fn refuse_all(requests: &mut mpsc::Receiver<Reply>, core: &russet_core::Error, dvt: &russet_core::Error) {
+async fn refuse_all(requests: &mut mpsc::Receiver<Request>, core: &russet_core::Error, dvt: &russet_core::Error) {
     let message = format!("no screenshot service: {}; {}", core.message(), dvt.message());
-    while let Ok(Some(reply)) = tokio::time::timeout(Duration::from_millis(100), requests.recv()).await {
+    while let Ok(Some(Request { reply, .. })) = tokio::time::timeout(Duration::from_millis(100), requests.recv()).await
+    {
         let error = russet_core::Error::new(dvt.code(), message.clone()).with_hint(
             "Check that the device is unlocked and its developer disk image is mounted (`russet device ddi status`).",
         );
@@ -865,6 +875,37 @@ impl Bits<'_> {
 }
 
 /// The width and height of a PNG, from its IHDR chunk.
+/// A JPEG's size, from its first start-of-frame segment.
+pub(crate) fn jpeg_size(jpeg: &[u8]) -> Result<(u32, u32)> {
+    let bad = || device_error(codes::device::PROTOCOL, "the device's screenshot is not a JPEG Russet can read");
+    if !jpeg.starts_with(&[0xFF, 0xD8]) {
+        return Err(bad());
+    }
+    let mut at = 2;
+    while at + 9 <= jpeg.len() {
+        if jpeg[at] != 0xFF {
+            return Err(bad());
+        }
+        let marker = jpeg[at + 1];
+        // Fill bytes, and the markers that have no length.
+        if marker == 0xFF {
+            at += 1;
+            continue;
+        }
+        if matches!(marker, 0x01 | 0xD0..=0xD8) {
+            at += 2;
+            continue;
+        }
+        // SOF0 to SOF15, but DHT, JPG and DAC: precision, height, width.
+        if (0xC0..=0xCF).contains(&marker) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
+            let be = |i: usize| u32::from(u16::from_be_bytes([jpeg[at + i], jpeg[at + i + 1]]));
+            return Ok((be(7), be(5)));
+        }
+        at += 2 + usize::from(u16::from_be_bytes([jpeg[at + 2], jpeg[at + 3]]));
+    }
+    Err(bad())
+}
+
 pub(crate) fn png_size(png: &[u8]) -> Result<(u32, u32)> {
     const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
     if png.len() < 24 || &png[..8] != SIGNATURE || &png[12..16] != b"IHDR" {
@@ -886,6 +927,21 @@ mod tests {
         assert_eq!(png_size(&png).ok(), Some((1170, 2532)));
         assert!(png_size(&png[..20]).is_err());
         assert!(png_size(b"\xff\xd8\xff\xe0 a JPEG, not a PNG at all").is_err());
+    }
+
+    #[test]
+    fn reads_the_jpeg_size_past_the_segments_before_the_frame() {
+        // SOI, an APP0 segment (length 16), a DQT segment (length 4), then SOF0: 8-bit, 2532 high, 1170 wide.
+        let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        jpeg.extend_from_slice(&[0; 14]);
+        jpeg.extend_from_slice(&[0xFF, 0xDB, 0x00, 0x04, 0, 0]);
+        jpeg.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x11, 8]);
+        jpeg.extend_from_slice(&2532u16.to_be_bytes());
+        jpeg.extend_from_slice(&1170u16.to_be_bytes());
+        jpeg.extend_from_slice(&[3, 0, 0, 0]);
+        assert_eq!(jpeg_size(&jpeg).ok(), Some((1170, 2532)));
+        assert!(jpeg_size(&jpeg[..10]).is_err());
+        assert!(jpeg_size(b"\x89PNG\r\n\x1a\n not a JPEG").is_err());
     }
 
     /// One RTP datagram of the display stream (payload type 100).

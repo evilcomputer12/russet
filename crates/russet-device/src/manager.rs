@@ -500,8 +500,9 @@ impl DeviceHandle {
         crate::logs::open(self, f).await
     }
 
-    pub async fn screenshot(&self) -> Result<Screenshot> {
-        crate::screen::screenshot(self).await
+    /// A screenshot: JPEG when `jpeg` and the device's capture service can, else PNG ([`Screenshot::jpeg`]).
+    pub async fn screenshot(&self, jpeg: bool) -> Result<Screenshot> {
+        crate::screen::screenshot(self, jpeg).await
     }
 
     /// A display session: the screen as HEVC access units and, with `o.input`, HID input (device.md §6.8.2).

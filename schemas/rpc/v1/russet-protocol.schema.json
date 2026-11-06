@@ -8894,7 +8894,7 @@
               "type": "null"
             }
           ],
-          "description": "The encoding (default `png`). The device's screenshot service answers PNG only."
+          "description": "The encoding (default `png`). `jpeg` is smaller and quicker for the device; the older DVT screenshot service\nanswers PNG anyway, and the result's `format` says which it is."
         },
         "maxDimension": {
           "description": "The longest side, in pixels (downscaling; not available yet).",
@@ -8906,7 +8906,7 @@
           ]
         },
         "quality": {
-          "description": "JPEG quality, 1–100.",
+          "description": "JPEG quality, 1–100 (not available yet: the device picks it).",
           "format": "uint8",
           "maximum": 255,
           "minimum": 0,

@@ -3258,7 +3258,8 @@ export type ScreenMirrorStopResult = Record<symbol, never>;
  */
 export type ScreenScreenshotParams = { udid?: string, 
 /**
- * The encoding (default `png`). The device's screenshot service answers PNG only.
+ * The encoding (default `png`). `jpeg` is smaller and quicker for the device; the older DVT screenshot service
+ * answers PNG anyway, and the result's `format` says which it is.
  */
 format?: ImageFormat, 
 /**
@@ -3270,7 +3271,7 @@ maxDimension?: number,
  */
 scale?: number, 
 /**
- * JPEG quality, 1–100.
+ * JPEG quality, 1–100 (not available yet: the device picks it).
  */
 quality?: number, 
 /**
