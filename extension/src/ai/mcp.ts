@@ -25,21 +25,34 @@ export interface McpServerOptions {
   ideData: string;
   host?: string;
   wsl?: string;
+  /**
+   * `russet` on the command line (bin\russet.exe), when the installation has it: it serves the same tools with
+   * Windows paths in and out, and starts the engine with iPhones when Russet is closed.
+   */
+  cli?: { command: string; project?: string };
 }
 
 export function mcpServers(o: McpServerOptions): McpServer[] {
   return [
-    {
-      name: "russet",
-      label: "Russet",
-      command: o.wsl ?? "C:\\Windows\\System32\\wsl.exe",
-      args: [
-        "-d", "Russet-Dev", "-u", "russet", "--exec", "env", `RUSSET_HOME=${o.backendHome}`,
-        "/opt/russet/bin/russet-dev", "mcp", "serve", "--client", o.client,
-        ...(o.project ? ["--project", o.project] : []),
-      ],
-      env: {},
-    },
+    o.cli
+      ? {
+          name: "russet",
+          label: "Russet",
+          command: o.cli.command,
+          args: ["mcp", "serve", "--client", o.client, ...(o.cli.project ? ["--project", o.cli.project] : [])],
+          env: {},
+        }
+      : {
+          name: "russet",
+          label: "Russet",
+          command: o.wsl ?? "C:\\Windows\\System32\\wsl.exe",
+          args: [
+            "-d", "Russet-Dev", "-u", "russet", "--exec", "env", `RUSSET_HOME=${o.backendHome}`,
+            "/opt/russet/bin/russet-dev", "mcp", "serve", "--client", o.client,
+            ...(o.project ? ["--project", o.project] : []),
+          ],
+          env: {},
+        },
     {
       name: "russet-ide",
       label: "Russet IDE",

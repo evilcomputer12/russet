@@ -14,9 +14,8 @@ try
     var editor = Path.Combine(root, "editor", "Russet.exe");
     var host = Path.Combine(root, "host", "Russet.Host.exe");
     if (!File.Exists(editor) || !File.Exists(host)) throw new IOException($"The {caption} installation is incomplete. Run its installer again.");
-    var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Russet", release ? "IDE" : "IDE-Development");
+    var (home, profile) = Installation.Backend(root);
     Directory.CreateDirectory(profile);
-    var home = release ? "/home/russet/.russet/ide" : "/home/russet/.russet-dev/ide-development";
     var muxSocket = BackendDaemon.MuxSocket(home);
     var wsl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe");
     // A first run has no backend yet: the editor opens anyway, and its setup page installs WSL

@@ -19,6 +19,16 @@ internal static class Installation
         }
     }
 
+    // This installation's backend home and editor profile: a release and a development installation keep their
+    // own. The launcher and `russet` on the command line (Russet.Host's Cli.cs) use the same.
+    internal static (string Home, string Profile) Backend(string root)
+    {
+        var release = IsRelease(root);
+        var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Russet",
+            release ? "IDE" : "IDE-Development");
+        return (release ? "/home/russet/.russet/ide" : "/home/russet/.russet-dev/ide-development", profile);
+    }
+
     // The managed distribution with its engine: WSL answers, Russet-Dev exists and holds the
     // daemon. False on a first run, before the setup page has installed them.
     internal static bool BackendInstalled(string wsl) =>
@@ -48,12 +58,15 @@ internal static class Installation
         var start = new ProcessStartInfo(wsl)
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            // Its own (empty) input: wsl.exe would otherwise read the caller's (`russet` on the command line).
+            RedirectStandardInput = true,
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         try
         {
             using var process = Process.Start(start);
             if (process is null) return -1;
+            process.StandardInput.Close();
             var standard = process.StandardOutput.ReadToEndAsync();
             var errors = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(seconds * 1000))

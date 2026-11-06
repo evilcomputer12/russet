@@ -69,6 +69,7 @@ internal static class Update
                 if (Directory.Exists(unpacked)) Directory.Delete(unpacked, recursive: true);
                 ZipFile.ExtractToDirectory(Path.Combine(staging, name + ".zip"), unpacked);
                 Swap(Path.Combine(root, Parts[name]), unpacked);
+                if (name == "host") RefreshCli(root);
                 done.Add(name);
                 Log($"replaced {name}");
             }
@@ -96,6 +97,15 @@ internal static class Update
         // Russet opens again either way: a part that was not replaced works as it did.
         Reopen(root);
         return 0;
+    }
+
+    // bin\russet.exe, the command line (Cli.cs), is the host's program under another name: it follows a new host.
+    static void RefreshCli(string root)
+    {
+        var cli = Path.Combine(root, "bin", "russet.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(cli)!);
+        File.Copy(Path.Combine(root, "host", "Russet.Host.exe"), cli + ".new", overwrite: true);
+        File.Move(cli + ".new", cli, overwrite: true);
     }
 
     static void Reopen(string root) =>

@@ -49,6 +49,28 @@ internal static class DeviceBridge
     /// <summary>Whether a bridge serves <paramref name="socket"/> (a stale socket is removed).</summary>
     internal static bool Served(string wsl, string socket) => Run(wsl, "python3", "-I", "-c", Probe, socket) == 0;
 
+    /// <summary>
+    /// Until the daemon at <paramref name="daemonSocket"/> has stopped (two checks a minute apart, after five minutes
+    /// for it to start): a bridge started for the command line, with no window to hold it (`--until-idle`).
+    /// </summary>
+    internal static async Task UntilIdle(string wsl, string daemonSocket)
+    {
+        const string Listening = """
+            import socket, sys
+            s = socket.socket(socket.AF_UNIX)
+            try:
+                s.connect(sys.argv[1])
+            except OSError:
+                sys.exit(1)
+            """;
+        await Task.Delay(TimeSpan.FromMinutes(5));
+        for (var misses = 0; misses < 2;)
+        {
+            misses = Run(wsl, "python3", "-I", "-c", Listening, daemonSocket) == 0 ? 0 : misses + 1;
+            await Task.Delay(TimeSpan.FromMinutes(1));
+        }
+    }
+
     /// <summary>EOF on the helper's input closes its socket and connections.</summary>
     internal static void Stop(Process bridge)
     {
@@ -59,7 +81,8 @@ internal static class DeviceBridge
 
     static ProcessStartInfo Backend(string wsl, params string[] command)
     {
-        var start = new ProcessStartInfo(wsl) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        // Its own input: wsl.exe would otherwise read the caller's (`russet` on the command line, an MCP client's requests).
+        var start = new ProcessStartInfo(wsl) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
         foreach (var value in new[] { "-d", "Russet-Dev", "-u", "russet", "--cd", "~", "--exec" }.Concat(command)) start.ArgumentList.Add(value);
         return start;
     }
@@ -67,6 +90,7 @@ internal static class DeviceBridge
     static int Run(string wsl, params string[] command)
     {
         using var process = Process.Start(Backend(wsl, command)) ?? throw new IOException("Cannot start the Russet backend.");
+        process.StandardInput.Close();
         _ = process.StandardOutput.ReadToEndAsync();
         _ = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(15000)) { process.Kill(entireProcessTree: true); return -1; }

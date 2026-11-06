@@ -13,6 +13,8 @@
     <Compile Include="..\Russet.Launcher\BackendDaemon.cs" Link="BackendDaemon.cs" />
     <!-- The Apple Devices bridge, which the IDE starts when the launcher could not (the device-bridge mode). -->
     <Compile Include="..\Russet.Launcher\DeviceBridge.cs" Link="DeviceBridge.cs" />
+    <!-- The installation's backend home and profile, for russet on the command line (Cli.cs). -->
+    <Compile Include="..\Russet.Launcher\Installation.cs" Link="Installation.cs" />
     <!-- "Russet: Move WSL Disk to Another Drive" (Setup.Move.cs), which also runs on its own. -->
     <None Include="move-wsl-disk.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

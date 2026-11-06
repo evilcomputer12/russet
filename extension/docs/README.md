@@ -17,6 +17,8 @@ Run **Russet: Open Documentation** to open this page again.
 - [Virtual iPhone](virtual-iphone.md): create, start and use the virtual iPhone, and how its engine updates.
 - [Updates](updates.md): how Russet, Swift and the virtual iPhone engine stay up to date.
 - [AI agents](ai-agents.md): give coding agents Russet's tools through MCP.
+- [Command line](command-line.md): `russet` in a terminal or a script, without Russet's window: build, run,
+  debug, the virtual iPhone, setup and MCP.
 - [Troubleshooting](troubleshooting.md): an offline engine, WSL memory and disk, slow builds, where the logs
   are, and what to put in a bug report.
 - [Settings](settings.md): every Russet setting and its default.

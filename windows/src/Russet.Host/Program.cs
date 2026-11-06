@@ -13,7 +13,8 @@ if (args.SequenceEqual(new[] { "--device-mux", "stdio" }))
 // The Apple Devices bridge for a window whose launcher started none, because Russet opened before its backend
 // was installed: "ready" once iPhones are reachable, then the IDE holds this process, and with it the bridge,
 // until the window closes (EOF on standard input). Another launcher's bridge already serving is "ready" too.
-if (args is ["--device-bridge"])
+// With --until-idle (`russet` on the command line, with no window open), it lasts as long as the daemon runs.
+if (args is ["--device-bridge", .. var bridgeOptions] && bridgeOptions is [] or ["--until-idle"])
 {
     var home = Environment.GetEnvironmentVariable("RUSSET_BACKEND_HOME");
     if (home is null || !home.StartsWith("/home/russet/", StringComparison.Ordinal) || home.Contains("/../", StringComparison.Ordinal))
@@ -28,9 +29,17 @@ if (args is ["--device-bridge"])
     Console.WriteLine("ready");
     if (owned is not null)
     {
-        await Console.In.ReadToEndAsync();
+        if (bridgeOptions is ["--until-idle"]) await DeviceBridge.UntilIdle(wsl, BackendDaemon.DaemonSocket(home));
+        else await Console.In.ReadToEndAsync();
         DeviceBridge.Stop(owned);
     }
+    return;
+}
+// `russet` on the command line (bin\russet.exe is this program), after this program's own modes above and below.
+if (args is not ["--setup", ..] && (args is ["--cli", ..]
+    || string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "russet", StringComparison.OrdinalIgnoreCase)))
+{
+    Environment.ExitCode = await Cli.Run(args is ["--cli", .. var cli] ? cli : args);
     return;
 }
 // A patch update, run from a copy outside the installation (Update.cs).

@@ -50,8 +50,11 @@ To check or share the configuration:
 - **Russet: MCP Status** lists the agents registered in the open project, with a **Register…** button.
 - **Russet: Copy MCP Config** copies the `mcpServers` JSON for both servers to the clipboard.
 
-The Russet server starts the engine's command line in WSL with the project's path, so the registered files
-contain this PC's paths. Register again after you move the project.
+The Russet server is `russet mcp serve` (Russet's [command line](command-line.md)) with the project's path,
+so the registered files contain this PC's paths. Register again after you move the project. Its tools take
+and return Windows paths, and they work while Russet is closed.
+
+An agent that runs commands can also use `russet` directly, without MCP: see [Command line](command-line.md).
 
 ## What agents can do
 

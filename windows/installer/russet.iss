@@ -35,6 +35,8 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=force
 RestartApplications=no
+; bin\ joins the user's PATH (below): terminals opened afterwards find `russet`.
+ChangesEnvironment=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
@@ -47,6 +49,12 @@ Type: filesandordirs; Name: "{app}\backend"
 
 [Files]
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; `russet` on the command line (for terminals, scripts and AI agents) is the host program under another name
+; (Cli.cs); the installer stores the file once.
+Source: "{#Stage}\host\Russet.Host.exe"; DestDir: "{app}\bin"; DestName: "russet.exe"; Flags: ignoreversion
+
+[Registry]
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}\bin"; Check: NeedsPath
 
 [Icons]
 Name: "{autoprograms}\Russet"; Filename: "{app}\Russet.Launcher.exe"
@@ -60,6 +68,42 @@ Filename: "{app}\Russet.Launcher.exe"; Flags: nowait; Check: IsUpdate
 function IsUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
+// Whether the user's PATH lacks {app}\bin, which holds `russet`.
+function NeedsPath: Boolean;
+var
+  Paths: String;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths) then
+    Result := True
+  else
+    Result := Pos(';' + Uppercase(ExpandConstant('{app}\bin')) + ';', ';' + Uppercase(Paths) + ';') = 0;
+end;
+
+// Uninstalling takes {app}\bin off the user's PATH again.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Paths, Bin, Entry, Kept: String;
+  Next: Integer;
+begin
+  if CurUninstallStep <> usPostUninstall then Exit;
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths) then Exit;
+  Bin := Uppercase(ExpandConstant('{app}\bin'));
+  Kept := '';
+  Paths := Paths + ';';
+  while Paths <> '' do
+  begin
+    Next := Pos(';', Paths);
+    Entry := Copy(Paths, 1, Next - 1);
+    Delete(Paths, 1, Next);
+    if (Entry <> '') and (Uppercase(Entry) <> Bin) then
+    begin
+      if Kept <> '' then Kept := Kept + ';';
+      Kept := Kept + Entry;
+    end;
+  end;
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Kept);
 end;
 
 // An update from the IDE: Russet's windows close (asked to, every 10 s, as the Restart Manager would: Russet 0.6.10

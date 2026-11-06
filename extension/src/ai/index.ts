@@ -7,6 +7,7 @@
 // `russet-ide` (a read-only look at the IDE itself, for fixing its bugs). Registrations are
 // project-scoped, as the engine's own `russet mcp install` writes them.
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { log } from "../util/log";
@@ -32,11 +33,29 @@ function linuxPath(windowsPath: string): string {
   return m ? `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, "/")}` : windowsPath.replace(/\\/g, "/");
 }
 
+/** `russet` on the command line (bin\russet.exe) of this installation, if it has one. */
+export function russetCli(): string | undefined {
+  const root = process.env.RUSSET_INSTALL_ROOT;
+  const cli = root ? path.join(root, "bin", "russet.exe") : undefined;
+  return cli && fs.existsSync(cli) ? cli : undefined;
+}
+
 export function registerAi(context: vscode.ExtensionContext, backendHome: string | undefined): void {
   const project = (): string | undefined => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // Russet's terminals, and the processes agents in the editor start, find `russet` without a restart after an
+  // install (the installer puts bin\ on the user's PATH for terminals opened afterwards).
+  const cli = russetCli();
+  if (cli) {
+    const bin = path.dirname(cli);
+    context.environmentVariableCollection.prepend("PATH", `${bin};`);
+    if (!(process.env.PATH ?? "").toLowerCase().split(";").includes(bin.toLowerCase())) {
+      process.env.PATH = `${bin};${process.env.PATH ?? ""}`;
+    }
+  }
   const servers = (client: string): McpServer[] => {
     const root = project();
     return mcpServers({
+      ...(cli ? { cli: { command: cli, ...(root ? { project: root } : {}) } } : {}),
       client,
       project: root ? linuxPath(root) : undefined,
       backendHome: backendHome ?? "/home/russet/.russet-dev/engine",

@@ -43,3 +43,21 @@ describe("Russet MCP registrations", () => {
     expect(after).toContain('env = { ELECTRON_RUN_AS_NODE = "1"');
   });
 });
+
+describe("Russet MCP through the command line", () => {
+  it("runs `russet mcp serve` with the Windows project when the installation has bin\\russet.exe", () => {
+    const [russet] = mcpServers({
+      client: "codex",
+      project: "/mnt/c/Users/someone/My App",
+      backendHome: "/home/russet/.russet/ide",
+      editor: "C:\\Programs\\Russet\\editor\\Russet.exe",
+      ideScript: "ide-mcp.js",
+      ideData: "C:\\Users\\someone\\AppData\\Local\\Russet\\IDE",
+      cli: { command: "C:\\Programs\\Russet\\bin\\russet.exe", project: "C:\\Users\\someone\\My App" },
+    });
+    expect(russet).toMatchObject({
+      command: "C:\\Programs\\Russet\\bin\\russet.exe",
+      args: ["mcp", "serve", "--client", "codex", "--project", "C:\\Users\\someone\\My App"],
+    });
+  });
+});

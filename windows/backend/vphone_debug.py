@@ -1,6 +1,7 @@
 """Debugging an app on the virtual iPhone, for the IDE's Debug button on the virtual destination.
 
     vphone_debug.py prepare BUNDLE_ID SESSION_DIR [--cid N] [--local-app PATH]
+    vphone_debug.py lldb RESULT_JSON [LLDB ARGS…]     LLDB in the terminal on that session (`russet vm debug`)
 
 Launches the app through vphoned, starts the phone's own debugserver as a launchd job, attaches it
 to the app through vphoned's port tunnel, then serves two Unix sockets in SESSION_DIR until the
@@ -43,6 +44,7 @@ PLIST = f"""<?xml version="1.0" encoding="UTF-8"?>
 </dict></plist>
 """
 LLDB_DAP = "/usr/lib/swift/usr/bin/lldb-dap"
+LLDB = "/usr/lib/swift/usr/bin/lldb"
 # A debug session LLDB never connects to ends here (debugserver detaches and the app runs on).
 CONNECT_TIMEOUT = 180
 
@@ -229,7 +231,7 @@ def stop(dap):
         dap.kill()
 
 
-def lldb_dap(dap_path):
+def lldb_env():
     homes = sorted(glob.glob(os.path.expanduser("~/.local/share/uv/python/cpython-3.12*-linux-x86_64-gnu")))
     env = dict(os.environ)
     libs = ["/usr/lib/swift/usr/lib/swift/linux", "/usr/lib/swift/usr/lib/swift/host/compiler"]
@@ -238,6 +240,11 @@ def lldb_dap(dap_path):
         env["PYTHONHOME"] = homes[-1]
         libs.insert(0, f"{homes[-1]}/lib")
     env["LD_LIBRARY_PATH"] = ":".join(libs)
+    return env
+
+
+def lldb_dap(dap_path):
+    env = lldb_env()
     # lldb-dap's own protocol log, beside the sockets (the session folder is private to the user).
     env["LLDBDAP_LOG"] = os.path.join(os.path.dirname(dap_path), "lldb-dap.log")
     # A session of its own, like the helper's: the step's WSL session ends when the IDE's runner
@@ -303,8 +310,30 @@ def prepare(bundle, session, cid, local_app=None):
         os._exit(0)
 
 
+def lldb(result, extra):
+    """`russet vm debug`: LLDB in the terminal on a prepared session, attached as the IDE's lldb-dap is
+    (extension/src/setup/virtualDebug.ts); `extra` are LLDB's own arguments (`-b -o bt`, …)."""
+    quote = lambda p: '"' + p.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    commands = [
+        "settings set target.memory-module-load-level minimal",
+        "settings set plugin.process.gdb-remote.packet-timeout 60",
+        "platform select remote-ios",
+    ]
+    if result.get("localApp"):
+        name = os.path.basename(result["executable"])
+        commands += [
+            f"target create --arch arm64-apple-ios {quote(result['localApp'] + '/' + name)}",
+            f"target modules search-paths add {quote(result['appDir'])} {quote(result['localApp'])}",
+        ]
+    commands.append(f"process connect -p gdb-remote unix-connect://{result['gdbSocket']}")
+    argv = [LLDB] + [arg for command in commands for arg in ("-o", command)] + extra
+    os.execve(LLDB, argv, lldb_env())
+
+
 def main():
     args = sys.argv[1:]
+    if len(args) >= 2 and args[0] == "lldb":
+        lldb(json.loads(args[1]), args[2:])
     options = {"--cid": "3", "--local-app": None}
     for name in options:
         if name in args:

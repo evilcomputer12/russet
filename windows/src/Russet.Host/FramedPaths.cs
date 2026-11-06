@@ -1,9 +1,11 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
-internal static class FramedPaths
+internal static partial class FramedPaths
 {
     private const int MaxBody = 16 * 1024 * 1024;
     private static readonly HashSet<string> PathFields = new(StringComparer.Ordinal)
@@ -61,6 +63,65 @@ internal static class FramedPaths
         var linux = Translate(path, toLinux: true);
         return linux == path ? null : linux;
     }
+
+    // The backend's /mnt/x/… paths in `text` as Windows paths, with backslashes or (for text that is or holds JSON,
+    // which then needs no escaping) forward slashes.
+    internal static string WindowsPaths(string text, bool forwardSlashes) => MountPath().Replace(text, m =>
+    {
+        var drive = char.ToUpperInvariant(m.Groups[1].Value[0]);
+        var rest = m.Groups[2].Value;
+        return forwardSlashes ? $"{drive}:{(rest.Length == 0 ? "/" : rest)}" : $"{drive}:{(rest.Length == 0 ? "\\" : rest.Replace('/', '\\'))}";
+    });
+
+    static readonly JsonSerializerOptions Readable = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    // MCP over stdio (`russet mcp serve`): one JSON message per line, its path fields mapped as a frame's are. Tools
+    // also take paths in fields of their own and return them in text: any string that is a Windows path goes in as
+    // the backend's, and the backend's paths come out as Windows paths with forward slashes (text often holds JSON).
+    internal static async Task CopyLines(Stream input, Stream output, bool toLinux, CancellationToken cancel)
+    {
+        using var reader = new StreamReader(input, new UTF8Encoding(false));
+        while (await reader.ReadLineAsync(cancel) is { } line)
+        {
+            var text = line;
+            try
+            {
+                if (line.Length > 0 && JsonNode.Parse(line) is { } node)
+                {
+                    Map(node, toLinux);
+                    node = Strings(node, s => toLinux ? ToLinux(s) ?? s : WindowsPaths(s, forwardSlashes: true));
+                    text = node?.ToJsonString(Readable) ?? line;
+                }
+            }
+            catch (JsonException) { }
+            await output.WriteAsync(Encoding.UTF8.GetBytes(text + "\n"), cancel);
+            await output.FlushAsync(cancel);
+        }
+    }
+
+    // Every string in `node` through `change` (the node itself, changed in place, or the changed string).
+    static JsonNode? Strings(JsonNode? node, Func<string, string> change)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var key in obj.Select(pair => pair.Key).ToArray())
+                    if (Strings(obj[key], change) is var changed && !ReferenceEquals(changed, obj[key])) obj[key] = changed;
+                return obj;
+            case JsonArray array:
+                for (var i = 0; i < array.Count; i++)
+                    if (Strings(array[i], change) is var changed && !ReferenceEquals(changed, array[i])) array[i] = changed;
+                return array;
+            case JsonValue value when value.TryGetValue<string>(out var text):
+                var result = change(text);
+                return result == text ? value : JsonValue.Create(result);
+            default:
+                return node;
+        }
+    }
+
+    [GeneratedRegex(@"/mnt/([a-z])((?:/[^\s""'`:;,()<>|*?]*)*)")]
+    private static partial Regex MountPath();
 
     internal static async Task Copy(Stream input, Stream output, bool toLinux, CancellationToken cancel)
     {
