@@ -12,6 +12,7 @@ import type { Store } from "../state/store";
 import { configToWire } from "../run/session";
 import { stashPrepared } from "./adapterFactory";
 import { showDaemonError } from "../daemon/errors";
+import { makeAccountChanges, needsAccountChanges } from "../run/accountChanges";
 import type { DebugPrepareParams } from "../generated/protocol";
 
 export class RussetDebugConfigProvider implements vscode.DebugConfigurationProvider {
@@ -43,6 +44,8 @@ export class RussetDebugConfigProvider implements vscode.DebugConfigurationProvi
     folder: vscode.WorkspaceFolder | undefined,
     config: vscode.DebugConfiguration,
     token?: vscode.CancellationToken,
+    /** The second try, after Russet made the account changes the first one stopped for. */
+    again = false,
   ): Promise<vscode.DebugConfiguration | undefined | null> {
     // A bare F5 with no configuration: synthesize the default launch.
     if (!config.type && !config.request && !config.name) {
@@ -112,6 +115,12 @@ export class RussetDebugConfigProvider implements vscode.DebugConfigurationProvi
         __russetSessionId: result.sessionId,
       };
     } catch (err) {
+      if (!again && needsAccountChanges(err)) {
+        // The app or the iPhone needs changes in the Apple developer account: ask, make them, prepare again.
+        return (await makeAccountChanges(this.client, projectRoot, udid)) === "made"
+          ? this.resolveDebugConfigurationWithSubstitutedVariables(folder, config, token, true)
+          : undefined;
+      }
       await showDaemonError(err, "Could not prepare the debug session");
       return undefined;
     }

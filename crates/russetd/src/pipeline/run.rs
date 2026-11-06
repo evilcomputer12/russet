@@ -238,7 +238,8 @@ impl Pipeline {
                 format!("provisioning needs {} Apple-side change(s)", provisioned.mutations),
             )
             .with_hint(
-                "Review the plan with `russet provision --dry-run`; Run cannot ask for the approval to apply it yet.",
+                "Russet IDE lists the changes and asks you to make them. In a terminal, `russet provision` lists \
+                 them and makes them once you agree; then run again.",
             ));
         }
         cancelled(cancel)?;

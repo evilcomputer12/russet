@@ -8,7 +8,8 @@
 
 import * as vscode from "vscode";
 import { RussetClient } from "./daemon/client";
-import { WindowsBackend } from "./daemon/windowsBackend";
+import { WindowsBackend, keepDevicesEnabled } from "./daemon/windowsBackend";
+import { registerApprovals } from "./daemon/approvals";
 import { Store } from "./state/store";
 import { installContextKeys } from "./state/contextKeys";
 import {
@@ -73,6 +74,10 @@ export function activate(context: vscode.ExtensionContext): RussetApi {
     logger,
   );
   context.subscriptions.push(client);
+  // iPhones for a daemon that runs without them, as after a first run's setup: no restart of Russet needed.
+  if (backend) context.subscriptions.push(keepDevicesEnabled(client, backend, (m) => logger.info(m)));
+  // AI agents' requests to change the Apple developer account or publish: the user approves them here.
+  context.subscriptions.push(registerApprovals(client));
 
   const store = new Store(context.workspaceState);
   context.subscriptions.push(store);

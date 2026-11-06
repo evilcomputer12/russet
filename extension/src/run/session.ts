@@ -12,6 +12,7 @@ import type { ConsoleViewProvider } from "../panels/consoleView";
 import type { Diagnostics } from "./diagnostics";
 import type { BuildLog } from "./buildLog";
 import { isCancelled, showDaemonError } from "../daemon/errors";
+import { makeAccountChanges, needsAccountChanges } from "./accountChanges";
 
 export function configToWire(label: string | undefined): string {
   return (label ?? "Debug").toLowerCase();
@@ -54,7 +55,8 @@ export class RunManager implements vscode.Disposable {
     };
   }
 
-  async run(): Promise<void> {
+  /** `again`: the run after Russet made the account changes the last one stopped for. */
+  async run(again = false): Promise<void> {
     if (this.client.state !== "connected") {
       void vscode.window.showErrorMessage("The Russet daemon is not connected.");
       return;
@@ -120,6 +122,13 @@ export class RunManager implements vscode.Disposable {
         // Cancel on the notification: nothing failed.
         this.store.setBuild({ phase: "idle" });
         this.store.setRun({ state: "idle", isDebug: false });
+        return;
+      }
+      if (!again && needsAccountChanges(err)) {
+        // The app or the iPhone needs changes in the Apple developer account: ask, make them, run again.
+        this.store.setBuild({ phase: "idle" });
+        this.store.setRun({ state: "idle", isDebug: false });
+        if ((await makeAccountChanges(this.client, ctx.projectRoot, ctx.udid)) === "made") await this.run(true);
         return;
       }
       this.store.setBuild({ phase: "error", errorCount: this.diagnostics.errorCount });
