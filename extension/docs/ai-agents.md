@@ -73,8 +73,10 @@ and uploading a build.
 ### Approvals
 
 Tools that change your Apple developer account or publish need a person's approval. Their first call fails
-with `perm.approvalRequired` and an approval ID. This release of the IDE does not show approval requests yet,
-so these tools cannot finish from an agent. See `perm.approvalRequired` in the [Error reference](errors.md).
+with `perm.approvalRequired` and an approval ID, and Russet asks you in a dialog: *The AI agent "…" asks for
+your approval: …*, with what it would change. **Approve** lets the agent call the tool again with the approval
+ID; **Deny** refuses it. Closing the dialog leaves the request unanswered; it expires after 10 minutes. Approve
+only what you asked the agent for. An agent cannot approve its own requests: no command or tool can.
 
 Other permission errors an agent may report are `perm.denied`, `perm.rateLimited` and `perm.tierExceeded`.
 The [Error reference](errors.md) explains them.

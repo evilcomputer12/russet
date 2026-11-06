@@ -41,12 +41,21 @@ The page lists every step in order. Each one shows its state, a short descriptio
 runs, and the last lines of its log.
 
 - **Set up remaining steps** runs every step that still needs work, in order. It stops at the first step that
-  fails, and skips the Xcode step until you have chosen an Xcode archive.
+  fails. It skips the Xcode step until you have chosen an Xcode archive, and Apple Devices, which you install
+  from the Microsoft Store yourself (only a real iPhone needs it).
 - **Stop** cancels the step that is running.
 - **Check again** reads the state of every step again.
-- Each step also has its own button: **Set up**, **Retry**, **Cancel** or **Check again**.
+- Each step also has its own button: **Set up**, **Retry**, **Repair**, **Cancel** or **Check again**.
 
 Only one step runs at a time. Steps that download carry on where they stopped when you retry them.
+
+**Repair** on a finished step runs it again, over what is installed, after saying what it will do. Your
+projects, your sign-in and your virtual iPhones stay. For example, Repair on the Russet backend installs its
+engine again and restarts it, and Repair on Swift installs swift.org's newest release again (about 1.1 GB).
+Apple Devices, the iPhone and a created virtual iPhone have no Repair.
+
+Setup is complete once one way to run apps is ready: a real iPhone (Apple Devices and the iPhone step), or the
+virtual iPhone (its engine and a created virtual iPhone). You need not set up both.
 
 | Step | Needs | Administrator | Download | Time |
 | --- | --- | --- | --- | --- |
@@ -120,11 +129,11 @@ Windows talks to an iPhone over USB through Apple's **Apple Devices** app.
 2. Install Apple Devices and open it.
 3. Connect your iPhone, then select **Retry**.
 
-The step is done while Apple Devices is running. **Set up remaining steps** stops at this step until it is
-done. If you only want the virtual iPhone, set up the later steps with their own **Set up** buttons.
+The step is done while Apple Devices is running. Only a real iPhone needs it: **Set up remaining steps** leaves
+it to its own button, and you can skip it if you only use the virtual iPhone.
 
-Russet connects to Apple Devices when it starts. After you install Apple Devices, close Russet and open it
-again so it can reach your iPhone.
+Russet finds your iPhone as soon as Apple Devices runs, also when you open Apple Devices after Russet. You do
+not need to restart Russet.
 
 ## iPhone
 
@@ -190,11 +199,6 @@ created at a time. If the creation stops, select **Retry**: it resumes from the 
 
 WSL needs 8 GB of memory or more for this step. If it has less, the step says so; raise the limit with
 **Russet: Change WSL Limits (Memory and Disk)…** (see [Troubleshooting](troubleshooting.md)).
-
-## Reopen Russet after setup
-
-Close Russet and open it again once the backend and Apple Devices are set up. Russet only connects the
-engine to Apple Devices when it starts, so a physical iPhone appears after this restart.
 
 ## Create your first app
 

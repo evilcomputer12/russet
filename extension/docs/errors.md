@@ -168,9 +168,16 @@ approval first. Russet raises it when:
 - Run needs a change in your account first, such as registering the iPhone or creating a certificate or
   provisioning profile ("provisioning needs … Apple-side change(s)").
 
-What to do: this release of the IDE does not show approval requests yet, so it cannot grant one. When Russet
-already has a matching profile for the app and the iPhone, Run does not need an approval. Report your case,
-with the message, so it can be followed up.
+What to do:
+
+- From Run or Debug, Russet lists the changes and asks you; select **Make the Changes** (see
+  [Signing](signing.md)).
+- For an agent's request, Russet asks you in a dialog; select **Approve** if you asked the agent for it (see
+  [AI agents](ai-agents.md)).
+- In a terminal, `russet provision` lists the account changes and makes them once you answer `y`. An agent's
+  shell cannot answer: its message gives the plan and approval IDs. After you approve (in Russet, or with
+  `russet approve apr_…` in a terminal), the agent finishes with `russet provision --plan pln_… --approval
+  apr_…` within 10 minutes.
 
 ## perm.approvalInvalid
 
@@ -373,13 +380,14 @@ What to do: reconnect it and try again.
 
 ## device.usbmuxUnavailable
 
-Russet cannot reach iPhones. On Windows this usually means Apple Devices was not running when Russet
-started, so Russet's engine started without iPhone support.
+Russet cannot reach iPhones: Apple Devices is not running, or Russet's engine runs without iPhone support. The
+second happens when Russet was opened before its backend was installed; Russet then turns iPhone support on
+by itself as soon as the engine is idle (no build, run or debug session).
 
 What to do:
 
 1. Open Apple Devices from the Start menu (install it from the Microsoft Store if needed).
-2. Close Russet and open it again.
+2. Wait a few seconds and try again. If it continues, close Russet and open it again.
 
 ## device.trustPending
 

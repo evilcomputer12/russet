@@ -107,9 +107,10 @@ no such line, Russet opens it and asks you to set `bundle-id` yourself, then run
 
 To run on an iPhone, the app needs a certificate and a provisioning profile that lists the iPhone. When
 Russet already has a matching profile, it uses it. When it would have to change your developer account
-first, for example to register the iPhone or create a profile, Run stops with `perm.approvalRequired`. Such
-changes need a person's approval, and this release of the IDE cannot grant it yet. See
-`perm.approvalRequired` in the [Error reference](errors.md).
+first, for example to register the iPhone or create a profile, Russet lists the changes and asks you:
+*Running on this iPhone needs 2 changes in your Apple developer account*. Select **Make the Changes**, and
+Russet makes exactly those changes, then runs (or debugs) the app. Russet only adds to your account here: it
+never revokes or deletes anything.
 
 ## Sign-in errors
 
