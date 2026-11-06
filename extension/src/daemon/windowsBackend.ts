@@ -13,11 +13,15 @@ export interface BackendRelay {
 
 /** The longest a daemon start may take: the host gives `daemon start` 60 s. */
 const DAEMON_START_MS = 90_000;
+/** The Apple Devices bridge's start: two probes of 15 s and the helper's 20 s at most. */
+const BRIDGE_START_MS = 60_000;
 
 export class WindowsBackend {
   private readonly children = new Set<ChildProcess>();
   private disposed = false;
   private starting?: Promise<boolean>;
+  /** The Apple Devices bridge this window started (enableDevices). */
+  private bridge?: ChildProcess;
 
   constructor(
     private readonly executable: string,
@@ -93,25 +97,116 @@ export class WindowsBackend {
    */
   startDaemon(): Promise<boolean> {
     if (this.disposed) return Promise.resolve(false);
-    this.starting ??= new Promise<boolean>((resolve) => {
-      const child = spawn(this.executable, ["--setup", "daemon-start"], { windowsHide: true, stdio: "ignore" });
-      this.children.add(child);
-      const timer = setTimeout(() => child.kill(), DAEMON_START_MS);
-      const done = (started: boolean): void => {
-        clearTimeout(timer);
-        this.children.delete(child);
-        this.starting = undefined;
-        resolve(started);
-      };
-      child.once("error", () => done(false));
-      child.once("exit", (code) => done(code === 0));
+    this.starting ??= this.host(["--setup", "daemon-start"]).then((code) => {
+      this.starting = undefined;
+      return code === 0;
     });
     return this.starting;
   }
 
+  /**
+   * iPhones for a daemon that runs without them: Russet opened before its backend was installed (a first run),
+   * so the launcher started no Apple Devices bridge. Starts one (`--device-bridge`, held until this window
+   * closes), then the daemon again with iPhones (`--setup daemon-devices`). "busy" while the daemon builds or
+   * runs something (ask again later).
+   */
+  async enableDevices(): Promise<"enabled" | "busy" | "unavailable"> {
+    if (this.disposed || !(this.bridge || (await this.startBridge()))) return "unavailable";
+    // The daemon starts this window makes from now on (startDaemon) have iPhones too.
+    process.env.RUSSET_DEVICE_BACKEND = "live";
+    const code = await this.host(["--setup", "daemon-devices"]);
+    return code === 0 ? "enabled" : code === 2 ? "busy" : "unavailable";
+  }
+
+  private startBridge(): Promise<boolean> {
+    const child = spawn(this.executable, ["--device-bridge"], { windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+    this.children.add(child);
+    child.once("exit", () => {
+      this.children.delete(child);
+      if (this.bridge === child) this.bridge = undefined;
+    });
+    return new Promise<boolean>((resolve) => {
+      let output = "";
+      let settled = false;
+      const settle = (ready: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (!ready) child.kill();
+        // A bridge that keeps running is this window's; "ready" and an exit is another launcher's bridge.
+        else if (child.exitCode === null) this.bridge = child;
+        resolve(ready);
+      };
+      const timer = setTimeout(() => settle(false), BRIDGE_START_MS);
+      child.stdout?.on("data", (chunk: Buffer) => {
+        output += chunk.toString("utf8");
+        if (output.includes("\n")) settle(output.split(/\r?\n/)[0] === "ready");
+      });
+      child.once("error", () => settle(false));
+      child.once("exit", () => settle(output.startsWith("ready")));
+    });
+  }
+
+  /** Runs Russet's host with `args`; resolves with its exit code (-1 when it did not run or timed out). */
+  private host(args: string[]): Promise<number> {
+    return new Promise<number>((resolve) => {
+      const child = spawn(this.executable, args, { windowsHide: true, stdio: "ignore" });
+      this.children.add(child);
+      const timer = setTimeout(() => child.kill(), DAEMON_START_MS);
+      const done = (code: number): void => {
+        clearTimeout(timer);
+        this.children.delete(child);
+        resolve(code);
+      };
+      child.once("error", () => done(-1));
+      child.once("exit", (code) => done(code ?? -1));
+    });
+  }
+
   dispose(): void {
     this.disposed = true;
+    this.bridge = undefined;
     for (const child of this.children) child.kill();
     this.children.clear();
   }
+}
+
+/** What keepDevicesEnabled reads of the daemon client. */
+export interface DaemonConnection {
+  readonly state: string;
+  readonly hello?: { server: { deviceBackend: string } };
+  onDidChangeState(listener: () => void): { dispose(): void };
+}
+
+/**
+ * Each time the daemon connects without iPhones (`deviceBackend: none`), enables them
+ * (WindowsBackend.enableDevices). A busy daemon is asked again a minute later; five tries at most.
+ */
+export function keepDevicesEnabled(
+  client: DaemonConnection,
+  backend: Pick<WindowsBackend, "enableDevices">,
+  log: (message: string) => void,
+  retryMs = 60_000,
+): { dispose(): void } {
+  let tries = 0;
+  let running = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const check = (): void => {
+    if (running || tries >= 5 || client.state !== "connected" || client.hello?.server.deviceBackend !== "none") return;
+    running = true;
+    tries++;
+    void backend.enableDevices().then((result) => {
+      running = false;
+      log(`[devices] the daemon ran without iPhones; enabling them: ${result}`);
+      if (result === "busy") timer = setTimeout(check, retryMs);
+    });
+  };
+  const subscription = client.onDidChangeState(check);
+  check();
+  return {
+    dispose: () => {
+      subscription.dispose();
+      clearTimeout(timer);
+    },
+  };
 }

@@ -233,6 +233,47 @@ describe("SetupModel", () => {
     expect(model.contextKeys()).toMatchObject({ "russet.setupOk": true, "russet.sdkOk": true, "russet.virtualIphoneOk": true });
   });
 
+  it("offers Repair on a finished step only where it reinstalls something", async () => {
+    const { model, runner } = setup({ xips: [XIP] });
+    runner!.states.set("virtual-iphone", "done");
+    await model.refresh();
+    const actions = (id: string) => model.snapshot().steps.find((x) => x.id === id)?.actions;
+    expect(actions("wsl")).toEqual(["repair"]);
+    expect(actions("xtool")).toEqual(["repair"]);
+    // Apple Devices comes from the Store, and a created virtual iPhone has nothing to reinstall.
+    expect(actions("apple-devices")).toEqual([]);
+    expect(actions("virtual-iphone")).toEqual([]);
+    await model.runStep("xtool", "repair");
+    expect(runner!.runs.at(-1)).toEqual({ id: "xtool", args: { repair: "1" } });
+  });
+
+  it("leaves Apple Devices to its own button when setting up the remaining steps", async () => {
+    const { model, runner } = setup({ xips: [XIP] });
+    runner!.states.set("apple-devices", "needed");
+    await model.runAll();
+    expect(runner!.runs.map((r) => r.id)).toEqual(["xcode-sdk", "vphone", "virtual-iphone"]);
+    expect(model.snapshot().steps.find((x) => x.id === "apple-devices")?.state).toBe("needed");
+  });
+
+  it("counts setup as complete with either a real iPhone or the virtual one", async () => {
+    // The virtual iPhone only: no Apple Devices, no iPhone.
+    const virtual = setup({ xips: [XIP] });
+    virtual.runner!.states.set("apple-devices", "needed");
+    for (const id of ["xcode-sdk", "vphone", "virtual-iphone"]) virtual.runner!.states.set(id, "done");
+    await virtual.model.refresh();
+    expect(virtual.model.contextKeys()["russet.setupOk"]).toBe(true);
+    // A real iPhone only: the virtual iPhone's engine never built.
+    const real = setup({ xips: [XIP], devices: { ready: "iPhone 15, iOS 26.1" } });
+    real.runner!.states.set("xcode-sdk", "done");
+    await real.model.refresh();
+    expect(real.model.contextKeys()["russet.setupOk"]).toBe(true);
+    // Neither.
+    const neither = setup({ xips: [XIP] });
+    neither.runner!.states.set("xcode-sdk", "done");
+    await neither.model.refresh();
+    expect(neither.model.contextKeys()["russet.setupOk"]).toBe(false);
+  });
+
   it("without a runner, shows the engine-backed steps only and never claims setup", async () => {
     const { model } = setup({ runner: null });
     await model.refresh();

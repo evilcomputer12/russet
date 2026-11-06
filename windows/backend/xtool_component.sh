@@ -3,7 +3,8 @@
 # these steps; xtool builds the iOS Swift SDK from an Xcode .xip until the
 # engine's own `sdk.import` (W16b) replaces it. Sign-in is Russet's, not xtool's.
 #
-#   install                 pinned AppImage, checksum-verified, extracted (no FUSE)
+#   install [--repair]      pinned AppImage, checksum-verified, extracted (no FUSE);
+#                           --repair downloads it again over the copy present
 #   sdk XIP                 build ~/.swiftpm/swift-sdks/darwin.artifactbundle from Xcode
 #   status                  JSON summary for the IDE
 set -Eeuo pipefail
@@ -19,6 +20,12 @@ log() { printf '==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 install() {
+  # The setup page's Repair: download xtool again; the copy present goes back in place if that fails.
+  if [ "${1:-}" = --repair ] && [ -e "$OPT" ]; then
+    rm -rf "$OPT.previous"
+    mv "$OPT" "$OPT.previous"
+    trap '[ -e "$OPT" ] || mv "$OPT.previous" "$OPT"' EXIT
+  fi
   if [ -x "$OPT/AppRun" ]; then log "xtool $VERSION present"; else
     local tmp; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
     log "downloading xtool $VERSION"
@@ -33,6 +40,7 @@ install() {
   mkdir -p "$(dirname "$BIN")"
   ln -sfn "$OPT/AppRun" "$BIN"
   "$BIN" --version
+  rm -rf "$OPT.previous"
 }
 
 sdk() {
@@ -58,7 +66,7 @@ status() {
 }
 
 case ${1:-} in
-  install) install ;;
+  install) shift; install "$@" ;;
   sdk) shift; sdk "$@" ;;
   status) status ;;
   *) sed -n '2,10p' "$0"; exit 2 ;;

@@ -8,7 +8,7 @@
 
 import * as vscode from "vscode";
 import { localResourceRoots, renderPage } from "../panels/webviewHost";
-import type { SetupModel } from "./model";
+import { REPAIRS, type SetupModel } from "./model";
 import { DEFAULT_VIRTUAL, pairingsFor, virtualDevices } from "./virtualCatalog";
 import { downloadsDir } from "./xcode";
 
@@ -132,6 +132,15 @@ export class SetupPanel implements vscode.Disposable {
       case "run": {
         const mode = m.mode === "retry" || m.mode === "repair" ? m.mode : "run";
         if (typeof m.id === "string") {
+          // Repair on a finished step runs it again: say what that does first.
+          const repair = mode === "repair" && this.model.stepState(m.id) === "done" ? REPAIRS[m.id] : undefined;
+          if (repair) {
+            const title = this.model.snapshot().steps.find((s) => s.id === m.id)?.title ?? m.id;
+            const pick = await vscode.window.showInformationMessage(
+              `Repair ${title}?`, { modal: true, detail: `Repair ${repair}` }, "Repair",
+            );
+            if (pick !== "Repair") break;
+          }
           const outcome = await this.model.runStep(m.id, mode);
           if (outcome?.kind === "failed") {
             void this.panel?.webview.postMessage({ kind: "announce", text: `Step failed: ${outcome.message}` });

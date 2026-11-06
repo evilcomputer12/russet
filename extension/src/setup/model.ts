@@ -79,6 +79,28 @@ export type ContextKeys = Record<string, boolean>;
 
 const LOG_TAIL = 200;
 const ACCOUNT_STEP = "account";
+
+/**
+ * What Repair does on a finished step: it runs the step again (Russet.Host's `Repairable`), installing over
+ * what is there. Apple Devices, the iPhone and a created virtual iPhone have nothing to reinstall.
+ */
+export const REPAIRS: Readonly<Record<string, string>> = {
+  wsl: "runs WSL's installer again. Windows asks for administrator rights.",
+  "wsl-update": "updates WSL from its pre-release channel again. Windows asks for administrator rights; WSL, the backend and the virtual iPhone stop for a minute.",
+  backend: "installs Russet's engine into WSL again and restarts it. Your projects, sign-in, Swift and virtual iPhones stay.",
+  swift: "downloads swift.org's newest Swift (about 1.1 GB) and installs it over the one in use, which is kept for a rollback.",
+  xtool: "downloads xtool again and installs it over the copy present.",
+  "xcode-sdk": "builds the iOS SDK again from the Xcode archive you chose.",
+  vphone: "checks Russet's patches to the virtual iPhone engine and builds it again. Your virtual iPhones stay.",
+};
+
+/**
+ * The two ways to run apps: a real iPhone on USB, or the virtual iPhone. One of them set up is enough, so Set up
+ * remaining steps leaves Apple Devices (installed by hand, from the Microsoft Store) to its own button.
+ */
+const REAL_IPHONE = ["apple-devices", "iphone"];
+const VIRTUAL_IPHONE = ["vphone", "virtual-iphone"];
+const BY_HAND = new Set(["apple-devices"]);
 const KEY_VIRTUAL = "russet.setup.virtualChoice";
 const KEY_XIP = "russet.setup.xipPath";
 
@@ -316,7 +338,8 @@ export class SetupModel {
 
   /**
    * Run every step that still needs work, in order, stopping at the first
-   * failure or cancel. Steps waiting for input (no Xcode archive) are skipped.
+   * failure or cancel. Steps waiting for input (no Xcode archive) are skipped, and so is
+   * Apple Devices, which the user installs from the Store (only a real iPhone needs it).
    */
   async runAll(): Promise<void> {
     if (this.running || this.runningAll || !this.deps.runner) {
@@ -332,7 +355,7 @@ export class SetupModel {
           break;
         }
         const state = this.stepState(step.id);
-        if (state !== "needed" && state !== "failed") {
+        if ((state !== "needed" && state !== "failed") || BY_HAND.has(step.id)) {
           continue;
         }
         if ("blocked" in this.argsFor(step.id, false)) {
@@ -373,7 +396,7 @@ export class SetupModel {
       } else if (s.state === "failed") {
         actions.push(rt?.error?.retryable === false ? "repair" : "retry");
       } else if (s.state === "done") {
-        actions.push("repair");
+        if (s.id in REPAIRS) actions.push("repair");
       } else if (s.state === "unavailable") {
         actions.push("recheck");
       }
@@ -507,9 +530,13 @@ export class SetupModel {
   contextKeys(): ContextKeys {
     const runnerDone = (id: string): boolean => this.stepState(id) === "done";
     const runnerSteps = (this.status?.steps ?? []).map((s) => this.withDeviceState(s));
+    const done = (ids: string[]): boolean => ids.every((id) => runnerSteps.find((s) => s.id === id)?.state === "done");
+    // Every step, but of the two ways to run apps only one.
+    const setupOk = runnerSteps.length > 0 && (done(REAL_IPHONE) || done(VIRTUAL_IPHONE))
+      && runnerSteps.every((s) => REAL_IPHONE.includes(s.id) || VIRTUAL_IPHONE.includes(s.id) || s.state === "done");
     return {
       "russet.windowsSetup": this.runnerAvailable,
-      "russet.setupOk": this.runnerAvailable && runnerSteps.length > 0 && runnerSteps.every((s) => s.state === "done"),
+      "russet.setupOk": this.runnerAvailable && setupOk,
       "russet.toolchainOk": !!this.toolchainInfo?.swiftOk || (runnerDone("backend") && runnerDone("xtool")),
       "russet.sdkOk": (this.toolchainInfo?.sdkCount ?? 0) > 0 || runnerDone("xcode-sdk"),
       "russet.accountOk": (this.accountInfo?.count ?? 0) > 0,

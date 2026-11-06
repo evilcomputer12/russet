@@ -52,6 +52,8 @@ internal static partial class Setup
         }
         if (args is ["daemon-start"])
             return await RestartDaemon();
+        if (args is ["daemon-devices"])
+            return await RestartDaemonWithDevices();
         if (args is ["run", "swift-update" or "swift-retry-update" or "swift-rollback"])
             return await RunSwiftMaintenance(args[1]);
         if (args is ["run", "wsl-limits" or "wsl-restart", ..])
@@ -179,7 +181,8 @@ internal static partial class Setup
                 : $"Install Swift {latest?.Version ?? "(swift.org's newest release)"}, which builds your apps (about a 1.1 GB download).");
         }
         var usb = await AppleDevicesReachable();
-        Add("apple-devices", usb ? "done" : "needed", usb ? "Apple Devices is running." : "Install or open Apple Devices from the Microsoft Store.");
+        Add("apple-devices", usb ? "done" : "needed", usb ? "Apple Devices is running."
+            : "For a real iPhone on USB: install or open Apple Devices from the Microsoft Store. The virtual iPhone does not need it.");
         Add("iphone", "unavailable", "Checked in the device picker once the backend is ready.");
         if (!installed)
         {
@@ -229,6 +232,11 @@ internal static partial class Setup
 
     const string StillCreating ="A virtual iPhone is still being created (it carries on while Russet is closed). Wait for it to finish; Set up Russet shows it done.";
 
+    // The steps the page's Repair runs again once done (`--arg repair=1`): each installs over what is there and
+    // keeps the user's data (projects, sign-in, virtual iPhones). Apple Devices, the iPhone and a created virtual
+    // iPhone have nothing to reinstall.
+    static readonly HashSet<string> Repairable = ["wsl", "wsl-update", "backend", "swift", "xtool", "xcode-sdk", "vphone"];
+
     static async Task<int> RunStep(string id, Dictionary<string, string> arguments)
     {
         void Emit(object value) => Console.WriteLine(JsonSerializer.Serialize(value));
@@ -237,8 +245,9 @@ internal static partial class Setup
             Emit(new { step = id, @event = "failed", code = $"setup.{id}.{reason}", message, retryable });
             return 1;
         }
+        var repair = arguments.GetValueOrDefault("repair") == "1" && Repairable.Contains(id);
         var current = (await Status()).Single(s => s.id == id);
-        if (current.state == "done") { Emit(new { step = id, @event = "done" }); return 0; }
+        if (current.state == "done" && !repair) { Emit(new { step = id, @event = "done" }); return 0; }
         if (current.state == "running") return Fail("busy", StillCreating);
         switch (id)
         {
@@ -282,7 +291,7 @@ internal static partial class Setup
             case "iphone":
                 return Fail("unavailable", "Connect and trust your iPhone, then pick it in the device picker.", retryable: false);
             case "xtool":
-                if (await Stream(id, "xtool_component.sh", ["install"]) != 0) return Fail("install", "xtool did not install.");
+                if (await Stream(id, "xtool_component.sh", repair ? ["install", "--repair"] : ["install"]) != 0) return Fail("install", "xtool did not install.");
                 break;
             case "xcode-sdk":
                 if (!arguments.TryGetValue("xip", out var xip) || !File.Exists(xip) || !xip.EndsWith(".xip", StringComparison.OrdinalIgnoreCase))

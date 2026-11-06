@@ -22,7 +22,7 @@ internal static class DeviceBridge
     internal static bool Start(string wsl, string host, string socket, out Process? owned)
     {
         owned = null;
-        if (Run(wsl, "python3", "-I", "-c", Probe, socket) == 0) return true;
+        if (Served(wsl, socket)) return true;
         var start = Backend(wsl, "python3", "-I", "/opt/russet/lib/device_mux.py", "--socket", socket, "--host", ToLinux(host));
         start.RedirectStandardInput = true;
         var bridge = Process.Start(start);
@@ -42,9 +42,12 @@ internal static class DeviceBridge
         bridge.Dispose();
         // Russet started twice in a row: the other launcher's bridge took the socket first, and the helper refuses
         // to replace it. Use that bridge; answering "no phones" here would restart the daemon without them.
-        // Otherwise Apple Devices is missing or the backend cannot run the helper: the IDE opens without phones.
-        return Run(wsl, "python3", "-I", "-c", Probe, socket) == 0;
+        // Otherwise the backend cannot run the helper: the IDE opens without phones.
+        return Served(wsl, socket);
     }
+
+    /// <summary>Whether a bridge serves <paramref name="socket"/> (a stale socket is removed).</summary>
+    internal static bool Served(string wsl, string socket) => Run(wsl, "python3", "-I", "-c", Probe, socket) == 0;
 
     /// <summary>EOF on the helper's input closes its socket and connections.</summary>
     internal static void Stop(Process bridge)

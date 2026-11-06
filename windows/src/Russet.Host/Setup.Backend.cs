@@ -104,15 +104,36 @@ internal static partial class Setup
         return await StartDaemon() ? 0 : 1;
     }
 
-    // The daemon as the launcher started it, with iPhones through the launcher's Apple Devices
-    // bridge when it runs (RUSSET_DEVICE_BACKEND=live): for a backend installed after the editor
-    // opened, or a daemon that stopped since.
+    // `--setup daemon-devices`: the IDE found its daemon running without iPhones and started an Apple Devices
+    // bridge (`--device-bridge`): the daemon stops and starts again, with iPhones. 2 while it is busy (a build,
+    // a run or a debug session; the IDE asks again later), 1 when no bridge serves or a setup step has the
+    // daemons stopped.
+    static async Task<int> RestartDaemonWithDevices()
+    {
+        var home = Environment.GetEnvironmentVariable("RUSSET_BACKEND_HOME");
+        if (string.IsNullOrEmpty(home) || !home.StartsWith("/home/russet/", StringComparison.Ordinal)) return 1;
+        if (Mutex.TryOpenExisting(BackendDaemon.MaintenanceMutex, out var maintenance))
+        {
+            maintenance.Dispose();
+            return 1;
+        }
+        if (!DeviceBridge.Served(Wsl, BackendDaemon.MuxSocket(home))) return 1;
+        // `daemon stop` refuses a busy daemon (without --force).
+        if ((await Capture(["--distribution", Distribution, "--user", "russet", "--exec", "env", $"RUSSET_HOME={home}",
+                "/opt/russet/bin/russet-dev", "daemon", "stop"])).Exit != 0)
+            return 2;
+        return await StartDaemon() ? 0 : 1;
+    }
+
+    // The daemon as the launcher started it, with iPhones when an Apple Devices bridge runs (the launcher's,
+    // RUSSET_DEVICE_BACKEND=live, or one the IDE started since: `--device-bridge`): for a backend installed after
+    // the editor opened, or a daemon that stopped since.
     static async Task<bool> StartDaemon()
     {
         var profile = Environment.GetEnvironmentVariable("RUSSET_IDE_PROFILE");
         var home = Environment.GetEnvironmentVariable("RUSSET_BACKEND_HOME");
         if (string.IsNullOrEmpty(profile) || string.IsNullOrEmpty(home) || !home.StartsWith("/home/russet/", StringComparison.Ordinal)) return false;
-        var devices = Environment.GetEnvironmentVariable("RUSSET_DEVICE_BACKEND") == "live";
+        var devices = Environment.GetEnvironmentVariable("RUSSET_DEVICE_BACKEND") == "live" || DeviceBridge.Served(Wsl, BackendDaemon.MuxSocket(home));
         using var daemon = Process.Start(BackendDaemon.Start(Wsl, home, profile, devices));
         if (daemon is null) return false;
         var output = daemon.StandardOutput.ReadToEndAsync();

@@ -10,6 +10,29 @@ if (args.SequenceEqual(new[] { "--device-mux", "stdio" }))
     await DeviceMux.Run();
     return;
 }
+// The Apple Devices bridge for a window whose launcher started none, because Russet opened before its backend
+// was installed: "ready" once iPhones are reachable, then the IDE holds this process, and with it the bridge,
+// until the window closes (EOF on standard input). Another launcher's bridge already serving is "ready" too.
+if (args is ["--device-bridge"])
+{
+    var home = Environment.GetEnvironmentVariable("RUSSET_BACKEND_HOME");
+    if (home is null || !home.StartsWith("/home/russet/", StringComparison.Ordinal) || home.Contains("/../", StringComparison.Ordinal))
+        throw new ArgumentException("RUSSET_BACKEND_HOME must be the managed backend's home.");
+    var wsl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe");
+    if (!DeviceBridge.Start(wsl, Environment.ProcessPath!, BackendDaemon.MuxSocket(home), out var owned))
+    {
+        Console.WriteLine("unavailable");
+        Environment.ExitCode = 1;
+        return;
+    }
+    Console.WriteLine("ready");
+    if (owned is not null)
+    {
+        await Console.In.ReadToEndAsync();
+        DeviceBridge.Stop(owned);
+    }
+    return;
+}
 // A patch update, run from a copy outside the installation (Update.cs).
 if (args is ["--apply-update", ..])
 {

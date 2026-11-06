@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Russet contributors
 import { describe, it, expect, vi } from "vitest";
-import { WindowsBackend } from "../../src/daemon/windowsBackend";
+import { WindowsBackend, keepDevicesEnabled } from "../../src/daemon/windowsBackend";
 import { RussetDebugAdapterFactory, stashPrepared, dropPrepared } from "../../src/debug/adapterFactory";
 import type { DebugPrepareResult } from "../../src/generated/protocol";
 import type { DebugSession } from "vscode";
@@ -34,5 +34,36 @@ describe("managed Windows backend", () => {
       factory.release(session.id);
       expect(dispose).toHaveBeenCalledOnce();
     } finally { factory.dispose(); dropPrepared(token); }
+  });
+});
+
+describe("iPhones for a daemon started without them", () => {
+  const connection = (deviceBackend: string) => {
+    const listeners: Array<() => void> = [];
+    const client = {
+      state: "connected",
+      hello: { server: { deviceBackend } },
+      onDidChangeState: (l: () => void) => { listeners.push(l); return { dispose: () => undefined }; },
+      reconnect(next: string) { client.hello = { server: { deviceBackend: next } }; for (const l of listeners) l(); },
+    };
+    return client;
+  };
+
+  it("enables them once, asking again while the daemon is busy", async () => {
+    const client = connection("none");
+    const enableDevices = vi.fn().mockResolvedValueOnce("busy").mockResolvedValueOnce("enabled");
+    const watcher = keepDevicesEnabled(client, { enableDevices }, () => undefined, 5);
+    await vi.waitFor(() => expect(enableDevices).toHaveBeenCalledTimes(2));
+    // The restarted daemon has them: nothing more to do.
+    client.reconnect("live");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(enableDevices).toHaveBeenCalledTimes(2);
+    watcher.dispose();
+  });
+
+  it("leaves a daemon that has them alone", async () => {
+    const enableDevices = vi.fn();
+    keepDevicesEnabled(connection("live"), { enableDevices }, () => undefined).dispose();
+    expect(enableDevices).not.toHaveBeenCalled();
   });
 });
