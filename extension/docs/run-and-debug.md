@@ -155,8 +155,12 @@ The **iPhone** view, in the secondary side bar's **iPhone & Agents** group, show
 device frame. Open it with **Russet: Mirror Screen**.
 
 - For an iPhone on USB, it shows the live screen while the view is visible. Click or drag to touch, type to
-  send keys, and use **Home**. When the live stream cannot start, the view shows screenshots, a few each
-  second, and tries the stream again later.
+  send keys, and use **Home**. The label under the phone says how the screen arrives:
+  - **Live video**: the iPhone's screen as video.
+  - **Screenshots · N/s, tap to control**: your PC's graphics cannot decode the iPhone's HEVC video in the
+    editor, so the view shows screenshots, and a new one right after each touch. Touch, keys and **Home**
+    still work.
+  - **Screenshots · N/s**: the live stream could not start; the view tries it again later.
 - For the virtual iPhone, select **Open in Editor**, or **Russet: Open Virtual iPhone**, to use its screen in
   the Virtual iPhone tab.
 
